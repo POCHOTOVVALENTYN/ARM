@@ -1,0 +1,248 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+:root {
+  /* Default Brutalist Design Tokens */
+  --brut-bg: #F4F4F0;
+  --brut-black: #0F0F0F;
+  --brut-accent-red: #FF2222;
+  --brut-accent-yellow: #FFE600;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --brut-border: 3px solid var(--brut-black);
+  --brut-shadow: 4px 4px 0px var(--brut-black);
+}
+
+/* Theme 0: КП "ОМЕТ" Clean Modern (Світла Тема - Light) */
+[data-theme="omet-clean"] {
+  --app-bg: #EEF2F6;
+  --card-bg: #FFFFFF;
+  --card-border: 1px solid #E2E8F0;
+  --card-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.04), 0 8px 10px -6px rgba(15, 23, 42, 0.02);
+  --text-main: #1E293B;
+  --header-bg: #FFFFFF;
+  --header-border: #E2E8F0;
+}
+
+[data-theme="omet-clean"] body,
+[data-theme="omet-clean"] #root {
+  background-color: #EEF2F6 !important;
+  color: #1E293B !important;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+[data-theme="omet-clean"] .brutalist-card {
+  border-radius: 20px !important;
+  border: 1px solid #E0E6ED !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.04), 0 8px 10px -6px rgba(15, 23, 42, 0.02) !important;
+  background-color: #FFFFFF !important;
+  color: #1E293B !important;
+}
+
+[data-theme="omet-clean"] header {
+  background-color: #FFFFFF !important;
+  border-bottom: 1px solid #E2E8F0 !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03) !important;
+}
+
+[data-theme="omet-clean"] footer {
+  background-color: #FFFFFF !important;
+  border-top: 1px solid #E2E8F0 !important;
+  color: #64748B !important;
+}
+
+/* Theme 1: Brutalist (Technical Minimal) */
+[data-theme="brutalist"] {
+  --app-bg: #F4F4F0;
+  --card-bg: #FFFFFF;
+  --card-border: 3px solid #0F0F0F;
+  --card-shadow: 4px 4px 0px #0F0F0F;
+  --text-main: #0F0F0F;
+}
+
+/* Theme 2: Gov Blue (Official State / Municipal Light) */
+[data-theme="gov-blue"] {
+  --app-bg: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --card-border: 1px solid #CBD5E1;
+  --card-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --text-main: #0F172A;
+}
+
+/* Theme 3: Night Dispatcher (Темна Тема - Cyber Dispatch Dark) */
+[data-theme="night-dispatch"] {
+  --app-bg: #070D19;
+  --card-bg: #0F172A;
+  --card-border: 1px solid #1E293B;
+  --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+  --text-main: #F8FAFC;
+  --header-bg: #0B132B;
+  --header-border: #1E293B;
+}
+
+[data-theme="night-dispatch"] body,
+[data-theme="night-dispatch"] #root {
+  background-color: #070D19 !important;
+  color: #F8FAFC !important;
+}
+
+[data-theme="night-dispatch"] header {
+  background-color: #0B132B !important;
+  border-color: #1E293B !important;
+  color: #F8FAFC !important;
+}
+
+[data-theme="night-dispatch"] header h1,
+[data-theme="night-dispatch"] header h2,
+[data-theme="night-dispatch"] header span,
+[data-theme="night-dispatch"] header p {
+  color: #F8FAFC !important;
+}
+
+[data-theme="night-dispatch"] footer {
+  background-color: #0B132B !important;
+  border-color: #1E293B !important;
+  color: #94A3B8 !important;
+}
+
+[data-theme="night-dispatch"] .brutalist-card,
+[data-theme="night-dispatch"] .bg-white {
+  background-color: #0F172A !important;
+  color: #F8FAFC !important;
+  border-color: #1E293B !important;
+}
+
+[data-theme="night-dispatch"] .bg-slate-50,
+[data-theme="night-dispatch"] .bg-gray-50,
+[data-theme="night-dispatch"] .bg-slate-100,
+[data-theme="night-dispatch"] .bg-gray-100 {
+  background-color: #162238 !important;
+  color: #E2E8F0 !important;
+}
+
+[data-theme="night-dispatch"] .bg-slate-900,
+[data-theme="night-dispatch"] .bg-gray-900,
+[data-theme="night-dispatch"] .bg-slate-950,
+[data-theme="night-dispatch"] .bg-gray-950 {
+  background-color: #050A14 !important;
+  border-color: #1E293B !important;
+}
+
+[data-theme="night-dispatch"] .text-slate-900,
+[data-theme="night-dispatch"] .text-gray-900,
+[data-theme="night-dispatch"] .text-slate-800,
+[data-theme="night-dispatch"] .text-gray-800,
+[data-theme="night-dispatch"] .text-slate-700,
+[data-theme="night-dispatch"] .text-gray-700 {
+  color: #F8FAFC !important;
+}
+
+[data-theme="night-dispatch"] .text-slate-600,
+[data-theme="night-dispatch"] .text-gray-600,
+[data-theme="night-dispatch"] .text-slate-500,
+[data-theme="night-dispatch"] .text-gray-500 {
+  color: #94A3B8 !important;
+}
+
+[data-theme="night-dispatch"] .border-slate-200,
+[data-theme="night-dispatch"] .border-gray-200,
+[data-theme="night-dispatch"] .border-slate-300,
+[data-theme="night-dispatch"] .border-gray-300,
+[data-theme="night-dispatch"] .border-slate-100,
+[data-theme="night-dispatch"] .border-gray-100 {
+  border-color: #1E293B !important;
+}
+
+[data-theme="night-dispatch"] input,
+[data-theme="night-dispatch"] select,
+[data-theme="night-dispatch"] textarea {
+  background-color: #162238 !important;
+  color: #F8FAFC !important;
+  border-color: #334155 !important;
+}
+
+[data-theme="night-dispatch"] .leaflet-popup-content-wrapper {
+  background: rgba(15, 23, 42, 0.96) !important;
+  border-color: rgba(51, 65, 85, 0.9) !important;
+  color: #F8FAFC !important;
+}
+
+[data-theme="night-dispatch"] .leaflet-popup-tip {
+  background: rgba(15, 23, 42, 0.96) !important;
+}
+
+/* Theme 2: Gov Blue Overrides */
+[data-theme="gov-blue"] body {
+  background-color: #EFF6FF !important;
+}
+
+[data-theme="gov-blue"] .brutalist-card {
+  border: 1px solid #93C5FD !important;
+  box-shadow: 0 4px 12px rgba(30, 58, 138, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+/* Theme 4: High Contrast DSTU */
+[data-theme="contrast-light"] .brutalist-card {
+  border: 4px solid #000000 !important;
+  box-shadow: none !important;
+  border-radius: 0px !important;
+}
+
+/* Vehicle Marker & Leaflet Popup Enhancements */
+.vehicle-marker-icon {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  z-index: 900 !important;
+  transition: transform 0.15s ease-out;
+}
+
+.vehicle-marker-icon:hover {
+  transform: scale(1.18) !important;
+  z-index: 1000 !important;
+}
+
+.custom-checkpoint-icon,
+.district-marker-label {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(8px) !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.2) !important;
+  padding: 4px !important;
+}
+
+.leaflet-popup-tip {
+  background: rgba(255, 255, 255, 0.96) !important;
+}
+
+
+.brutalist-card {
+  background-color: var(--card-bg, #FFFFFF);
+  border: var(--card-border, 3px solid #0F0F0F);
+  box-shadow: var(--card-shadow, 4px 4px 0px #0F0F0F);
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.brutalist-card:active {
+  transform: translate(2px, 2px);
+}
+
+.brutalist-axis path,
+.brutalist-axis line {
+  stroke: currentColor;
+  stroke-width: 2px;
+}
+
+.brutalist-axis text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: bold;
+  fill: currentColor;
+}
+
