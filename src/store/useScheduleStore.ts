@@ -32,6 +32,16 @@ export interface UserProfile {
   badge: string;
 }
 
+export interface TelemetryData {
+    [vehicle_id: string]: {
+        lat: number;
+        lon: number;
+        speed: number;
+        status: string;
+        timestamp: number;
+    }
+}
+
 interface ScheduleState {
   // Navigation & Auth & Theme
   currentPath: string;
@@ -43,6 +53,11 @@ interface ScheduleState {
   setTheme: (theme: ThemeMode) => void;
 
   // Schedules (Live vs Draft)
+  telemetry: TelemetryData;
+  liveSchedule: any;
+  setLiveSchedule: (schedule: any) => void;
+  updateTelemetry: (data: TelemetryData) => void;
+
   selectedDate: string;
   setSelectedDate: (date: string) => void;
   liveBlocks: VehicleBlock[];
@@ -123,6 +138,11 @@ export const useScheduleStore = create<ScheduleState>()(
       user: { ...state.user, role },
     })),
   setTheme: (theme) => set({ theme }),
+
+  telemetry: {},
+  liveSchedule: null,
+  setLiveSchedule: (schedule) => set({ liveSchedule: schedule }),
+  updateTelemetry: (data) => set({ telemetry: data }),
 
   selectedDate: new Date().toISOString().split('T')[0],
   setSelectedDate: (date) => set({ selectedDate: date }),

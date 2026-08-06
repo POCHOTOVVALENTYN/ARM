@@ -21,8 +21,11 @@ import { AlgorithmSimulatorTab } from './components/tabs/AlgorithmSimulatorTab';
 import { StaticDutiesArchiveView } from './components/views/StaticDutiesArchiveView';
 import { useScheduleStore } from './store/useScheduleStore';
 import { useRouteStore } from './store/useRouteStore';
+import { useWebSocket } from './hooks/useWebSocket';
 
 export default function App() {
+  useWebSocket(); // Активуємо WebSocket підключення при старті додатку
+
   const { currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, applySlackToNode } = useScheduleStore();
   const { routes } = useRouteStore();
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);

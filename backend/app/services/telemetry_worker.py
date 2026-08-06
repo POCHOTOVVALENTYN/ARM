@@ -65,7 +65,7 @@ class TelemetryService:
             {"id": "troll_4001", "pos": {"y": 46.4775, "x": 30.7326, "s": 22}}
         ]
 
-    async def polling_loop(self):
+    async def polling_loop(self, ws_manager):
         """Нескінченний цикл опитування."""
         print("Воркер Wialon запущено...")
         async with aiohttp.ClientSession() as session:
@@ -100,6 +100,14 @@ class TelemetryService:
 
                     # Перевірка на таймаути (втрата зв'язку)
                     self._check_offline_timeouts(current_time)
+
+                    # ---> ВІДПРАВКА ДАНИХ ЧЕРЕЗ WEBSOCKET <---
+                    # Конвертуємо об'єкти VehiclePosition в словники
+                    vehicles_data = {vid: pos.dict() for vid, pos in self.active_vehicles.items()}
+                    await ws_manager.broadcast({
+                        "type": "TELEMETRY_UPDATE",
+                        "payload": vehicles_data
+                    })
 
                 except Exception as e:
                     print(f"Помилка поллінгу Wialon: {e}")
