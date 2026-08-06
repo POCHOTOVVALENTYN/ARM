@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock, AlertCircle } from 'lucide-react';
 import { useStationStore } from '../../store/useStationStore';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
+import { LiveVehicleCanvas } from './LiveVehicleCanvas';
 
 export const LiveMapView: React.FC = () => {
   const stations = useStationStore(state => state.stations);
@@ -12,6 +13,46 @@ export const LiveMapView: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
+
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const [mapDimensions, setMapDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (mapContainerRef.current) {
+        setMapDimensions({
+          width: mapContainerRef.current.clientWidth,
+          height: mapContainerRef.current.clientHeight
+        });
+      }
+    };
+    
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
+
+  // Приклад проекції для накладання Canvas поверх існуючої SVG
+  // Оскільки SVG має розмір 800x380 (viewBox), нам потрібно масштабувати його до реальних розмірів контейнера.
+  const projectPoint = (lat: number, lon: number) => {
+    // В реальності тут буде d3.geoMercator або аналог. 
+    // Для демо використаємо просте лінійне відображення.
+    // Координати в SVG для першої та останньої станцій (у нас від 46.4829, 30.7358).
+    // Поки просто повертаємо фейкову позицію, що залежить від lon/lat.
+    
+    // Щоб Canvas співпадав зі стилізованою SVG, використовуємо ті самі співвідношення
+    // Але оскільки SVG розтягується, ми повинні враховувати mapDimensions.width / 800 та mapDimensions.height / 380
+    
+    const scaleX = mapDimensions.width / 800;
+    const scaleY = mapDimensions.height / 380;
+    
+    // Імітація розташування на маршруті (спрощено)
+    // У реальному додатку ви б розраховували точні X, Y на основі geo координат
+    const x = ((lon - 30.72) * 20000) * scaleX; 
+    const y = (380 - (lat - 46.47) * 20000) * scaleY;
+    
+    return { x, y };
+  };
 
   // Simulation timer
   useEffect(() => {
@@ -23,6 +64,35 @@ export const LiveMapView: React.FC = () => {
     }
     return () => clearInterval(interval);
   }, [isPlaying, speedMultiplier]);
+
+  const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!mapContainerRef.current) return;
+    const rect = mapContainerRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    let clickedBlock: any = null;
+
+    Object.entries(telemetry).forEach(([id, vehicle]) => {
+      const { x, y } = projectPoint(vehicle.lat, vehicle.lon);
+      const dx = clickX - x;
+      const dy = clickY - y;
+      
+      // Радіус кліку ~15px
+      if (Math.sqrt(dx * dx + dy * dy) <= 15) {
+        // Знаходимо відповідний блок з liveBlocks
+        const block = liveBlocks.find((b: any) => {
+           const vNum = b.vehicleNumber.split(' ')[0];
+           return id.includes(vNum);
+        });
+        if (block) {
+          clickedBlock = block;
+        }
+      }
+    });
+
+    setSelectedVehicle(clickedBlock);
+  };
 
   const formatMins = (mins: number) => {
     const h = Math.floor(mins / 60) % 24;
@@ -156,7 +226,7 @@ export const LiveMapView: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Map Representation Container */}
         <div className="brutalist-card bg-slate-950 p-4 rounded-2xl lg:col-span-3 space-y-3 relative overflow-hidden min-h-[450px]">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs pointer-events-none">
             <div className="flex items-center space-x-2">
               <MapPin className="w-4 h-4 text-emerald-400" />
               <span className="font-bold text-white">
@@ -169,7 +239,11 @@ export const LiveMapView: React.FC = () => {
           </div>
 
           {/* Graphical Map Representation SVG */}
-          <div className="relative w-full h-[380px] bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden">
+          <div 
+            ref={mapContainerRef} 
+            onClick={handleMapClick}
+            className="relative w-full h-[380px] bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer"
+          >
             <svg viewBox="0 0 800 380" className="w-full h-full select-none">
               {/* Background grid */}
               <defs>
@@ -220,43 +294,14 @@ export const LiveMapView: React.FC = () => {
                 );
               })}
 
-              {/* Simulated Moving Vehicles on Tracks */}
-              {liveBlocks.map((block, idx) => {
-                const progress = ((simTimeMin - 300) / 1020 + idx * 0.15) % 1;
-                const x = 120 + progress * 580;
-                const y = 320 - progress * 240;
-
-                const isSelected = selectedVehicle?.id === block.id;
-
-                return (
-                  <g
-                    key={block.id}
-                    onClick={() => setSelectedVehicle(block)}
-                    className="cursor-pointer transition-all"
-                  >
-                    <circle
-                      cx={x}
-                      cy={y}
-                      r={isSelected ? "14" : "10"}
-                      fill={idx % 2 === 0 ? "#38bdf8" : "#f59e0b"}
-                      stroke="#ffffff"
-                      strokeWidth="2.5"
-                      className="shadow-xl"
-                    />
-                    <text
-                      x={x}
-                      y={y + 3.5}
-                      fill="#0f172a"
-                      fontSize="9"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                    >
-                      {block.vehicleNumber.split(' ')[0]}
-                    </text>
-                  </g>
-                );
-              })}
+              {/* Canvas Overlay for live vehicles */}
             </svg>
+            <LiveVehicleCanvas
+              width={mapDimensions.width}
+              height={mapDimensions.height}
+              projectPoint={projectPoint}
+              selectedVehicleId={selectedVehicle?.vehicleNumber.split(' ')[0]}
+            />
           </div>
         </div>
 
