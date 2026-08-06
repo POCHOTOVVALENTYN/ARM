@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "phase-self-check",
+  "owner": "bryantchi",
+  "repo": "claude-sustain",
+  "path": "skills/phase-self-check",
+  "branch": "main",
+  "sha": "e671690980be748d480103060fdd1f0b8c0c6770",
+  "source": "manual"
+}

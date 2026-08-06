@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "flow-execution",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/flow-execution",
+  "branch": "main",
+  "sha": "cf50c9a25c003105d236246b2a0f4e8273accd49",
+  "source": "manual"
+}

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "challenge",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/challenge",
+  "branch": "main",
+  "sha": "ab8f8addfebd3cb1d14de71d95a0357215992fea",
+  "source": "manual"
+}

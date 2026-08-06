@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "flow-memory-keeper",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "templates/agent/skills/flow-memory-keeper",
+  "branch": "main",
+  "sha": "51ce50057954a3a9b6b53a3f2b16308210985545",
+  "source": "manual"
+}

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "consensus",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/consensus",
+  "branch": "main",
+  "sha": "ddf205332adab0e63f4384bbe9f04660f4da51cb",
+  "source": "manual"
+}

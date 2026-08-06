@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "logistics-exception-management",
+  "owner": "mit-network",
+  "repo": "antigravity-awesome-skills",
+  "path": "plugins/antigravity-awesome-skills-claude/skills/logistics-exception-management",
+  "branch": "main",
+  "sha": "2be2935d728e33748dab20fc3709c13fba458fc0",
+  "source": "manual"
+}

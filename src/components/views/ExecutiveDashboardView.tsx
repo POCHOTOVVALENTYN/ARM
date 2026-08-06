@@ -162,7 +162,7 @@ export const ExecutiveDashboardView: React.FC = () => {
     { label: 'Диспетчерський Графік Марея', path: '/dispatch/marey', icon: Activity, color: 'bg-indigo-600 text-white' },
     { label: 'Карта руху в реальному часі', path: '/dispatch/map', icon: MapPin, color: 'bg-emerald-600 text-white' },
     { label: 'Карта Симуляції GTFS (Leaflet)', path: '/planning/simulation', icon: Radio, color: 'bg-purple-600 text-white' },
-    { label: 'Конструктор нарядів (Duties)', path: '/planning/duties', icon: Bus, color: 'bg-amber-600 text-white' },
+    { label: 'Конструктор нарядів', path: '/planning/duties', icon: Bus, color: 'bg-amber-600 text-white' },
     { label: 'Валідатор КЗпП та конфліктів', path: '/planning/validate', icon: ShieldAlert, color: 'bg-rose-600 text-white' },
     { label: 'Адміністрування & Open Data', path: '/admin', icon: Download, color: 'bg-blue-600 text-white' },
   ];

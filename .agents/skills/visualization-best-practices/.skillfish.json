@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "visualization-best-practices",
+  "owner": "jeremylongshore",
+  "repo": "claude-code-plugins-plus-skills",
+  "path": "skills/12-data-analytics/visualization-best-practices",
+  "branch": "main",
+  "sha": "790e667a8d870be18a8c8efec514aa2f8dfbb914",
+  "source": "manual"
+}

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "nginx",
+  "owner": "adityavanjre",
+  "repo": "project-k",
+  "path": "integrations/openfang/crates/openfang-skills/bundled/nginx",
+  "branch": "main",
+  "sha": "d578fe53a205d0dae3d801c46c750e78de93517d",
+  "source": "manual"
+}

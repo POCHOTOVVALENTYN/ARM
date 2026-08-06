@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "api-gateway-configuration",
+  "owner": "secondsky",
+  "repo": "claude-skills",
+  "path": "plugins/api-gateway-configuration/skills/api-gateway-configuration",
+  "branch": "main",
+  "sha": "8552709176187d623c904c3866c95364504f9195",
+  "source": "manual"
+}

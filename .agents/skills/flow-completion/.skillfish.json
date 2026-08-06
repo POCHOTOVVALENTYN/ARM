@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "flow-completion",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/flow-completion",
+  "branch": "main",
+  "sha": "36fe689bf242c788ad7955ccbeff90692fe16e2e",
+  "source": "manual"
+}

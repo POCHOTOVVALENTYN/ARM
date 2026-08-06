@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "apilookup",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/apilookup",
+  "branch": "main",
+  "sha": "60e481d5926648948213f8adab84e35b22f81ae6",
+  "source": "manual"
+}

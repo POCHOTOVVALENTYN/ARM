@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "flow-sync-status",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/flow-sync-status",
+  "branch": "main",
+  "sha": "4413b742dd363539e74620c353484ba4fb0047de",
+  "source": "manual"
+}

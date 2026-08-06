@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "flow-planning",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/flow-planning",
+  "branch": "main",
+  "sha": "57b23d953ff57e7c9d55cd640a0f6e6ea3b475c5",
+  "source": "manual"
+}

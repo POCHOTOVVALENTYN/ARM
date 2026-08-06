@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "performance-analyst",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/performance-analyst",
+  "branch": "main",
+  "sha": "020d28890c27743bdd90c5b582a067b3b1c78610",
+  "source": "manual"
+}

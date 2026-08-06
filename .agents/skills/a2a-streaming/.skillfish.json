@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "a2a-streaming",
+  "owner": "orcaqubits",
+  "repo": "agentic-commerce-skills-plugins",
+  "path": "a2a-multi-agent/skills/a2a-streaming",
+  "branch": "main",
+  "sha": "2b294d6f2c9e3aec370eb0f3b277072e0eb23838",
+  "source": "manual"
+}

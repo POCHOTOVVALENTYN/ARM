@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "docgen",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/docgen",
+  "branch": "main",
+  "sha": "ce97bc279abf079444eb0a065723225ec1abe44c",
+  "source": "manual"
+}

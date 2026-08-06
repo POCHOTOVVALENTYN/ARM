@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "perspectives",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/perspectives",
+  "branch": "main",
+  "sha": "4699cd3060d58fce5e3f24d5429bcfd7836cd70f",
+  "source": "manual"
+}

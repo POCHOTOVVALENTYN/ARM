@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "security-auditor",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/security-auditor",
+  "branch": "main",
+  "sha": "3beff4ab85f5f3c9ba79459efa14cb211f66bccd",
+  "source": "manual"
+}

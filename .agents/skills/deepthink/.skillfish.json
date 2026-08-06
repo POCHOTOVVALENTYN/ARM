@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "deepthink",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/deepthink",
+  "branch": "main",
+  "sha": "74369884ee4abd05334954b5faceb4981f5cc331",
+  "source": "manual"
+}

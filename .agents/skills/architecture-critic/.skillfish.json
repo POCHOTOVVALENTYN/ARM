@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "architecture-critic",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/architecture-critic",
+  "branch": "main",
+  "sha": "56b5dd2a1777c397a3077e1d23dbc03e952f0871",
+  "source": "manual"
+}

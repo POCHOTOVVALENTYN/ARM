@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "flow-setup",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/flow-setup",
+  "branch": "main",
+  "sha": "c922156180bc0042722b704365577be392d1172f",
+  "source": "manual"
+}

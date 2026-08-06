@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { 
   VehicleBlock, 
   DriverDuty, 
@@ -6,7 +7,8 @@ import {
   Trip, 
   HubNode,
   EmergencyDetour,
-  DailyDeploymentPlan
+  DailyDeploymentPlan,
+  TransportType
 } from '../types';
 import { 
   MOCK_VEHICLE_BLOCKS, 
@@ -41,6 +43,8 @@ interface ScheduleState {
   setTheme: (theme: ThemeMode) => void;
 
   // Schedules (Live vs Draft)
+  selectedDate: string;
+  setSelectedDate: (date: string) => void;
   liveBlocks: VehicleBlock[];
   draftBlocks: VehicleBlock[];
   liveDuties: DriverDuty[];
@@ -86,10 +90,14 @@ interface ScheduleState {
   updateTripDeparture: (blockId: string, tripId: string, newTime: string) => void;
   assignDriverToDuty: (dutyId: string, driverName: string, driverBadge: string) => void;
   updateVehicleBlockInfo: (blockId: string, updates: Partial<VehicleBlock>) => void;
+  deleteVehicleBlock: (blockId: string) => void;
+  clearVehicleBlocks: (blockIds: string[]) => void;
   addVehicleBlock: (newBlock: VehicleBlock) => void;
+  generateMultipleBlocks: (routeId: string, type: TransportType, count: number, date: string) => void;
   assignDriverToBlockShift: (blockId: string, dutyId: string, driverName: string, driverBadge: string) => void;
   toggleDetour: (detourId: string) => void;
   recalculateConflicts: () => void;
+  reorderVehicleBlocks: (activeId: string, overId: string) => void;
 }
 
 const DEFAULT_USER: UserProfile = {
@@ -100,7 +108,9 @@ const DEFAULT_USER: UserProfile = {
   badge: 'DISP-042',
 };
 
-export const useScheduleStore = create<ScheduleState>((set, get) => ({
+export const useScheduleStore = create<ScheduleState>()(
+  persist(
+    (set, get) => ({
   currentPath: '/',
   userRole: 'dispatcher',
   user: DEFAULT_USER,
@@ -114,8 +124,11 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
     })),
   setTheme: (theme) => set({ theme }),
 
-  liveBlocks: REAL_GTFS_BLOCKS.length > 0 ? REAL_GTFS_BLOCKS as VehicleBlock[] : MOCK_VEHICLE_BLOCKS,
-  draftBlocks: REAL_GTFS_BLOCKS.length > 0 ? REAL_GTFS_BLOCKS as VehicleBlock[] : MOCK_VEHICLE_BLOCKS,
+  selectedDate: new Date().toISOString().split('T')[0],
+  setSelectedDate: (date) => set({ selectedDate: date }),
+
+  liveBlocks: [],
+  draftBlocks: [],
   liveDuties: GTFS_DRIVER_DUTIES.length > 0 ? GTFS_DRIVER_DUTIES : MOCK_DRIVER_DUTIES,
   draftDuties: GTFS_DRIVER_DUTIES.length > 0 ? GTFS_DRIVER_DUTIES : MOCK_DRIVER_DUTIES,
   deploymentPlans: [],
@@ -447,13 +460,46 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
 
     set({
       draftBlocks: draftBlocks.map((b) => (b.id === blockId ? { ...b, ...updates } : b)),
-      historyStack: [...historyStack, snapshot],
-      isDraftModified: true,
+      historyStack: [snapshot, ...historyStack].slice(0, 50),
+      redoStack: [],
+    });
+  },
+
+  deleteVehicleBlock: (blockId) => {
+    const { draftBlocks, draftDuties, historyStack } = get();
+    const snapshot = {
+      blocks: JSON.parse(JSON.stringify(draftBlocks)),
+      duties: JSON.parse(JSON.stringify(draftDuties)),
+      label: `Видалення наряду вагона ${blockId}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    set({
+      draftBlocks: draftBlocks.filter((b) => b.id !== blockId),
+      historyStack: [snapshot, ...historyStack].slice(0, 50),
+      redoStack: [],
+    });
+  },
+
+  clearVehicleBlocks: (blockIds) => {
+    const { draftBlocks, draftDuties, historyStack } = get();
+    const snapshot = {
+      blocks: JSON.parse(JSON.stringify(draftBlocks)),
+      duties: JSON.parse(JSON.stringify(draftDuties)),
+      label: `Масове очищення нарядів вагонів`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    set({
+      draftBlocks: draftBlocks.filter((b) => !blockIds.includes(b.id)),
+      historyStack: [snapshot, ...historyStack].slice(0, 50),
+      redoStack: [],
     });
   },
 
   addVehicleBlock: (newBlock) => {
-    const { draftBlocks, draftDuties, historyStack } = get();
+    const { draftBlocks, draftDuties, historyStack, selectedDate } = get();
+    newBlock.date = newBlock.date || selectedDate;
     const snapshot = {
       blocks: JSON.parse(JSON.stringify(draftBlocks)),
       duties: JSON.parse(JSON.stringify(draftDuties)),
@@ -463,6 +509,63 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
 
     set({
       draftBlocks: [...draftBlocks, newBlock],
+      historyStack: [...historyStack, snapshot],
+      isDraftModified: true,
+    });
+  },
+
+reorderVehicleBlocks: (activeId, overId) => {
+    set(state => {
+      const activeIndex = state.draftBlocks.findIndex(b => b.id === activeId);
+      const overIndex = state.draftBlocks.findIndex(b => b.id === overId);
+      
+      if (activeIndex !== -1 && overIndex !== -1) {
+        const newBlocks = [...state.draftBlocks];
+        const [movedBlock] = newBlocks.splice(activeIndex, 1);
+        newBlocks.splice(overIndex, 0, movedBlock);
+        return { draftBlocks: newBlocks };
+      }
+      return state;
+    });
+  },
+
+  generateMultipleBlocks: (routeId, type, count, date) => {
+    const { draftBlocks, draftDuties, historyStack } = get();
+    
+    // Find highest numeric block ID across all blocks to avoid duplicates
+    let maxId = 0;
+    draftBlocks.forEach(b => {
+      const num = parseInt(b.id, 10);
+      if (!isNaN(num) && num > maxId) {
+        maxId = num;
+      }
+    });
+
+    const newBlocks: VehicleBlock[] = [];
+    for (let i = 1; i <= count; i++) {
+      newBlocks.push({
+        id: String(maxId + i),
+        routeId,
+        type,
+        scheduleType: 'single', // Default
+        vehicleNumber: '', // Empty for table
+        depotId: type === 'tram' ? 'depot_tram_1' : 'depot_trolley_1', // Default
+        depotExitTime: '05:00', // Default
+        depotReturnTime: '23:00', // Default
+        date,
+        trips: [], // Empty initially
+      });
+    }
+
+    const snapshot = {
+      blocks: JSON.parse(JSON.stringify(draftBlocks)),
+      duties: JSON.parse(JSON.stringify(draftDuties)),
+      label: `Масова генерація ${count} нарядів для маршруту ${routeId}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    set({
+      draftBlocks: [...draftBlocks, ...newBlocks],
       historyStack: [...historyStack, snapshot],
       isDraftModified: true,
     });
@@ -562,4 +665,17 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
 
     set({ conflicts: newConflicts });
   },
-}));
+    }),
+    {
+      name: 'schedule-storage',
+      partialize: (state) => ({ 
+        liveBlocks: state.liveBlocks, 
+        draftBlocks: state.draftBlocks,
+        liveDuties: state.liveDuties,
+        draftDuties: state.draftDuties,
+        historyStack: state.historyStack,
+        isDraftModified: state.isDraftModified
+      }),
+    }
+  )
+);

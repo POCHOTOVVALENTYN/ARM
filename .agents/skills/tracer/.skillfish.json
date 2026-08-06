@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "tracer",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/tracer",
+  "branch": "main",
+  "sha": "b8c410b17bd752a5caa1de007d09597dded1325a",
+  "source": "manual"
+}

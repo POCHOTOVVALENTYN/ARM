@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "devils-advocate",
+  "owner": "cofin",
+  "repo": "flow",
+  "path": "plugins/flow/skills/devils-advocate",
+  "branch": "main",
+  "sha": "cfa6f75490f55737e616b72226339ea154011be3",
+  "source": "manual"
+}
