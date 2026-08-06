@@ -104,7 +104,15 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     setValidationWarnings: (warnings) => set({ validationWarnings: warnings }),
 
     // Встановлює новий розклад. Викликається переважно через WebSocket при події STATE_UPDATE
-    setLiveSchedule: (schedule) => set({ liveSchedule: schedule }),
+    setLiveSchedule: (schedule) => {
+        set((state) => {
+            // Zero-diff check: запобігаємо зайвим рендерам React
+            if (JSON.stringify(state.liveSchedule) === JSON.stringify(schedule)) {
+                return state;
+            }
+            return { liveSchedule: schedule };
+        });
+    },
 
     // Оновлює позиції вагонів. Викликається через WebSocket при події TELEMETRY_UPDATE
     updateTelemetry: (data) => set({ telemetry: data }),

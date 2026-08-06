@@ -20,13 +20,21 @@ class ConnectionManager:
         print(f"Клієнт відключився. Всього клієнтів: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
-        """Відправляє повідомлення всім підключеним клієнтам."""
+        """Відправляє повідомлення всім підключеним клієнтам та очищує мертві."""
         json_message = json.dumps(message)
+        dead_connections = []
         for connection in self.active_connections:
             try:
                 await connection.send_text(json_message)
             except Exception as e:
-                print(f"Помилка відправки: {e}")
+                print(f"Помилка відправки (м'яке відключення): {e}")
+                dead_connections.append(connection)
+        
+        # Очищення мертвих з'єднань
+        for dead in dead_connections:
+            if dead in self.active_connections:
+                self.active_connections.remove(dead)
+                print(f"Очищено мертве з'єднання. Залишилося: {len(self.active_connections)}")
 
 # Глобальний менеджер підключень
 manager = ConnectionManager()

@@ -174,6 +174,8 @@ export const TripGridView: React.FC = () => {
                         <button
                           onClick={() => handleSaveTime(trip.blockId, trip.id, trip.start_time)}
                           className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded flex items-center space-x-1 cursor-pointer ml-auto text-xs"
+                          aria-label={`Зберегти час відправлення для рейсу ${trip.id}`}
+                          tabIndex={0}
                         >
                           <Save className="w-3.5 h-3.5" />
                           <span>Зберегти</span>
@@ -183,6 +185,8 @@ export const TripGridView: React.FC = () => {
                           onClick={() => handleStartEdit(trip.id, trip.start_time)}
                           className="p-1 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded cursor-pointer transition-colors"
                           title="Змінити час відправлення"
+                          aria-label={`Редагувати час відправлення для рейсу ${trip.id}`}
+                          tabIndex={0}
                         >
                           <Edit3 className="w-4 h-4" />
                         </button>
