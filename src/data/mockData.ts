@@ -3,7 +3,7 @@ import {
   HubNode,
   Depot,
   RouteDepotConfig,
-  DriverBreakLocation,
+  BreakLocationConfig,
   DriverDuty,
   EmergencyDetour,
   EmergencyDetourTemplate,
@@ -279,8 +279,8 @@ export const MOCK_ROUTES: Route[] = [
 export const MOCK_ROUTE_DEPOT_CONFIGS: RouteDepotConfig[] = [
   {
     id: 'cfg_1',
-    routeId: 'tram_3',
-    depotId: 'depot_tram_1',
+    routeId: 'Tr3',
+    depotId: 'depot_trolley_1',
     pullOut: {
       dir0: { targetStationId: '687088', distanceKm: 2.1, durationMin: 9, passengerPickupAllowed: false },
       dir1: { targetStationId: '687087', distanceKm: 1.5, durationMin: 6, passengerPickupAllowed: true }
@@ -292,8 +292,8 @@ export const MOCK_ROUTE_DEPOT_CONFIGS: RouteDepotConfig[] = [
   },
   {
     id: 'cfg_2',
-    routeId: 'tram_7',
-    depotId: 'depot_tram_2',
+    routeId: 'Tr7',
+    depotId: 'depot_trolley_1',
     pullOut: {
       dir0: { targetStationId: '702349', distanceKm: 3.8, durationMin: 14, passengerPickupAllowed: true },
       dir1: { targetStationId: '702197', distanceKm: 5.2, durationMin: 18, passengerPickupAllowed: false }
@@ -305,8 +305,8 @@ export const MOCK_ROUTE_DEPOT_CONFIGS: RouteDepotConfig[] = [
   },
   {
     id: 'cfg_3',
-    routeId: 'trolleybus_5',
-    depotId: 'depot_trolley_1',
+    routeId: 'T5',
+    depotId: 'depot_tram_1',
     pullOut: {
       dir0: { targetStationId: '798899', distanceKm: 6.2, durationMin: 18, passengerPickupAllowed: false },
       dir1: { targetStationId: '798878', distanceKm: 8.5, durationMin: 24, passengerPickupAllowed: true }
@@ -318,27 +318,33 @@ export const MOCK_ROUTE_DEPOT_CONFIGS: RouteDepotConfig[] = [
   }
 ];
 
-export const MOCK_DRIVER_BREAK_LOCATIONS: DriverBreakLocation[] = [
+export const MOCK_DRIVER_BREAK_LOCATIONS: BreakLocationConfig[] = [
   {
-    id: 'brk_starosinna',
-    name: 'Диспетчерський пункт «Старосінна площа»',
-    stationId: 'st_starosinna',
+    id: 'brk_1',
+    routeId: 'T3',
+    locationId: 'st_starosinna',
+    locationName: 'Диспетчерський пункт «Старосінна площа»',
+    locationType: 'dispatch_point',
     maxCapacityVehicles: 4,
-    routeIds: ['T3', 'T7', 'T10']
+    durationMin: 45
   },
   {
-    id: 'brk_lustdorf_11th',
-    name: 'Кінцева станція «11-та ст. Люстдорфської дороги»',
-    stationId: 'st_lustdorf_11th',
+    id: 'brk_2',
+    routeId: 'T7',
+    locationId: 'st_starosinna',
+    locationName: 'Диспетчерський пункт «Старосінна площа»',
+    locationType: 'dispatch_point',
+    maxCapacityVehicles: 4,
+    durationMin: 45
+  },
+  {
+    id: 'brk_3',
+    routeId: 'T3',
+    locationId: 'st_lustdorf_11th',
+    locationName: 'Кінцева станція «11-та ст. Люстдорфської дороги»',
+    locationType: 'terminal',
     maxCapacityVehicles: 2,
-    routeIds: ['T3', 'T7']
-  },
-  {
-    id: 'brk_vokzal',
-    name: 'Диспетчерський пункт «Залізничний вокзал»',
-    stationId: 'st_vokzal',
-    maxCapacityVehicles: 3,
-    routeIds: ['Tr8', 'Tr9']
+    durationMin: 30
   }
 ];
 

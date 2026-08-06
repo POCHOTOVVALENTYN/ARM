@@ -65,7 +65,7 @@ export const RouteControlPointsView: React.FC<RouteControlPointsViewProps> = ({ 
   const getStationById = useStationStore(state => state.getStationById);
 
   // Available points are now the actual stations on this route
-  const availablePointsToAdd = (route.stations || [])
+  const availablePointsToAdd = (route.allStations || route.stations || [])
     .map(stationId => getStationById(stationId))
     .filter(s => s !== undefined)
     .filter(station => !routePoints.some(rp => rp.controlPointId === station!.id));
@@ -73,7 +73,7 @@ export const RouteControlPointsView: React.FC<RouteControlPointsViewProps> = ({ 
   return (
     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-5 space-y-4">
       <div className="flex items-center justify-between border-b-2 border-blue-200 pb-3">
-        <h4 className="font-bold text-gray-900 text-base">Контрольні точки на маршруті: {route.type === 'tram' ? 'Тр' : 'Т'} {route.number}</h4>
+        <h4 className="font-bold text-gray-900 text-base">Контрольні точки на маршруті: {route.type === 'tram' ? 'Тр' : 'Тб'} {route.number}</h4>
         
         <div className="flex items-center space-x-2">
           <select

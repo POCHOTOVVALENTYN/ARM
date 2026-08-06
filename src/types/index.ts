@@ -58,9 +58,15 @@ export interface Route {
   lengthDir1Km: number;
   lengthDir2Km: number;
   stations: string[];
+  allStations?: string[]; // Includes unique stations from both directions
   segments: RouteSegment[];
   controlPoints?: RouteControlPoint[]; // <-- added mapping
   description?: string;
+  activeVehiclesCount?: {
+    workday: number;
+    weekend: number;
+    holiday: number;
+  };
 }
 
 export type TrackType = 'main_loop' | 'passing_loop' | 'terminal' | 'idle' | 'passenger_platform';
@@ -142,12 +148,14 @@ export interface RouteDepotConfig {
   };
 }
 
-export interface DriverBreakLocation {
+export interface BreakLocationConfig {
   id: string;
-  name: string;
-  stationId: string;
+  routeId: string;
+  locationId: string; // ID of the stop or dispatch point
+  locationName: string;
+  locationType: 'dispatch_point' | 'terminal' | 'stop';
   maxCapacityVehicles: number;
-  routeIds: string[];
+  durationMin: number;
 }
 
 export interface Trip {

@@ -7,6 +7,7 @@ interface RouteDepotStore {
   addConfig: (config: RouteDepotConfig) => void;
   updateConfig: (config: RouteDepotConfig) => void;
   deleteConfig: (id: string) => void;
+  upsertConfig: (config: RouteDepotConfig) => void;
 }
 
 export const useRouteDepotStore = create<RouteDepotStore>((set) => ({
@@ -24,4 +25,15 @@ export const useRouteDepotStore = create<RouteDepotStore>((set) => ({
     set((state) => ({
       configs: state.configs.filter((c) => c.id !== id),
     })),
+
+  upsertConfig: (config) =>
+    set((state) => {
+      const exists = state.configs.some((c) => c.routeId === config.routeId && c.depotId === config.depotId);
+      if (exists) {
+        return {
+          configs: state.configs.map((c) => (c.routeId === config.routeId && c.depotId === config.depotId ? config : c)),
+        };
+      }
+      return { configs: [...state.configs, config] };
+    }),
 }));

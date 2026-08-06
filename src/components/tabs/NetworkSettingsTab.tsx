@@ -1,18 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { Route, RouteStatus, TransportType } from '../../types';
+import { Route, RouteStatus, TransportType, ControlPointNode } from '../../types';
 import { useRouteStore } from '../../store/useRouteStore';
 import { RouteTable } from '../routes/RouteTable';
 import { RoutePassport } from '../routes/RoutePassport';
 import { RouteFormModal } from '../routes/RouteFormModal';
 import { RouteControlPointsView } from '../routes/RouteControlPointsView';
 import { GlobalHubFormModal } from '../network/GlobalHubFormModal';
+import { BreakLocationFormModal } from '../network/BreakLocationFormModal';
+import { useBreakStore } from '../../store/useBreakStore';
 import { JsonImportModal } from '../routes/JsonImportModal';
 import { MOCK_DEPOTS, MOCK_DRIVER_BREAK_LOCATIONS } from '../../data/mockData';
-import gtfsRoutesRaw from '../../data/gtfsParsed.json';
-import { GtfsLogicalRoute } from '../../types';
 import { useRouteDepotStore } from '../../store/useRouteDepotStore';
-
-const logicalRoutes = gtfsRoutesRaw as GtfsLogicalRoute[];
+import { useScheduleStore } from '../../store/useScheduleStore';
 import { useStationStore } from '../../store/useStationStore';
 import { useControlPointStore } from '../../store/useControlPointStore';
 import { 
@@ -41,7 +40,11 @@ import {
 
 export const NetworkSettingsTab: React.FC = () => {
   const stations = useStationStore(state => state.stations);
-  const [activeSubTab, setActiveSubTab] = useState<'routes' | 'hubs' | 'depots' | 'breaks'>('routes');
+  const { currentPath } = useScheduleStore();
+  let activeSubTab = 'routes';
+  if (currentPath.includes('/intersections')) activeSubTab = 'hubs';
+  else if (currentPath.includes('/depots')) activeSubTab = 'depots';
+  else if (currentPath.includes('/breaks')) activeSubTab = 'breaks';
 
   // Route Store State & Actions
   const {
@@ -69,14 +72,19 @@ export const NetworkSettingsTab: React.FC = () => {
   } = useRouteStore();
 
   const { controlPoints, addControlPoint, updateControlPoint, deleteControlPoint } = useControlPointStore();
+  const { breaks, addBreak, updateBreak, deleteBreak } = useBreakStore();
   
   // Hub CRUD State
   const [isHubModalOpen, setIsHubModalOpen] = useState(false);
-  const [editingHub, setEditingHub] = useState<any>(null);
+  const [hubRouteTypeFilter, setHubRouteTypeFilter] = useState<TransportType | 'all'>('all');
 
   // Modals local state
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingRoute, setEditingRoute] = useState<Route | null>(null);
+  const [editingHub, setEditingHub] = useState<ControlPointNode | null>(null);
+  const [activeBreakRouteId, setActiveBreakRouteId] = useState<string | null>(null);
+  const [editingBreakConfig, setEditingBreakConfig] = useState<any>(null);
+  const [expandedBreakRouteId, setExpandedBreakRouteId] = useState<string | null>(null);
   const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
   const [selectedRouteForPoints, setSelectedRouteForPoints] = useState<string>('');
   const [expandedRouteId, setExpandedRouteId] = useState<string | null>(null);
@@ -171,61 +179,6 @@ export const NetworkSettingsTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Modern Executive Header & Sub-tab Navigation */}
-      <div className="bg-white border border-blue-200 rounded-2xl p-5 text-slate-900 shadow-[0_8px_30px_rgba(37,99,235,0.12)] flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-5 relative overflow-hidden">
-        {/* Subtle Decorative Ambient Background Glow */}
-        <div className="absolute -top-12 -left-12 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
-
-        {/* Title & Metadata Block */}
-        <div className="flex items-center space-x-4 relative z-10">
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 shadow-2xs shrink-0">
-            <Settings className="w-6 h-6 animate-spin-slow" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
-                КП «ОДЕСМІСЬКЕЛЕКТРОТРАНС»
-              </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Сервер синхронізовано" />
-            </div>
-            <h2 className="font-extrabold text-lg text-slate-900 tracking-tight mt-1">
-              Налаштування та Довідники мережі
-            </h2>
-            <p className="text-xs text-slate-500 font-medium font-sans leading-relaxed">
-              Централізований довідник маршрутів, паспортів, міжзупинкових перегонів та інфраструктурних вузлів
-            </p>
-          </div>
-        </div>
-
-        {/* Sub-tab Navigation Buttons */}
-        <div className="flex bg-blue-50/60 p-1.5 rounded-xl border border-blue-200 text-xs overflow-x-auto relative z-10 shrink-0 gap-1.5">
-          {[
-            { id: 'routes', label: '1. Маршрути (Route Master)', icon: Navigation },
-            { id: 'hubs', label: '2. Контрольні точки', icon: MapPin },
-            { id: 'depots', label: '3. Депо та Нульові пробіги', icon: Bus },
-            { id: 'breaks', label: '4. Місця обідів водіїв', icon: Coffee },
-          ].map((item) => {
-            const Icon = item.icon;
-            const isActive = activeSubTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveSubTab(item.id as any)}
-                className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-lg font-extrabold transition-all duration-200 whitespace-nowrap cursor-pointer ${
-                  isActive
-                    ? 'bg-blue-600 text-white border-2 border-blue-600 shadow-xs'
-                    : 'bg-white text-blue-700 hover:text-blue-900 border border-blue-300 hover:border-blue-500 hover:bg-blue-50/80 font-bold'
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-blue-600'}`} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* 1. Route Management (Route Master) Sub-tab */}
       {activeSubTab === 'routes' && (
         <div className="space-y-6">
@@ -582,8 +535,30 @@ export const NetworkSettingsTab: React.FC = () => {
 
           <div className="space-y-3">
             <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2">2. Контрольні точки за маршрутами</h4>
+            
+            <div className="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg w-max mb-3 text-xs font-bold">
+              <button
+                onClick={() => setHubRouteTypeFilter('all')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${hubRouteTypeFilter === 'all' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Всі маршрути
+              </button>
+              <button
+                onClick={() => setHubRouteTypeFilter('tram')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${hubRouteTypeFilter === 'tram' ? 'bg-white shadow-sm text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Трамваї
+              </button>
+              <button
+                onClick={() => setHubRouteTypeFilter('trolleybus')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${hubRouteTypeFilter === 'trolleybus' ? 'bg-white shadow-sm text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Тролейбуси
+              </button>
+            </div>
+
             <div className="space-y-2">
-              {routes.map(r => {
+              {routes.filter(r => hubRouteTypeFilter === 'all' || r.type === hubRouteTypeFilter).map(r => {
                 const isExpanded = expandedRouteId === r.id;
                 return (
                   <div key={r.id} className="bg-white border border-gray-300 rounded-lg shadow-sm overflow-hidden">
@@ -594,7 +569,7 @@ export const NetworkSettingsTab: React.FC = () => {
                       <div className="flex items-center space-x-3">
                         <RouteIcon className="w-5 h-5 text-indigo-600" />
                         <span className="font-bold text-sm text-gray-900">
-                          {r.type === 'tram' ? 'Тр' : 'Т'} {r.number}: {r.name}
+                          {r.type === 'tram' ? 'Т' : 'Тр'} {r.number}: {r.name}
                         </span>
                         <span className="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-mono font-bold">
                           {(r.controlPoints || []).length} точок
@@ -657,7 +632,7 @@ export const NetworkSettingsTab: React.FC = () => {
             {/* --- Tram routes --- */}
             <div className="space-y-1">
               <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Трамвайні маршрути</h5>
-              {logicalRoutes.filter(r => r.type === 'tram').map(route => {
+              {routes.filter(r => r.type === 'tram').map(route => {
                 const configs = routeDepotConfigs.filter(c => c.routeId === route.id);
                 const isExpanded = expandedDepotRouteId === route.id;
                 const hasConfig = configs.length > 0;
@@ -671,8 +646,8 @@ export const NetworkSettingsTab: React.FC = () => {
                       <div className="flex items-center space-x-2">
                         {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                         <RouteIcon className="w-4 h-4 text-rose-600" />
-                        <span className="font-bold text-gray-900 text-sm">Тр {route.short_name}</span>
-                        <span className="text-xs text-gray-500 truncate max-w-[300px]">{route.long_name}</span>
+                        <span className="font-bold text-gray-900 text-sm">Тр {route.number}</span>
+                        <span className="text-xs text-gray-500 truncate max-w-[300px]">{route.name}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         {hasConfig ? (
@@ -700,7 +675,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                 </h5>
                                 <button
                                   onClick={() => {
-                                    if (window.confirm(`Видалити зв'язок маршруту Тр ${route.short_name} з депо "${depot?.name}"?`)) {
+                                    if (window.confirm(`Видалити зв'язок маршруту Тр ${route.number} з депо "${depot?.name}"?`)) {
                                       deleteRouteDepotConfig(cfg.id);
                                     }
                                   }}
@@ -716,12 +691,13 @@ export const NetworkSettingsTab: React.FC = () => {
                                   <h6 className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">▶ Виїзди з депо (Pull-out)</h6>
                                   {(['dir0', 'dir1'] as const).map(dir => {
                                     const dirData = cfg.pullOut?.[dir];
-                                    const dirInfo = route.directions[dir === 'dir0' ? '0' : '1'];
-                                    if (!dirInfo) return null;
+                                    const terminalId = dir === 'dir0' ? route.primaryTerminalId : route.secondaryTerminalId;
+                                    const terminalName = stations.find(s => s.id === terminalId)?.name || `Зупинка ${terminalId}`;
+                                    if (!terminalName) return null;
                                     return (
                                       <div key={dir} className="bg-white p-2 rounded border border-gray-200 text-xs space-y-1.5">
                                         <span className="font-bold text-gray-700 block">
-                                          Напр. {dir === 'dir0' ? '1' : '2'} → {dirInfo.firstStopName}
+                                          Напр. {dir === 'dir0' ? '1' : '2'} → {terminalName}
                                         </span>
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <label className="flex items-center gap-1 text-gray-500">
@@ -730,7 +706,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.distanceKm ?? 0}
                                               onChange={e => {
                                                 const val = parseFloat(e.target.value) || 0;
-                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: dirInfo.firstStopId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
+                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: terminalId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-16 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -743,7 +719,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.durationMin ?? 0}
                                               onChange={e => {
                                                 const val = parseInt(e.target.value) || 0;
-                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: dirInfo.firstStopId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
+                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: terminalId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-14 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -754,7 +730,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                             <input type="checkbox"
                                               checked={dirData?.passengerPickupAllowed ?? false}
                                               onChange={e => {
-                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: dirInfo.firstStopId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
+                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: terminalId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
                                                 updateConfig(updated);
                                               }}
                                               className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
@@ -771,12 +747,13 @@ export const NetworkSettingsTab: React.FC = () => {
                                   <h6 className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">◀ Заїзди в депо (Pull-in)</h6>
                                   {(['dir0', 'dir1'] as const).map(dir => {
                                     const dirData = cfg.pullIn?.[dir];
-                                    const dirInfo = route.directions[dir === 'dir0' ? '0' : '1'];
-                                    if (!dirInfo) return null;
+                                    const terminalId = dir === 'dir0' ? route.primaryTerminalId : route.secondaryTerminalId;
+                                    const terminalName = stations.find(s => s.id === terminalId)?.name || `Зупинка ${terminalId}`;
+                                    if (!terminalName) return null;
                                     return (
                                       <div key={dir} className="bg-white p-2 rounded border border-gray-200 text-xs space-y-1.5">
                                         <span className="font-bold text-gray-700 block">
-                                          Напр. {dir === 'dir0' ? '1' : '2'} ← {dirInfo.lastStopName}
+                                          Напр. {dir === 'dir0' ? '1' : '2'} ← {stations.find(s => s.id === (terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId))?.name || 'Кінцева'}
                                         </span>
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <label className="flex items-center gap-1 text-gray-500">
@@ -785,7 +762,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.distanceKm ?? 0}
                                               onChange={e => {
                                                 const val = parseFloat(e.target.value) || 0;
-                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: dirInfo.lastStopId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
+                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-16 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -798,7 +775,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.durationMin ?? 0}
                                               onChange={e => {
                                                 const val = parseInt(e.target.value) || 0;
-                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: dirInfo.lastStopId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
+                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-14 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -809,7 +786,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                             <input type="checkbox"
                                               checked={dirData?.passengerPickupAllowed ?? false}
                                               onChange={e => {
-                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: dirInfo.lastStopId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
+                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
                                                 updateConfig(updated);
                                               }}
                                               className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
@@ -837,19 +814,19 @@ export const NetworkSettingsTab: React.FC = () => {
                               return;
                             }
                             const depot = availableDepots[0];
-                            const dir0 = route.directions['0'];
-                            const dir1 = route.directions['1'];
+                            const dir0Name = stations.find(s => s.id === route.primaryTerminalId)?.name || 'Кінцева 1';
+                            const dir1Name = stations.find(s => s.id === route.secondaryTerminalId)?.name || 'Кінцева 2';
                             addConfig({
                               id: `cfg_${Date.now()}`,
                               routeId: route.id,
                               depotId: depot.id,
                               pullOut: {
-                                ...(dir0 ? { dir0: { targetStationId: dir0.firstStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
-                                ...(dir1 ? { dir1: { targetStationId: dir1.firstStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir0: { targetStationId: route.primaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir1: { targetStationId: route.secondaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
                               },
                               pullIn: {
-                                ...(dir0 ? { dir0: { targetStationId: dir0.lastStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
-                                ...(dir1 ? { dir1: { targetStationId: dir1.lastStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir0: { targetStationId: route.secondaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir1: { targetStationId: route.primaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
                               },
                             });
                           }}
@@ -868,7 +845,7 @@ export const NetworkSettingsTab: React.FC = () => {
             {/* --- Trolleybus routes --- */}
             <div className="space-y-1 mt-4">
               <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Тролейбусні маршрути</h5>
-              {logicalRoutes.filter(r => r.type === 'trolleybus').map(route => {
+              {routes.filter(r => r.type === 'trolleybus').map(route => {
                 const configs = routeDepotConfigs.filter(c => c.routeId === route.id);
                 const isExpanded = expandedDepotRouteId === route.id;
                 const hasConfig = configs.length > 0;
@@ -882,8 +859,8 @@ export const NetworkSettingsTab: React.FC = () => {
                       <div className="flex items-center space-x-2">
                         {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                         <RouteIcon className="w-4 h-4 text-indigo-600" />
-                        <span className="font-bold text-gray-900 text-sm">Тб {route.short_name}</span>
-                        <span className="text-xs text-gray-500 truncate max-w-[300px]">{route.long_name}</span>
+                        <span className="font-bold text-gray-900 text-sm">Тб {route.number}</span>
+                        <span className="text-xs text-gray-500 truncate max-w-[300px]">{route.name}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         {hasConfig ? (
@@ -911,7 +888,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                 </h5>
                                 <button
                                   onClick={() => {
-                                    if (window.confirm(`Видалити зв'язок маршруту Тб ${route.short_name} з депо "${depot?.name}"?`)) {
+                                    if (window.confirm(`Видалити зв'язок маршруту Тб ${route.number} з депо "${depot?.name}"?`)) {
                                       deleteRouteDepotConfig(cfg.id);
                                     }
                                   }}
@@ -927,12 +904,13 @@ export const NetworkSettingsTab: React.FC = () => {
                                   <h6 className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">▶ Виїзди з депо (Pull-out)</h6>
                                   {(['dir0', 'dir1'] as const).map(dir => {
                                     const dirData = cfg.pullOut?.[dir];
-                                    const dirInfo = route.directions[dir === 'dir0' ? '0' : '1'];
-                                    if (!dirInfo) return null;
+                                    const terminalId = dir === 'dir0' ? route.primaryTerminalId : route.secondaryTerminalId;
+                                    const terminalName = stations.find(s => s.id === terminalId)?.name || `Зупинка ${terminalId}`;
+                                    if (!terminalName) return null;
                                     return (
                                       <div key={dir} className="bg-white p-2 rounded border border-gray-200 text-xs space-y-1.5">
                                         <span className="font-bold text-gray-700 block">
-                                          Напр. {dir === 'dir0' ? '1' : '2'} → {dirInfo.firstStopName}
+                                          Напр. {dir === 'dir0' ? '1' : '2'} → {terminalName}
                                         </span>
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <label className="flex items-center gap-1 text-gray-500">
@@ -941,7 +919,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.distanceKm ?? 0}
                                               onChange={e => {
                                                 const val = parseFloat(e.target.value) || 0;
-                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: dirInfo.firstStopId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
+                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: terminalId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-16 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -954,7 +932,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.durationMin ?? 0}
                                               onChange={e => {
                                                 const val = parseInt(e.target.value) || 0;
-                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: dirInfo.firstStopId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
+                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: terminalId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-14 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -965,7 +943,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                             <input type="checkbox"
                                               checked={dirData?.passengerPickupAllowed ?? false}
                                               onChange={e => {
-                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: dirInfo.firstStopId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
+                                                const updated = { ...cfg, pullOut: { ...cfg.pullOut, [dir]: { ...(dirData || { targetStationId: terminalId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
                                                 updateConfig(updated);
                                               }}
                                               className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
@@ -982,12 +960,13 @@ export const NetworkSettingsTab: React.FC = () => {
                                   <h6 className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">◀ Заїзди в депо (Pull-in)</h6>
                                   {(['dir0', 'dir1'] as const).map(dir => {
                                     const dirData = cfg.pullIn?.[dir];
-                                    const dirInfo = route.directions[dir === 'dir0' ? '0' : '1'];
-                                    if (!dirInfo) return null;
+                                    const terminalId = dir === 'dir0' ? route.primaryTerminalId : route.secondaryTerminalId;
+                                    const terminalName = stations.find(s => s.id === terminalId)?.name || `Зупинка ${terminalId}`;
+                                    if (!terminalName) return null;
                                     return (
                                       <div key={dir} className="bg-white p-2 rounded border border-gray-200 text-xs space-y-1.5">
                                         <span className="font-bold text-gray-700 block">
-                                          Напр. {dir === 'dir0' ? '1' : '2'} ← {dirInfo.lastStopName}
+                                          Напр. {dir === 'dir0' ? '1' : '2'} ← {stations.find(s => s.id === (terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId))?.name || 'Кінцева'}
                                         </span>
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <label className="flex items-center gap-1 text-gray-500">
@@ -996,7 +975,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.distanceKm ?? 0}
                                               onChange={e => {
                                                 const val = parseFloat(e.target.value) || 0;
-                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: dirInfo.lastStopId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
+                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId, durationMin: 0, passengerPickupAllowed: false }), distanceKm: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-16 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -1009,7 +988,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                               value={dirData?.durationMin ?? 0}
                                               onChange={e => {
                                                 const val = parseInt(e.target.value) || 0;
-                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: dirInfo.lastStopId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
+                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId, distanceKm: 0, passengerPickupAllowed: false }), durationMin: val } } };
                                                 updateConfig(updated);
                                               }}
                                               className="w-14 text-center font-bold border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-indigo-400 focus:outline-none"
@@ -1020,7 +999,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                             <input type="checkbox"
                                               checked={dirData?.passengerPickupAllowed ?? false}
                                               onChange={e => {
-                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: dirInfo.lastStopId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
+                                                const updated = { ...cfg, pullIn: { ...cfg.pullIn, [dir]: { ...(dirData || { targetStationId: terminalId === route.primaryTerminalId ? route.secondaryTerminalId : route.primaryTerminalId, distanceKm: 0, durationMin: 0 }), passengerPickupAllowed: e.target.checked } } };
                                                 updateConfig(updated);
                                               }}
                                               className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
@@ -1048,19 +1027,19 @@ export const NetworkSettingsTab: React.FC = () => {
                               return;
                             }
                             const depot = availableDepots[0];
-                            const dir0 = route.directions['0'];
-                            const dir1 = route.directions['1'];
+                            const dir0Name = stations.find(s => s.id === route.primaryTerminalId)?.name || 'Кінцева 1';
+                            const dir1Name = stations.find(s => s.id === route.secondaryTerminalId)?.name || 'Кінцева 2';
                             addConfig({
                               id: `cfg_${Date.now()}`,
                               routeId: route.id,
                               depotId: depot.id,
                               pullOut: {
-                                ...(dir0 ? { dir0: { targetStationId: dir0.firstStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
-                                ...(dir1 ? { dir1: { targetStationId: dir1.firstStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir0: { targetStationId: route.primaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir1: { targetStationId: route.secondaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
                               },
                               pullIn: {
-                                ...(dir0 ? { dir0: { targetStationId: dir0.lastStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
-                                ...(dir1 ? { dir1: { targetStationId: dir1.lastStopId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir0: { targetStationId: route.secondaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
+                                ...(true ? { dir1: { targetStationId: route.primaryTerminalId, distanceKm: 0, durationMin: 0, passengerPickupAllowed: false } } : {}),
                               },
                             });
                           }}
@@ -1082,34 +1061,183 @@ export const NetworkSettingsTab: React.FC = () => {
       {/* 4. Driver Break Database */}
       {activeSubTab === 'breaks' && (
         <div className="space-y-4">
-          <h3 className="text-gray-900 font-bold text-base">
-            База даних місць відпочинку та обіду водіїв (Driver Break Database)
-          </h3>
-          <p className="text-xs text-gray-600">
-            Реєстр дозволених локацій для організації обідніх перерв (виключно ДП, Старосінна площа або протилежні кінцеві станції)
-          </p>
+          <div className="flex justify-between items-center mb-2">
+            <div>
+              <h3 className="text-gray-900 font-bold text-base">
+                База даних місць відпочинку та обіду водіїв
+              </h3>
+              <p className="text-xs text-gray-600">
+                Призначення дозволених локацій для організації обідніх перерв за маршрутами.
+              </p>
+            </div>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {MOCK_DRIVER_BREAK_LOCATIONS.map((loc) => (
-              <div
-                key={loc.id}
-                className="bg-white border-2 border-gray-900 rounded-xl p-5 space-y-3 shadow-sm"
-              >
-                <div className="flex items-center space-x-2">
-                  <Coffee className="w-5 h-5 text-amber-600" />
-                  <h4 className="text-gray-900 font-bold text-sm">{loc.name}</h4>
-                </div>
-                <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-lg text-xs space-y-1">
-                  <div className="flex justify-between font-mono">
-                    <span className="text-gray-600">Максимальна місткість ТЗ:</span>
-                    <strong className="text-amber-900 font-bold">{loc.maxCapacityVehicles} вагони</strong>
+          <div className="space-y-6">
+            {/* Tram Routes */}
+            <div className="space-y-1">
+              <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Трамвайні маршрути</h5>
+              {routes.filter(r => r.type === 'tram').map(route => {
+                const routeBreaks = breaks.filter(b => b.routeId === route.id);
+                const isExpanded = expandedBreakRouteId === route.id;
+
+                return (
+                  <div key={route.id} className="border rounded-lg overflow-hidden border-gray-300 bg-white">
+                    <button
+                      onClick={() => setExpandedBreakRouteId(isExpanded ? null : route.id)}
+                      className="w-full flex items-center justify-between p-2.5 hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center space-x-2">
+                        {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                        <RouteIcon className="w-4 h-4 text-rose-600" />
+                        <span className="font-bold text-gray-900 text-sm">Тр {route.number}</span>
+                        <span className="text-xs text-gray-500 truncate max-w-[200px]">{route.name}</span>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {routeBreaks.length} точок обіду
+                        </span>
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="p-3 border-t border-gray-200 bg-gray-50 space-y-3">
+                        {routeBreaks.length === 0 ? (
+                          <div className="text-center py-4 text-xs text-gray-500 border border-dashed border-gray-300 rounded-lg bg-white">
+                            Не призначено жодної точки обіду. Водії не зможуть робити перерви.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {routeBreaks.map(b => (
+                              <div key={b.id} className="bg-white border border-gray-200 rounded-lg p-3 relative hover:shadow-sm transition-shadow group">
+                                <button 
+                                  onClick={() => deleteBreak(b.id)}
+                                  className="absolute top-2 right-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingBreakConfig(b);
+                                    setActiveBreakRouteId(route.id);
+                                  }}
+                                  className="text-left w-full"
+                                >
+                                  <div className="flex items-center mb-1.5">
+                                    <Coffee className="w-4 h-4 text-amber-600 mr-1.5" />
+                                    <span className="font-bold text-gray-900 text-xs truncate max-w-[180px]">{b.locationName}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-[10px]">
+                                    <span className="text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                                      {b.locationType === 'dispatch_point' ? 'ДП' : b.locationType === 'terminal' ? 'Кінцева' : 'Зупинка'}
+                                    </span>
+                                    <span className="text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
+                                      {b.maxCapacityVehicles} ваг. / {b.durationMin} хв.
+                                    </span>
+                                  </div>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          onClick={() => {
+                            setEditingBreakConfig(null);
+                            setActiveBreakRouteId(route.id);
+                          }}
+                          className="w-full py-2 flex items-center justify-center text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 rounded-lg transition-colors mt-2"
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          Додати місце обіду
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[11px] text-gray-600">
-                    Обслуговує маршрути: <span className="text-indigo-700 font-bold">{loc.routeIds.join(', ')}</span>
+                );
+              })}
+            </div>
+
+            {/* Trolleybus Routes */}
+            <div className="space-y-1 mt-4">
+              <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Тролейбусні маршрути</h5>
+              {routes.filter(r => r.type === 'trolleybus').map(route => {
+                const routeBreaks = breaks.filter(b => b.routeId === route.id);
+                const isExpanded = expandedBreakRouteId === route.id;
+
+                return (
+                  <div key={route.id} className="border rounded-lg overflow-hidden border-gray-300 bg-white">
+                    <button
+                      onClick={() => setExpandedBreakRouteId(isExpanded ? null : route.id)}
+                      className="w-full flex items-center justify-between p-2.5 hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center space-x-2">
+                        {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                        <RouteIcon className="w-4 h-4 text-indigo-600" />
+                        <span className="font-bold text-gray-900 text-sm">Тб {route.number}</span>
+                        <span className="text-xs text-gray-500 truncate max-w-[200px]">{route.name}</span>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {routeBreaks.length} точок обіду
+                        </span>
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="p-3 border-t border-gray-200 bg-gray-50 space-y-3">
+                        {routeBreaks.length === 0 ? (
+                          <div className="text-center py-4 text-xs text-gray-500 border border-dashed border-gray-300 rounded-lg bg-white">
+                            Не призначено жодної точки обіду. Водії не зможуть робити перерви.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {routeBreaks.map(b => (
+                              <div key={b.id} className="bg-white border border-gray-200 rounded-lg p-3 relative hover:shadow-sm transition-shadow group">
+                                <button 
+                                  onClick={() => deleteBreak(b.id)}
+                                  className="absolute top-2 right-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingBreakConfig(b);
+                                    setActiveBreakRouteId(route.id);
+                                  }}
+                                  className="text-left w-full"
+                                >
+                                  <div className="flex items-center mb-1.5">
+                                    <Coffee className="w-4 h-4 text-amber-600 mr-1.5" />
+                                    <span className="font-bold text-gray-900 text-xs truncate max-w-[180px]">{b.locationName}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-[10px]">
+                                    <span className="text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                                      {b.locationType === 'dispatch_point' ? 'ДП' : b.locationType === 'terminal' ? 'Кінцева' : 'Зупинка'}
+                                    </span>
+                                    <span className="text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
+                                      {b.maxCapacityVehicles} ваг. / {b.durationMin} хв.
+                                    </span>
+                                  </div>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          onClick={() => {
+                            setEditingBreakConfig(null);
+                            setActiveBreakRouteId(route.id);
+                          }}
+                          className="w-full py-2 flex items-center justify-center text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 rounded-lg transition-colors mt-2"
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          Додати місце обіду
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -1141,6 +1269,22 @@ export const NetworkSettingsTab: React.FC = () => {
             setIsHubModalOpen(false);
           }}
           onClose={() => setIsHubModalOpen(false)}
+        />
+      )}
+
+      {activeBreakRouteId && (
+        <BreakLocationFormModal
+          routeId={activeBreakRouteId}
+          existingConfig={editingBreakConfig}
+          onSave={(config) => {
+            if ('id' in config && (config as any).id) {
+              updateBreak(config as any);
+            } else {
+              addBreak(config as any);
+            }
+            setActiveBreakRouteId(null);
+          }}
+          onClose={() => setActiveBreakRouteId(null)}
         />
       )}
     </div>

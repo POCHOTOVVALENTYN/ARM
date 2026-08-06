@@ -1,9 +1,9 @@
 [
   {
-    "id": "tram_3",
+    "id": "trolleybus_3",
     "short_name": "3",
     "long_name": "станція Застава I — Парк ім. Тараса Шевченка",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "687088",
@@ -20,10 +20,10 @@
     }
   },
   {
-    "id": "tram_2",
+    "id": "trolleybus_2",
     "short_name": "2",
     "long_name": "Парк ім. Тараса Шевченка — вул. Новосельського",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "687087",
@@ -40,10 +40,10 @@
     }
   },
   {
-    "id": "tram_12",
+    "id": "trolleybus_12",
     "short_name": "12",
     "long_name": "вул. Архітекторська — вул. Святослава Ріхтера",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "702349",
@@ -60,10 +60,10 @@
     }
   },
   {
-    "id": "tram_7",
+    "id": "trolleybus_7",
     "short_name": "7",
     "long_name": "вул. Архітекторська — вул. Новосельського",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "702349",
@@ -80,10 +80,10 @@
     }
   },
   {
-    "id": "tram_8",
+    "id": "trolleybus_8",
     "short_name": "8",
     "long_name": "Суперфосфатний завод — Залізничний вокзал",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "702460",
@@ -100,10 +100,10 @@
     }
   },
   {
-    "id": "tram_9",
+    "id": "trolleybus_9",
     "short_name": "9",
     "long_name": "вул. Інглезі — вул. Грецька",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "702487",
@@ -120,10 +120,10 @@
     }
   },
   {
-    "id": "tram_10",
+    "id": "trolleybus_10",
     "short_name": "10",
     "long_name": "вул. Інглезі — Пересипський міст",
-    "type": "tram",
+    "type": "trolleybus",
     "directions": {
       "0": {
         "firstStopId": "702487",
@@ -140,10 +140,10 @@
     }
   },
   {
-    "id": "trolleybus_15",
+    "id": "tram_15",
     "short_name": "15",
     "long_name": "станція Одеса-Товарна — Слобідський ринок",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798883",
@@ -160,10 +160,10 @@
     }
   },
   {
-    "id": "trolleybus_20",
+    "id": "tram_20",
     "short_name": "20",
     "long_name": "Херсонський сквер — Хаджибейський лиман",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "703520",
@@ -180,10 +180,10 @@
     }
   },
   {
-    "id": "trolleybus_1",
+    "id": "tram_1",
     "short_name": "1",
     "long_name": "Пересипський міст — завод Центроліт",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "703558",
@@ -200,10 +200,10 @@
     }
   },
   {
-    "id": "trolleybus_7",
+    "id": "tram_7",
     "short_name": "7",
     "long_name": "11-а станція Люстдорфської дороги — Таврія В",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798663",
@@ -220,10 +220,10 @@
     }
   },
   {
-    "id": "trolleybus_5",
+    "id": "tram_5",
     "short_name": "5",
     "long_name": "Автовокзал — Аркадія",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798899",
@@ -240,10 +240,10 @@
     }
   },
   {
-    "id": "trolleybus_6",
+    "id": "tram_6",
     "short_name": "6",
     "long_name": "Пересипський міст — Лузанівка",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "703558",
@@ -260,10 +260,10 @@
     }
   },
   {
-    "id": "trolleybus_10",
+    "id": "tram_10",
     "short_name": "10",
     "long_name": "вул. Іцкаха Рабіна — пл. Тираспольська",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798786",
@@ -280,10 +280,10 @@
     }
   },
   {
-    "id": "trolleybus_11",
+    "id": "tram_11",
     "short_name": "11",
     "long_name": "станція Одеса-Товарна — пл. Старосінна",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798883",
@@ -300,10 +300,10 @@
     }
   },
   {
-    "id": "trolleybus_12",
+    "id": "tram_12",
     "short_name": "12",
     "long_name": "Херсонський сквер — Слобідський ринок",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "703520",
@@ -320,10 +320,10 @@
     }
   },
   {
-    "id": "trolleybus_21",
+    "id": "tram_21",
     "short_name": "21",
     "long_name": "пл. Тираспольська — станція Застава ІІ",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798894",
@@ -340,10 +340,10 @@
     }
   },
   {
-    "id": "trolleybus_27",
+    "id": "tram_27",
     "short_name": "27",
     "long_name": "пл. Старосінна — Рибний порт",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "708889",
@@ -360,10 +360,10 @@
     }
   },
   {
-    "id": "trolleybus_28",
+    "id": "tram_28",
     "short_name": "28",
     "long_name": "вул. Пастера — Парк ім. Тараса Шевченка",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798744",
@@ -380,10 +380,10 @@
     }
   },
   {
-    "id": "trolleybus_26",
+    "id": "tram_26",
     "short_name": "26",
     "long_name": "пл. Старосінна — 11-а станція Люстдорфської дороги",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "708889",
@@ -400,10 +400,10 @@
     }
   },
   {
-    "id": "trolleybus_3",
+    "id": "tram_3",
     "short_name": "3",
     "long_name": "вул. Пастера — 11-а станція Люстдорфської дороги",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798744",
@@ -420,10 +420,10 @@
     }
   },
   {
-    "id": "trolleybus_13",
+    "id": "tram_13",
     "short_name": "13",
     "long_name": "пл. Старосінна — ж/м Шкільний",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "708889",
@@ -440,10 +440,10 @@
     }
   },
   {
-    "id": "trolleybus_17",
+    "id": "tram_17",
     "short_name": "17",
     "long_name": "11-а станція Великого Фонтану — Куликове поле",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "802153",
@@ -460,10 +460,10 @@
     }
   },
   {
-    "id": "trolleybus_18",
+    "id": "tram_18",
     "short_name": "18",
     "long_name": "Куликове поле — Меморіал 411-ї батареї",
-    "type": "trolleybus",
+    "type": "tram",
     "directions": {
       "0": {
         "firstStopId": "798880",

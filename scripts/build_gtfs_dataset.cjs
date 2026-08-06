@@ -135,6 +135,9 @@ uniqueRouteNumbers.forEach(numStr => {
 
   const primaryTerm = stationIds[0] || '';
   const secondaryTerm = stationIds[stationIds.length - 1] || '';
+  
+  const reverseStationIds = repReverseTrip ? stopTimesByTrip[repReverseTrip.trip_id].map(st => st.stop_id) : [];
+  const allStationIds = [...new Set([...stationIds, ...reverseStationIds])];
 
   const segments = [];
   for (let i = 0; i < stationIds.length - 1; i++) {
@@ -173,6 +176,7 @@ uniqueRouteNumbers.forEach(numStr => {
     lengthDir1Km: Number(lengthDir1.toFixed(2)),
     lengthDir2Km: Number(lengthDir2.toFixed(2)),
     stations: stationIds,
+    allStations: allStationIds,
     segments,
     activeVehiclesCount: {
       workday: 10,
