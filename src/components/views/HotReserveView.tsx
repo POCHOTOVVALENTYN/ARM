@@ -16,10 +16,49 @@ export const HotReserveView: React.FC = () => {
     regeneratedBooklets?: string[];
   } | null>(null);
 
-  const handleExecuteSwap = (e: React.FormEvent) => {
+  const handleExecuteSwap = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = executeHotReserveSwap(brokenDutyId, reserveDutyId, incidentTime);
-    setSwapResult(res);
+    setSwapResult(null);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/incidents/hot-reserve/activate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          reserve_vehicle_id: reserveDutyId,
+          target_trip_id: brokenDutyId,
+          reason: `Заміна по інциденту о ${incidentTime}`
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        setSwapResult({
+          success: false,
+          message: errorData.detail || 'Помилка транзакції'
+        });
+        return;
+      }
+
+      const data = await response.json();
+      setSwapResult({
+        success: true,
+        message: `Гарячий резерв активовано. Новий борт: ${data.new_vehicle_id}`,
+        regeneratedBooklets: [data.new_vehicle_id, brokenDutyId]
+      });
+      
+      // Якщо у нас є локальна функція для оновлення UI, можемо її викликати
+      if (executeHotReserveSwap) {
+          executeHotReserveSwap(brokenDutyId, reserveDutyId, incidentTime);
+      }
+    } catch (error) {
+      setSwapResult({
+        success: false,
+        message: 'Помилка з\'єднання з сервером'
+      });
+    }
   };
 
   return (

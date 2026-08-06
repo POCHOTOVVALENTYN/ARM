@@ -40,22 +40,40 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
                 ctx.stroke();
             }
 
+            // Визначення кольору за статусом
+            let shadowColor = 'rgba(25, 118, 210, 0.3)';
+            let coreColor = '#1976d2';
+            
+            if (vehicle.status === 'DELAYED') {
+                shadowColor = 'rgba(220, 53, 69, 0.3)';
+                coreColor = '#dc3545';
+            } else if (vehicle.status === 'MODIFIED_RESERVE' || vehicle.status === 'HOT_RESERVE') {
+                shadowColor = 'rgba(147, 51, 234, 0.3)'; // purple-600
+                coreColor = '#9333ea';
+            }
+
             // Відмальовування тіні/світіння
             ctx.beginPath();
             ctx.arc(x, y, finalRadius + 4, 0, 2 * Math.PI);
-            ctx.fillStyle = vehicle.status === 'DELAYED' 
-                ? 'rgba(220, 53, 69, 0.3)'   // Червоний для затримок
-                : 'rgba(25, 118, 210, 0.3)'; // Синій для норми
+            ctx.fillStyle = shadowColor;
             ctx.fill();
 
             // Відмальовування ядра вагона
             ctx.beginPath();
             ctx.arc(x, y, finalRadius, 0, 2 * Math.PI);
-            ctx.fillStyle = vehicle.status === 'DELAYED' ? '#dc3545' : '#1976d2';
+            ctx.fillStyle = coreColor;
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 2;
-            ctx.fill();
             ctx.stroke();
+            ctx.fill();
+
+            // Значок резерву (маленька блискавка або R)
+            if (vehicle.status === 'MODIFIED_RESERVE' || vehicle.status === 'HOT_RESERVE') {
+                ctx.font = 'bold 8px Inter, sans-serif';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText('R', x, y + 3);
+            }
 
             // Ідентифікатор борту (відмальовуємо текст прямо на Canvas)
             ctx.font = 'bold 10px Inter, sans-serif';

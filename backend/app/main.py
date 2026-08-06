@@ -29,7 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
-app.include_router(incidents_router, prefix="/api/v1/incidents", tags=["Incidents"])
+app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(ws_router) # <--- ДОДАНО 07.08.2026
 
 # Ендпоінт для перевірки поточного стану телеметрії (для тестування)

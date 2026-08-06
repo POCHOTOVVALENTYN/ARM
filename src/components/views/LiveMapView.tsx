@@ -315,15 +315,52 @@ export const LiveMapView: React.FC = () => {
 
           {selectedVehicle ? (
             <div className="space-y-3 font-mono text-xs">
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-1">
-                <span className="text-indigo-600 font-bold block text-[10px]">Бортовий номер:</span>
-                <strong className="text-indigo-950 text-sm">{selectedVehicle.vehicleNumber}</strong>
-              </div>
+              {(() => {
+                const vNum = selectedVehicle.vehicleNumber.split(' ')[0];
+                const telemetryEntry = Object.entries(telemetry).find(([id]) => id.includes(vNum));
+                const status = telemetryEntry ? telemetryEntry[1].status : null;
+                const isReserve = status === 'MODIFIED_RESERVE' || status === 'HOT_RESERVE';
+
+                return (
+                  <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-1">
+                    <span className="text-indigo-600 font-bold block text-[10px]">Бортовий номер:</span>
+                    <div className="flex items-center justify-between">
+                      <strong className="text-indigo-950 text-sm">{selectedVehicle.vehicleNumber}</strong>
+                      {isReserve && (
+                        <span className="bg-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded flex items-center space-x-1">
+                          <Zap className="w-3 h-3" />
+                          <span>РЕЗЕРВ</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="p-3 bg-gray-50 border border-gray-300 rounded-xl space-y-1">
                 <span className="text-gray-500 block text-[10px]">Прикріплений маршрут:</span>
                 <strong className="text-gray-900 text-sm">Маршрут №{selectedVehicle.routeId}</strong>
               </div>
+
+              {(() => {
+                const vNum = selectedVehicle.vehicleNumber.split(' ')[0];
+                const telemetryEntry = Object.entries(telemetry).find(([id]) => id.includes(vNum));
+                const speed = telemetryEntry ? telemetryEntry[1].speed : null;
+                
+                return (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 flex justify-between items-center">
+                    <div>
+                      <span className="text-blue-600 block text-[10px]">Поточна швидкість:</span>
+                      <strong className="text-blue-900 text-sm">
+                        {speed !== null ? `${speed} км/год` : 'Очікування даних...'}
+                      </strong>
+                    </div>
+                    {speed !== null && speed > 0 && (
+                      <Zap className="w-5 h-5 text-amber-500 animate-pulse" />
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="p-3 bg-gray-50 border border-gray-300 rounded-xl space-y-1">
                 <span className="text-gray-500 block text-[10px]">Вихід / Повернення депо:</span>

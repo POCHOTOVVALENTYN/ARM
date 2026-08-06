@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from datetime import datetime
 
 class Trip(BaseModel):
     id: str
@@ -38,3 +39,15 @@ class VehiclePosition(BaseModel):
     speed: float
     timestamp: float
     status: str  # 'ACTIVE', 'OFFLINE', 'ANOMALY'
+
+class HotReserveActivationRequest(BaseModel):
+    reserve_vehicle_id: str = Field(..., description="Ідентифікатор борту гарячого резерву")
+    target_trip_id: str = Field(..., description="Ідентифікатор рейсу, який потребує заміни")
+    incident_id: Optional[str] = Field(None, description="ID інциденту (якщо резерв викликано через ДТП/поламку)")
+    reason: str = Field(..., description="Причина введення резерву")
+
+class HotReserveActivationResponse(BaseModel):
+    status: str
+    trip_id: str
+    new_vehicle_id: str
+    activation_time: datetime
