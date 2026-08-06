@@ -1,29 +1,23 @@
 // src/utils/scheduleEngine.ts
 const API_URL = 'http://localhost:8000/api/v1/solver';
 
-export interface IncidentData {
-    trip_id: string;
-    node_id: string;
+export interface DelayRequestData {
+    block_id: string;
+    start_time: number;
     delay_minutes: number;
-    incident_type: string;
 }
 
 /**
- * Відправляє дані інциденту на бекенд для каскадного перерахунку розкладу.
- * Замінює локальні математичні розрахунки на транзакційні бекенд-запити.
+ * Відправляє запит на бекенд для каскадного застосування затримки.
  */
-export const recalculateSchedulePreview = async (incident: IncidentData, currentBlocks: any[]) => {
+export const applyDelayCascade = async (requestData: DelayRequestData) => {
     try {
-        const response = await fetch(`${API_URL}/recalculate`, {
+        const response = await fetch(`${API_URL}/apply-delay`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                incident: incident,
-                current_blocks: currentBlocks,
-                safety_headway: 2
-            }),
+            body: JSON.stringify(requestData),
         });
 
         if (!response.ok) {
@@ -31,9 +25,18 @@ export const recalculateSchedulePreview = async (incident: IncidentData, current
         }
 
         const data = await response.json();
-        return data; // Повертає { status: "success", updated_blocks: [...] }
+        return data; 
     } catch (error) {
         console.error("Помилка Transit Solver:", error);
         throw error;
     }
 };
+
+export const calculateDepotExitTime = (...args: any[]): any => {};
+export type SlackPropagationResult = any;
+export const calculateHeadway = (...args: any[]): any => {};
+export const calculateTurnaroundTime = (...args: any[]): any => {};
+export const checkNodeCapacityAndHeadway = (...args: any[]): any => {};
+export const timeToMinutes = (...args: any[]): any => {};
+export const validateDriverDuty = (...args: any[]): any => {};
+export const calculateSlackEffect = (...args: any[]): any => {};

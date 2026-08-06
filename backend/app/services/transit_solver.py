@@ -1,58 +1,57 @@
-from app.models.schemas import VehicleBlock, IncidentEvent, ShiftValidation
-from app.core.config import settings
-from typing import List, Dict
+# backend/app/services/transit_solver.py
+from typing import List, Dict, Any
 
 class TransitSolver:
-    @staticmethod
-    def recalculate_cascade(incident: IncidentEvent, blocks: List[VehicleBlock], safety_headway: int) -> Dict:
-        updated_blocks = []
+    def __init__(self):
+        # Константи для валідації (згідно з нормами)
+        self.MAX_DRIVING_MINUTES = 240  # 4 години безперервного керування
+        self.MIN_BREAK_MINUTES = 30     # Мінімальна тривалість обіду
+
+    def apply_delay_cascade(self, schedule_data: List[Dict[str, Any]], block_id: str, start_time_sec: int, delay_sec: int) -> tuple[List[Dict[str, Any]], List[str]]:
+        """
+        Каскадно застосовує затримку до всіх наступних рейсів вагона (block_id) 
+        і повертає оновлений розклад та список попереджень.
+        """
+        updated_schedule = []
+        warnings = []
         
-        for block in blocks:
-            updated_trips = []
-            cumulative_delay = 0
+        # 1. Каскадний зсув часу
+        for trip in schedule_data:
+            if trip.get("block_id") == block_id and trip.get("departure_time") >= start_time_sec:
+                # Зсуваємо час відправлення та прибуття
+                trip["departure_time"] += delay_sec
+                trip["arrival_time"] += delay_sec
+                trip["is_delayed"] = True
+            updated_schedule.append(trip)
 
-            for trip in block.trips:
-                # Фіксуємо затримку на рейсі, де сталася подія
-                if trip.id == incident.trip_id:
-                    cumulative_delay += incident.delay_minutes
-
-                # Каскадно зсуваємо цей та всі наступні рейси
-                if cumulative_delay > 0:
-                    trip.start_time += cumulative_delay
-                    trip.end_time += cumulative_delay
-                
-                updated_trips.append(trip)
-
-            block.trips = updated_trips
-            updated_blocks.append(block)
-
-        # TODO: Додати логіку порівняння часу прибуття на спільні вузли для запобігання "паровозності"
-        # з урахуванням safety_headway
+        # 2. Валідація обідніх перерв для зміненого блоку
+        block_trips = sorted(
+            [t for t in updated_schedule if t.get("block_id") == block_id], 
+            key=lambda x: x["departure_time"]
+        )
         
-        return {
-            "status": "success",
-            "updated_blocks": [block.dict() for block in updated_blocks]
-        }
-
-    @staticmethod
-    def validate_kzpp(shift_start: int, shift_end: int, break_start: int, vehicle_type: str, duty_id: str) -> ShiftValidation:
-        validation = ShiftValidation(duty_id=duty_id)
-        t_prep = settings.T_PREP_TRAM if vehicle_type == 'TRAM' else settings.T_PREP_TROLLEYBUS
+        continuous_driving_time = 0
         
-        shift_duration = shift_end - shift_start + t_prep
-        
-        # 1. Перевірка 10-годинного ліміту
-        if shift_duration > settings.MAX_SHIFT_MINUTES:
-            validation.is_valid = False
-            validation.errors.append(f"Перевищено 10-годинний ліміт: {shift_duration / 60:.1f} год.")
+        for i in range(len(block_trips) - 1):
+            current_trip = block_trips[i]
+            next_trip = block_trips[i+1]
+            
+            # Рахуємо час у дорозі
+            trip_duration = (current_trip["arrival_time"] - current_trip["departure_time"]) / 60
+            continuous_driving_time += trip_duration
+            
+            # Рахуємо час стоянки (перерви) між рейсами
+            break_duration = (next_trip["departure_time"] - current_trip["arrival_time"]) / 60
+            
+            if break_duration >= self.MIN_BREAK_MINUTES:
+                # Обід відбувся, скидаємо лічильник водіння
+                continuous_driving_time = 0
+            elif break_duration < 0:
+                warnings.append(f"КРИТИЧНО: Накладання рейсів для борту {block_id}.")
+            
+            if continuous_driving_time > self.MAX_DRIVING_MINUTES:
+                warnings.append(f"ПОРУШЕННЯ: Водій борту {block_id} перевищив ліміт керування ({int(continuous_driving_time)} хв без обіду).")
 
-        # 2. Перевірка вікна обіду (4-6 годин)
-        time_until_break = break_start - shift_start
-        if time_until_break < settings.MIN_BREAK_WINDOW_MINUTES:
-            validation.is_valid = False
-            validation.errors.append("Обід призначено раніше ніж через 4 години.")
-        elif time_until_break > settings.MAX_BREAK_WINDOW_MINUTES:
-            validation.is_valid = False
-            validation.errors.append("КРИТИЧНО: Обід змістився за межу 6 годин!")
+        return updated_schedule, warnings
 
-        return validation
+transit_solver = TransitSolver()

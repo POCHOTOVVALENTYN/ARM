@@ -11,6 +11,7 @@ export const useWebSocket = () => {
   // Додайте дію updateTelemetry у ваш useScheduleStore, якщо її ще немає
   const updateTelemetry = useScheduleStore(state => (state as any).updateTelemetry);
   const setLiveSchedule = useScheduleStore(state => (state as any).setLiveSchedule);
+  const setValidationWarnings = useScheduleStore(state => (state as any).setValidationWarnings);
 
   useEffect(() => {
     // Ініціалізація підключення
@@ -42,6 +43,13 @@ export const useWebSocket = () => {
           case 'INCIDENT_UPDATE':
             useIncidentStore.getState().setIncidents(data.payload);
             break;
+          case 'VALIDATION_WARNING': // <--- ДОДАНО ОБРОБНИК
+            if (setValidationWarnings) {
+                setValidationWarnings(data.payload);
+                // Тут також можна викликати Toast/Notification бібліотеку (напр. react-toastify)
+                data.payload.forEach((warning: string) => console.warn("УВАГА:", warning));
+            }
+            break;
           default:
             console.warn('Невідомий тип WebSocket повідомлення:', data.type);
         }
@@ -62,7 +70,7 @@ export const useWebSocket = () => {
     return () => {
       ws.close();
     };
-  }, [updateTelemetry, setLiveSchedule]);
+  }, [updateTelemetry, setLiveSchedule, setValidationWarnings]);
 
   return wsRef.current;
 };

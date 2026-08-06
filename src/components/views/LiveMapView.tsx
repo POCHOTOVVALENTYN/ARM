@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
-import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock } from 'lucide-react';
+import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock, AlertCircle } from 'lucide-react';
 import { useStationStore } from '../../store/useStationStore';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 
 export const LiveMapView: React.FC = () => {
   const stations = useStationStore(state => state.stations);
-  const { liveSchedule, telemetry } = useScheduleStore();
+  const { liveSchedule, telemetry, validationWarnings } = useScheduleStore();
   const liveBlocks = liveSchedule?.current_blocks || [];
   const [simTimeMin, setSimTimeMin] = useState<number>(450); // 07:30 default
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -136,6 +136,21 @@ export const LiveMapView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Validation Warnings */}
+      {validationWarnings && validationWarnings.length > 0 && (
+        <div className="bg-red-50 border-2 border-red-900 p-4 rounded-2xl shadow-[4px_4px_0px_0px_rgba(127,29,29,1)] space-y-2 brutalist-card">
+          <div className="flex items-center space-x-2 text-red-800 font-bold text-sm">
+            <AlertCircle className="w-5 h-5" />
+            <span>Системні попередження (Transit Solver)</span>
+          </div>
+          <ul className="list-disc pl-5 text-xs text-red-700 space-y-1 font-mono">
+            {validationWarnings.map((warning: string, idx: number) => (
+              <li key={idx}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Map Canvas Visual Area */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
