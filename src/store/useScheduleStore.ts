@@ -76,6 +76,30 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     telemetry: {},
     isProcessingTransaction: false,
     validationWarnings: [],
+    
+    // UI Navigation & Theme
+    currentPath: '/',
+    setPath: (path: string) => set({ currentPath: path }),
+    theme: 'system',
+    setTheme: (theme: string) => set({ theme }),
+
+    // Mock Data Defaults to prevent crashes
+    draftBlocks: [],
+    draftDuties: [],
+    liveBlocks: [],
+    liveDuties: [],
+    conflicts: [],
+    applySlackToNode: () => {},
+    
+    // History
+    redoStack: [],
+    historyStack: [],
+    isDraftModified: false,
+
+    // User Context
+    user: { name: 'Головний Диспетчер' },
+    userRole: 'DISPATCHER',
+    setUserRole: (role: string) => set({ userRole: role }),
 
     setValidationWarnings: (warnings) => set({ validationWarnings: warnings }),
 

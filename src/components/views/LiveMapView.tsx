@@ -7,12 +7,23 @@ import { LiveVehicleCanvas } from './LiveVehicleCanvas';
 
 export const LiveMapView: React.FC = () => {
   const stations = useStationStore(state => state.stations);
-  const { liveSchedule, telemetry, validationWarnings } = useScheduleStore();
+  const { liveSchedule, validationWarnings } = useScheduleStore();
+  
   const liveBlocks = liveSchedule?.current_blocks || [];
   const [simTimeMin, setSimTimeMin] = useState<number>(450); // 07:30 default
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
+
+  // Підписуємося ТІЛЬКИ на телеметрію вибраного вагона (zero-diff updates), 
+  // щоб не ре-рендерити весь компонент при русі інших вагонів
+  const selectedVehicleTelemetry = useScheduleStore(state => {
+    if (!selectedVehicle) return null;
+    const vNum = selectedVehicle.vehicleNumber?.split(' ')[0];
+    const telemetryObj = state.telemetry || {};
+    const key = Object.keys(telemetryObj).find(id => id.includes(vNum));
+    return key ? telemetryObj[key] : null;
+  });
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [mapDimensions, setMapDimensions] = useState({ width: 0, height: 0 });
@@ -72,8 +83,9 @@ export const LiveMapView: React.FC = () => {
     const clickY = e.clientY - rect.top;
 
     let clickedBlock: any = null;
+    const currentTelemetry = useScheduleStore.getState().telemetry || {};
 
-    Object.entries(telemetry).forEach(([id, vehicle]) => {
+    Object.entries(currentTelemetry).forEach(([id, vehicle]: [string, any]) => {
       const { x, y } = projectPoint(vehicle.lat, vehicle.lon);
       const dx = clickX - x;
       const dy = clickY - y;
@@ -316,9 +328,7 @@ export const LiveMapView: React.FC = () => {
           {selectedVehicle ? (
             <div className="space-y-3 font-mono text-xs">
               {(() => {
-                const vNum = selectedVehicle.vehicleNumber.split(' ')[0];
-                const telemetryEntry = Object.entries(telemetry).find(([id]) => id.includes(vNum));
-                const status = telemetryEntry ? telemetryEntry[1].status : null;
+                const status = selectedVehicleTelemetry ? selectedVehicleTelemetry.status : null;
                 const isReserve = status === 'MODIFIED_RESERVE' || status === 'HOT_RESERVE';
 
                 return (
@@ -343,9 +353,7 @@ export const LiveMapView: React.FC = () => {
               </div>
 
               {(() => {
-                const vNum = selectedVehicle.vehicleNumber.split(' ')[0];
-                const telemetryEntry = Object.entries(telemetry).find(([id]) => id.includes(vNum));
-                const speed = telemetryEntry ? telemetryEntry[1].speed : null;
+                const speed = selectedVehicleTelemetry ? selectedVehicleTelemetry.speed : null;
                 
                 return (
                   <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 flex justify-between items-center">

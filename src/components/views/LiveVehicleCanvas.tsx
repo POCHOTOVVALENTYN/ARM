@@ -11,12 +11,11 @@ interface LiveVehicleCanvasProps {
 }
 
 export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, height, projectPoint, selectedVehicleId }) => {
-    // Отримуємо актуальну телеметрію безпосередньо зі store (Single Source of Truth)
-    const telemetry = useScheduleStore(state => state.telemetry);
-
     // Логіка відмальовування, яка передається в конвеєр
     const draw = useCallback((ctx: CanvasRenderingContext2D, frameCount: number) => {
-        const vehicles = Object.entries(telemetry).map(([id, data]) => ({ id, ...data }));
+        // Отримуємо актуальну телеметрію безпосередньо зі store без підписки на рендеринг
+        const telemetry = useScheduleStore.getState().telemetry || {};
+        const vehicles = Object.entries(telemetry).map(([id, data]) => ({ id, ...(data as any) }));
 
         vehicles.forEach(vehicle => {
             const { x, y } = projectPoint(vehicle.lat, vehicle.lon);
@@ -81,7 +80,7 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
             ctx.textAlign = 'center';
             ctx.fillText(vehicle.id || '', x, y - 12);
         });
-    }, [telemetry, projectPoint, selectedVehicleId]);
+    }, [projectPoint, selectedVehicleId]);
 
     const canvasRef = useCanvasAutomation(draw);
 

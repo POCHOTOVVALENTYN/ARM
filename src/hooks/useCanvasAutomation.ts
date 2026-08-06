@@ -4,6 +4,12 @@ type DrawFunction = (ctx: CanvasRenderingContext2D, frameCount: number) => void;
 
 export const useCanvasAutomation = (draw: DrawFunction) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const drawRef = useRef(draw);
+
+    // Зберігаємо найновішу версію draw без ре-ініціалізації Canvas
+    useEffect(() => {
+        drawRef.current = draw;
+    }, [draw]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -30,7 +36,8 @@ export const useCanvasAutomation = (draw: DrawFunction) => {
             frameCount++;
             // Очищення фрейму перед новим відмальовуванням
             context.clearRect(0, 0, canvas.width, canvas.height);
-            draw(context, frameCount);
+            // Використовуємо актуальний колбек з Ref
+            drawRef.current(context, frameCount);
             animationFrameId = window.requestAnimationFrame(render);
         };
 
@@ -44,7 +51,7 @@ export const useCanvasAutomation = (draw: DrawFunction) => {
             window.cancelAnimationFrame(animationFrameId);
             window.removeEventListener('resize', setupCanvas);
         };
-    }, [draw]);
+    }, []); // Порожній масив залежностей гарантує, що ініціалізація та слухачі подій встановлюються лише раз
 
     return canvasRef;
 };
