@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock } from 'lucide-react';
 import { useStationStore } from '../../store/useStationStore';
+import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 
 export const LiveMapView: React.FC = () => {
   const stations = useStationStore(state => state.stations);
-  const { liveBlocks } = useScheduleStore();
+  const { liveSchedule, telemetry } = useScheduleStore();
+  const liveBlocks = liveSchedule?.current_blocks || [];
   const [simTimeMin, setSimTimeMin] = useState<number>(450); // 07:30 default
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
@@ -243,10 +245,11 @@ export const LiveMapView: React.FC = () => {
           </div>
         </div>
 
-        {/* Selected Vehicle Info Card */}
-        <div className="brutalist-card bg-white p-5 rounded-2xl space-y-4 lg:col-span-1">
-          <h3 className="font-bold text-sm text-gray-900 border-b pb-2 flex items-center space-x-2">
-            <Bus className="w-4 h-4 text-indigo-600" />
+        <div className="flex flex-col space-y-6 lg:col-span-1">
+          {/* Selected Vehicle Info Card */}
+          <div className="brutalist-card bg-white p-5 rounded-2xl space-y-4">
+            <h3 className="font-bold text-sm text-gray-900 border-b pb-2 flex items-center space-x-2">
+              <Bus className="w-4 h-4 text-indigo-600" />
             <span>Інформація про ТЗ</span>
           </h3>
 
@@ -280,6 +283,9 @@ export const LiveMapView: React.FC = () => {
               <p>Натисніть на маркер ТЗ на карті, щоб отримати телеметрію та дані наряду.</p>
             </div>
           )}
+          </div>
+
+          <IncidentDirectory />
         </div>
       </div>
     </div>

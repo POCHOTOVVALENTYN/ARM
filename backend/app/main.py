@@ -5,6 +5,7 @@ import asyncio
 
 from app.api.routes import router as solver_router
 from app.api.websocket import router as ws_router # <--- ДОДАНО 07.08.2026
+from app.api.incidents import router as incidents_router
 from app.services.telemetry_worker import telemetry_service
 from app.api.websocket import manager as ws_manager # <--- ДОДАНО 07.08.2026
 
@@ -12,7 +13,7 @@ from app.api.websocket import manager as ws_manager # <--- ДОДАНО 07.08.20
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Запускаємо воркер Wialon у фоновому режимі при старті сервера
-    polling_task = asyncio.create_task(telemetry_service.polling_loop())
+    polling_task = asyncio.create_task(telemetry_service.polling_loop(ws_manager))
     yield
     # При вимкненні сервера скасовуємо завдання
     polling_task.cancel()
@@ -28,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
+app.include_router(incidents_router, prefix="/api/v1/incidents", tags=["Incidents"])
 app.include_router(ws_router) # <--- ДОДАНО 07.08.2026
 
 # Ендпоінт для перевірки поточного стану телеметрії (для тестування)

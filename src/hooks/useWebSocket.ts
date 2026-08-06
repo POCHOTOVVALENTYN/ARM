@@ -1,6 +1,7 @@
 // src/hooks/useWebSocket.ts
 import { useEffect, useRef } from 'react';
 import { useScheduleStore } from '../store/useScheduleStore';
+import { useIncidentStore } from '../store/useIncidentStore';
 
 const WS_URL = 'ws://localhost:8000/ws';
 
@@ -37,6 +38,9 @@ export const useWebSocket = () => {
             if (setLiveSchedule) {
                  setLiveSchedule(data.payload);
             }
+            break;
+          case 'INCIDENT_UPDATE':
+            useIncidentStore.getState().setIncidents(data.payload);
             break;
           default:
             console.warn('Невідомий тип WebSocket повідомлення:', data.type);
