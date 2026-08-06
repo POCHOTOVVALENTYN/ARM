@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Route, VehicleBlock, DriverDuty, ScheduleConflict } from '../../types';
-import { MareyDiagram } from '../dispatcher/MareyDiagram';
 import { GanttChart } from '../dispatcher/GanttChart';
 import { SlackManager } from '../dispatcher/SlackManager';
 import { AlertTriangle, CheckCircle, ChevronDown, Clock, Play, Radio, ShieldAlert } from 'lucide-react';
@@ -25,7 +24,6 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
   onReserveVehicle = () => {}
 }) => {
   const [selectedRouteId, setSelectedRouteId] = useState<string>(routes[0]?.id || '');
-  const [activeView, setActiveView] = useState<'marey' | 'gantt'>('marey');
 
   const selectedRoute = routes.find((r) => r.id === selectedRouteId) || routes[0];
   const routeBlocks = blocks.filter((b) => b.routeId === selectedRouteId);
@@ -69,29 +67,6 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
             </div>
           </div>
 
-          {/* View Switcher */}
-          <div className="flex bg-blue-50/60 p-1.5 rounded-xl border border-blue-200 shrink-0 gap-1">
-            <button
-              onClick={() => setActiveView('marey')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeView === 'marey'
-                  ? 'bg-white text-blue-700 border border-blue-300 shadow-xs font-extrabold'
-                  : 'text-slate-600 hover:text-blue-900 hover:bg-white/60'
-              }`}
-            >
-              Графік Марея
-            </button>
-            <button
-              onClick={() => setActiveView('gantt')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeView === 'gantt'
-                  ? 'bg-white text-blue-700 border border-blue-300 shadow-xs font-extrabold'
-                  : 'text-slate-600 hover:text-blue-900 hover:bg-white/60'
-              }`}
-            >
-              Графік Ганта
-            </button>
-          </div>
         </div>
       </div>
 
@@ -119,15 +94,7 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
       )}
 
       {/* Main Diagram View */}
-      {activeView === 'marey' ? (
-        <MareyDiagram
-          route={selectedRoute}
-          blocks={routeBlocks}
-          conflicts={conflicts}
-        />
-      ) : (
-        <GanttChart duties={duties} />
-      )}
+      <GanttChart duties={duties} />
 
       {/* Slack Manager Widget */}
       <SlackManager

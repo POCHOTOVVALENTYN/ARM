@@ -12,6 +12,7 @@ import { ValidatorView } from './components/views/ValidatorView';
 import { LiveMapView } from './components/views/LiveMapView';
 import { SimulationMapView } from './components/views/SimulationMapView';
 import { OperationalScheduleGenerator } from './components/views/OperationalScheduleGenerator';
+import { MareyDiagramTab } from './components/tabs/MareyDiagramTab';
 import { CrewRosterTab } from './components/tabs/CrewRosterTab';
 import { CrewAssignmentView } from './components/views/CrewAssignmentView';
 import { HotReserveView } from './components/views/HotReserveView';
@@ -69,8 +70,9 @@ export default function App() {
         {currentPath === '/login' && <AuthLoginView />}
 
         {/* Dispatcher Views */}
-        {(currentPath === '/dispatch/marey' ||
-          currentPath === '/dispatch/gantt' ||
+        {currentPath === '/dispatch/marey' && <MareyDiagramTab />}
+
+        {(currentPath === '/dispatch/gantt' ||
           currentPath === '/dispatch/slack') && (
           <DispatcherTab
             routes={routes}

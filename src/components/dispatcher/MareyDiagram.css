@@ -1,0 +1,34 @@
+/* src/components/dispatcher/MareyDiagram.css */
+.marey-diagram-container {
+    width: 100%;
+    overflow-x: auto;
+    background-color: var(--bg-color, #ffffff);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.axis text {
+    font-family: inherit;
+}
+
+.axis path,
+.axis line {
+    stroke: var(--grid-line-color, #e0e0e0);
+}
+
+.trip-line {
+    transition: opacity 0.3s ease, stroke-width 0.3s ease;
+}
+
+.trip-line:hover {
+    stroke-width: 4;
+    opacity: 1;
+}
+
+.trip-point {
+    transition: r 0.3s ease;
+}
+
+.trip-point:hover {
+    r: 6;
+}
