@@ -15,7 +15,7 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
     const draw = useCallback((ctx: CanvasRenderingContext2D, frameCount: number) => {
         // Отримуємо актуальну телеметрію безпосередньо зі store без підписки на рендеринг
         const telemetry = useScheduleStore.getState().telemetry || {};
-        const vehicles = Object.entries(telemetry).map(([id, data]) => ({ id, ...(data as any) }));
+        const vehicles = Object.values(telemetry).map((v: any) => ({ ...v, id: v.id || v.vehicle_id }));
 
         vehicles.forEach(vehicle => {
             const { x, y } = projectPoint(vehicle.lat, vehicle.lon);

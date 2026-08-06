@@ -43,9 +43,9 @@ export const TripGridView: React.FC = () => {
 
   const filteredTrips = allTrips.filter(
     (t: any) =>
-      t.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.route_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.blockId.toLowerCase().includes(searchTerm.toLowerCase())
+      String(t.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(t.route_id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(t.blockId || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleStartEdit = (tripId: string, currentDepTimeMin: number) => {

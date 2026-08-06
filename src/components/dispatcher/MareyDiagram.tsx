@@ -68,15 +68,15 @@ export const MareyDiagram: React.FC<MareyDiagramProps> = ({
         return { xScale, yScale, lineGenerator };
     }, [stops, trips, innerWidth, innerHeight]);
 
-    // Делегуємо D3 малювання осей (складна логіка тіків та форматування часу)
     useEffect(() => {
         if (xAxisRef.current) {
             const xAxis = d3.axisBottom(xScale)
                 .ticks(d3.timeMinute.every(15))
                 .tickFormat((d) => d3.timeFormat("%H:%M")(d as Date));
             
-            d3.select(xAxisRef.current)
-                .call(xAxis)
+            const g = d3.select(xAxisRef.current);
+            g.selectAll("*").remove(); // Очищення попереднього рендеру
+            g.call(xAxis)
                 .selectAll("text")
                 .style("font-size", "12px")
                 .style("fill", "var(--text-primary)");
@@ -90,8 +90,9 @@ export const MareyDiagram: React.FC<MareyDiagramProps> = ({
                     return stop ? stop.name : '';
                 });
 
-            d3.select(yAxisRef.current)
-                .call(yAxis)
+            const g = d3.select(yAxisRef.current);
+            g.selectAll("*").remove(); // Очищення попереднього рендеру
+            g.call(yAxis)
                 .selectAll("text")
                 .style("font-size", "12px")
                 .style("fill", "var(--text-primary)");

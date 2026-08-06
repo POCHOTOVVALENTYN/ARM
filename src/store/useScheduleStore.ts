@@ -89,6 +89,10 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     liveBlocks: [],
     liveDuties: [],
     conflicts: [],
+    deploymentPlans: [],
+    updateDeploymentPlan: (plan: any) => set((state: any) => ({
+        deploymentPlans: [...state.deploymentPlans.filter((p: any) => p.id !== plan.id), plan]
+    })),
     applySlackToNode: () => {},
     
     // History
