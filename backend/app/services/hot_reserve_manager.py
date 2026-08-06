@@ -1,9 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from fastapi import HTTPException, status
 from app.models.models import Vehicle, Trip, IncidentLog # Припускаємо наявність ORM-моделей
 from app.models.schemas import HotReserveActivationRequest
 from datetime import datetime, timezone
+from app.api.websocket import manager  # Імпорт для розсилки івентів WebSocket
 
 async def activate_hot_reserve_tx(db: AsyncSession, payload: HotReserveActivationRequest):
     """
@@ -19,7 +21,7 @@ async def activate_hot_reserve_tx(db: AsyncSession, payload: HotReserveActivatio
         try:
             result = await db.execute(stmt_vehicle)
             vehicle = result.scalar_one_or_none()
-        except Exception:
+        except OperationalError:
             # Обробка помилки блокування, якщо інша транзакція вже тримає лок
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -36,9 +38,15 @@ async def activate_hot_reserve_tx(db: AsyncSession, payload: HotReserveActivatio
             )
 
         # 3. Блокування цільового рейсу
-        stmt_trip = select(Trip).where(Trip.id == payload.target_trip_id).with_for_update()
-        result_trip = await db.execute(stmt_trip)
-        trip = result_trip.scalar_one_or_none()
+        stmt_trip = select(Trip).where(Trip.id == payload.target_trip_id).with_for_update(nowait=True)
+        try:
+            result_trip = await db.execute(stmt_trip)
+            trip = result_trip.scalar_one_or_none()
+        except OperationalError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Рейс вже редагується іншим диспетчером."
+            )
 
         if not trip:
             raise HTTPException(status_code=404, detail="Цільовий рейс не знайдено.")
@@ -67,6 +75,17 @@ async def activate_hot_reserve_tx(db: AsyncSession, payload: HotReserveActivatio
         db.add(audit_log)
 
         # Комміт відбувається автоматично при виході з блоку async with db.begin()
+
+    # Після виходу з async with db.begin() транзакція успішно закоммічена.
+    # Транслюємо подію зміну статусу всім клієнтам по WebSocket
+    await manager.broadcast({
+        "type": "VEHICLE_STATUS_CHANGED",
+        "payload": {
+            "vehicle_id": vehicle.id,
+            "status": vehicle.status,
+            "trip_id": trip.id
+        }
+    })
 
     return {
         "status": "success",

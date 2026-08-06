@@ -15,9 +15,12 @@ from app.api.websocket import manager as ws_manager # <--- ДОДАНО 07.08.20
 async def lifespan(app: FastAPI):
     # Запускаємо воркер Wialon у фоновому режимі при старті сервера
     polling_task = asyncio.create_task(telemetry_service.polling_loop(ws_manager))
+    # Запускаємо слухача Redis для WebSocket
+    redis_task = asyncio.create_task(ws_manager.listen_to_redis())
     yield
     # При вимкненні сервера скасовуємо завдання
     polling_task.cancel()
+    redis_task.cancel()
 
 app = FastAPI(title="OMET Transit Solver API", version="1.0.0", lifespan=lifespan)
 
