@@ -20,6 +20,7 @@ import { EmergencyDetoursTab } from './components/tabs/EmergencyDetoursTab';
 import { GtfsIntegrationTab } from './components/tabs/GtfsIntegrationTab';
 import { AlgorithmSimulatorTab } from './components/tabs/AlgorithmSimulatorTab';
 import { StaticDutiesArchiveView } from './components/views/StaticDutiesArchiveView';
+import { SmartWaybillView } from './components/views/SmartWaybillView';
 import { useScheduleStore } from './store/useScheduleStore';
 import { useRouteStore } from './store/useRouteStore';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -47,6 +48,12 @@ export default function App() {
   const handleReserveVehicle = () => {
     setPath('/dispatch/hot-reserve');
   };
+
+  // If path is a driver view, render it directly without standard layout
+  if (currentPath.startsWith('/driver/')) {
+    const vehicleId = currentPath.split('/')[2];
+    return <SmartWaybillView vehicleId={vehicleId || '0000'} />;
+  }
 
   return (
     <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased selection:bg-indigo-200 selection:text-indigo-900 transition-colors duration-200">

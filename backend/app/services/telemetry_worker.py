@@ -12,6 +12,8 @@ class TelemetryService:
         # In-memory кеш для зберігання останніх валідних позицій
         # В майбутньому можна замінити на Redis
         self.active_vehicles: Dict[str, VehiclePosition] = {}
+        # Трекінг перебування вагона у депо
+        self.vehicle_in_depot: Dict[str, bool] = {}
 
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Обчислює відстань між двома GPS-координатами у кілометрах."""
@@ -51,6 +53,43 @@ class TelemetryService:
         for vid, pos in self.active_vehicles.items():
             if current_time - pos.timestamp > settings.OFFLINE_TIMEOUT_SEC:
                 pos.status = 'OFFLINE'
+
+    def _is_in_depot(self, lat: float, lon: float) -> bool:
+        """Перевіряє чи знаходяться координати всередині контрольних зон депо."""
+        dist_to_exit = self._haversine_distance(lat, lon, settings.DEPOT_EXIT_LAT, settings.DEPOT_EXIT_LON)
+        dist_to_entry = self._haversine_distance(lat, lon, settings.DEPOT_ENTRY_LAT, settings.DEPOT_ENTRY_LON)
+        
+        return dist_to_exit <= settings.DEPOT_RADIUS_KM or dist_to_entry <= settings.DEPOT_RADIUS_KM
+
+    def _check_geofence_crossings(self, vehicle_id: str, new_lat: float, new_lon: float, ws_manager) -> None:
+        """Визначає перетин воріт депо і фіксує виїзд/заїзд."""
+        currently_in_depot = self._is_in_depot(new_lat, new_lon)
+        was_in_depot = self.vehicle_in_depot.get(vehicle_id)
+
+        # Ініціалізація початкового стану
+        if was_in_depot is None:
+            self.vehicle_in_depot[vehicle_id] = currently_in_depot
+            return
+
+        if was_in_depot and not currently_in_depot:
+            # Вагон виїхав з депо
+            print(f"[DISPATCH] Вагон {vehicle_id} ВИЇХАВ з депо (перетнув геозону).")
+            # TODO: Зберегти подію виїзду у БД та оновити статус зміни
+            # Відправимо подію через WebSocket для логування диспетчеру
+            asyncio.create_task(ws_manager.broadcast({
+                "type": "GEOFENCE_EVENT",
+                "payload": {"vehicle_id": vehicle_id, "event": "DISPATCHED"}
+            }))
+
+        elif not was_in_depot and currently_in_depot:
+            # Вагон заїхав у депо
+            print(f"[DISPATCH] Вагон {vehicle_id} ЗАЇХАВ у депо.")
+            asyncio.create_task(ws_manager.broadcast({
+                "type": "GEOFENCE_EVENT",
+                "payload": {"vehicle_id": vehicle_id, "event": "RETURNED"}
+            }))
+
+        self.vehicle_in_depot[vehicle_id] = currently_in_depot
 
     async def fetch_wialon_data(self, session: aiohttp.ClientSession):
         """Імітація запиту до Wialon API. Тут має бути реальний виклик `core/search_items`."""
@@ -100,6 +139,10 @@ class TelemetryService:
 
                     # Перевірка на таймаути (втрата зв'язку)
                     self._check_offline_timeouts(current_time)
+
+                    # Перевірка геозон виїзду/заїзду
+                    for vid, pos in self.active_vehicles.items():
+                        self._check_geofence_crossings(vid, pos.lat, pos.lon, ws_manager)
 
                     # ---> ВІДПРАВКА ДАНИХ ЧЕРЕЗ WEBSOCKET <---
                     # Конвертуємо об'єкти VehiclePosition в словники

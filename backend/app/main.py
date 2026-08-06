@@ -6,6 +6,7 @@ import asyncio
 from app.api.routes import router as solver_router
 from app.api.websocket import router as ws_router # <--- ДОДАНО 07.08.2026
 from app.api.incidents import router as incidents_router
+from app.api.blocks import router as blocks_router # <--- ДОДАНО 07.08.2026
 from app.services.telemetry_worker import telemetry_service
 from app.api.websocket import manager as ws_manager # <--- ДОДАНО 07.08.2026
 
@@ -30,6 +31,7 @@ app.add_middleware(
 
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
 app.include_router(incidents_router, prefix="/api/v1")
+app.include_router(blocks_router, prefix="/api/v1")
 app.include_router(ws_router) # <--- ДОДАНО 07.08.2026
 
 # Ендпоінт для перевірки поточного стану телеметрії (для тестування)

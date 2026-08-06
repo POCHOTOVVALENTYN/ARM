@@ -14,4 +14,12 @@ class Settings:
     # Anti-EW (Анти-РЕБ) Settings
     MAX_VALID_SPEED_KMH: float = 100.0  # Максимальна фізично можлива швидкість трамвая/тролейбуса
     OFFLINE_TIMEOUT_SEC: int = 180  # 3 хвилини без валідних даних = статус OFFLINE
+
+    # Geofence Settings (Депо 1)
+    DEPOT_EXIT_LAT: float = 46.467810
+    DEPOT_EXIT_LON: float = 30.733415
+    DEPOT_ENTRY_LAT: float = 46.467022
+    DEPOT_ENTRY_LON: float = 30.736664
+    DEPOT_RADIUS_KM: float = 0.05  # 50 метрів радіус для воріт
+
 settings = Settings()

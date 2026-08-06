@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { useScheduleStore } from '../store/useScheduleStore';
 import { useIncidentStore } from '../store/useIncidentStore';
+import { useDriverStore } from '../store/useDriverStore';
 
 const WS_URL = 'ws://localhost:8000/ws';
 
@@ -20,6 +21,7 @@ export const useWebSocket = () => {
 
     ws.onopen = () => {
       console.log('WebSocket Connected');
+      useDriverStore.getState().setConnectionStatus('CONNECTED');
     };
 
     ws.onmessage = (event) => {
@@ -50,6 +52,22 @@ export const useWebSocket = () => {
                 data.payload.forEach((warning: string) => console.warn("УВАГА:", warning));
             }
             break;
+          case 'GEOFENCE_EVENT':
+            const { vehicle_id, event: geoEvent } = data.payload;
+            if (geoEvent === 'DISPATCHED') {
+                console.log(`🚀 [ГЕОЗОНА] Вагон ${vehicle_id} ВИЇХАВ з депо на лінію!`);
+                // В майбутньому: показати toast notification диспетчеру
+            } else if (geoEvent === 'RETURNED') {
+                console.log(`🏠 [ГЕОЗОНА] Вагон ${vehicle_id} ПОВЕРНУВСЯ у депо!`);
+            }
+            break;
+          case 'WAYBILL_UPDATE':
+            const updatedVehicleId = data.payload.vehicle_id;
+            const currentBlock = useDriverStore.getState().currentBlock;
+            if (updatedVehicleId && currentBlock && currentBlock.block_id.includes(updatedVehicleId)) {
+                useDriverStore.getState().fetchBlock(updatedVehicleId);
+            }
+            break;
           default:
             console.warn('Невідомий тип WebSocket повідомлення:', data.type);
         }
@@ -60,6 +78,7 @@ export const useWebSocket = () => {
 
     ws.onclose = () => {
       console.log('WebSocket Disconnected. Reconnecting in 5s...');
+      useDriverStore.getState().setConnectionStatus('OFFLINE');
       // Проста логіка перепідключення
       setTimeout(() => {
           // Тут можна викликати функцію реініціалізації, якщо потрібно
