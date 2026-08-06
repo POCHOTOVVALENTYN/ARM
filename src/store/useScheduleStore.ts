@@ -110,7 +110,44 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     updateTelemetry: (data) => set({ telemetry: data }),
 
     // Використовується для блокування UI під час запитів до бекенду
-    setIsProcessingTransaction: (status) => set({ isProcessingTransaction: status })
+    setIsProcessingTransaction: (status) => set({ isProcessingTransaction: status }),
+    
+    loadDefaultMockData: async () => {
+        set({ isProcessingTransaction: true });
+        try {
+            const response = await fetch('http://localhost:8000/api/v1/solver/schedule');
+            if (response.ok) {
+                const data = await response.json();
+                set({ liveSchedule: { current_blocks: data } });
+            }
+        } catch (error) {
+            console.error("Error loading mock data:", error);
+        } finally {
+            set({ isProcessingTransaction: false });
+        }
+    },
+
+    updateTripDeparture: async (blockId: string, tripId: string, startTime: number, delayMinutes: number) => {
+        set({ isProcessingTransaction: true });
+        try {
+            const response = await fetch('http://localhost:8000/api/v1/solver/apply-delay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    block_id: blockId,
+                    start_time: startTime,
+                    delay_minutes: delayMinutes
+                })
+            });
+            if (!response.ok) {
+                console.error("Failed to apply delay");
+            }
+        } catch (error) {
+            console.error("Error applying delay:", error);
+        } finally {
+            set({ isProcessingTransaction: false });
+        }
+    }
 }));
 
 export default useScheduleStore;
