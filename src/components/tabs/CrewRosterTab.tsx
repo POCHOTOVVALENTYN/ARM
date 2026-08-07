@@ -53,7 +53,7 @@ export const CrewRosterTab: React.FC<CrewRosterTabProps> = ({ duties = [] }) => 
             <tbody className="divide-y divide-slate-800 font-mono">
               {duties.map((duty) => {
                 const validation = validateDriverDuty(duty);
-                const shiftHours = (validation.shiftDurationMin / 60).toFixed(1);
+                const shiftHours = (validation.totalShiftMin / 60).toFixed(1);
 
                 return (
                   <tr key={duty.id} className="hover:bg-slate-900/40">
@@ -68,7 +68,7 @@ export const CrewRosterTab: React.FC<CrewRosterTabProps> = ({ duties = [] }) => 
                       </span>
                     </td>
                     <td className="p-3 text-sky-300 font-bold">{duty.shiftStartTime} — {duty.shiftEndTime}</td>
-                    <td className="p-3 text-amber-300 font-bold">{shiftHours} год ({validation.shiftDurationMin} хв)</td>
+                    <td className="p-3 text-amber-300 font-bold">{shiftHours} год ({validation.totalShiftMin} хв)</td>
                     <td className="p-3 font-sans">
                       {duty.lunchStartTime ? (
                         <span className="text-purple-300 font-bold">{duty.lunchStartTime} ({duty.lunchDurationMin} хв)</span>
@@ -77,7 +77,7 @@ export const CrewRosterTab: React.FC<CrewRosterTabProps> = ({ duties = [] }) => 
                       )}
                     </td>
                     <td className="p-3 font-sans">
-                      {validation.isShiftValid && validation.isLunchValid ? (
+                      {!validation.isViolating10hLimit && validation.isLunchCompliant ? (
                         <span className="text-emerald-400 font-semibold flex items-center space-x-1">
                           <CheckCircle className="w-3.5 h-3.5" />
                           <span>Відповідає нормам</span>

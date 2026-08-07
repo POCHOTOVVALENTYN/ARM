@@ -21,7 +21,7 @@ export const SlackManager: React.FC<SlackManagerProps> = ({
   const [slackValue, setSlackValue] = useState<number>(4);
   const [plannedTurnaround, setPlannedTurnaround] = useState<number>(68); // mins
   const [result, setResult] = useState<SlackPropagationResult>(
-    calculateSlackEffect(4, 68, 2, 480)
+    calculateSlackEffect(4, 68)
   );
 
   useEffect(() => {
@@ -32,12 +32,12 @@ export const SlackManager: React.FC<SlackManagerProps> = ({
 
   const handleSlackChange = (val: number) => {
     setSlackValue(val);
-    setResult(calculateSlackEffect(val, plannedTurnaround, 2, 480)); // 2 min reserve, 480 shift limit
+    setResult(calculateSlackEffect(val, plannedTurnaround)); // 2 min reserve, 480 shift limit
   };
 
   const handleTurnaroundChange = (val: number) => {
     setPlannedTurnaround(val);
-    setResult(calculateSlackEffect(slackValue, val, 2, 480));
+    setResult(calculateSlackEffect(slackValue, val));
   };
 
   return (

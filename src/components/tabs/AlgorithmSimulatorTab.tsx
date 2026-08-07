@@ -18,10 +18,22 @@ export const AlgorithmSimulatorTab: React.FC = () => {
   const [prepTimeMin, setPrepTimeMin] = useState<number>(10); // 10 tram, 19 trolley
 
   // Calculations
-  const turnaround = calculateTurnaroundTime(tDir1, tDir2, tDisp, trafficCoeff);
-  const headwayBase = calculateHeadway(turnaround.tRevBase, vehicleCount);
-  const headwayDynamic = calculateHeadway(turnaround.tRevDynamic, vehicleCount);
-  const depotExitTime = calculateDepotExitTime(firstTripStart, zeroRunMin, prepTimeMin);
+  const tRevBase = tDir1 + tDir2 + tDisp;
+  const tRevDynamic = Math.ceil((tDir1 + tDir2) * trafficCoeff) + tDisp;
+  const headwayBase = (tRevBase / vehicleCount).toFixed(1);
+  const headwayDynamic = (tRevDynamic / vehicleCount).toFixed(1);
+  
+  // Calculate depot exit time manually since scheduleEngine was modified
+  const timeToMinutes = (timeStr: string) => {
+    const parts = timeStr.split(':');
+    return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+  };
+  const minutesToTime = (mins: number) => {
+    const m = (mins % 1440 + 1440) % 1440;
+    return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
+  };
+  
+  const depotExitTime = minutesToTime(timeToMinutes(firstTripStart) - zeroRunMin - prepTimeMin);
 
   return (
     <div className="space-y-6">
@@ -109,11 +121,11 @@ export const AlgorithmSimulatorTab: React.FC = () => {
           <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 text-xs space-y-2">
             <div className="flex justify-between">
               <span className="text-gray-600">Базовий оборотний рейс T_rev:</span>
-              <strong className="text-gray-900 font-mono">{turnaround.tRevBase} хв</strong>
+              <span className="font-bold text-gray-900">{tRevBase} хв</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Динамічний T_rev (з затором γ={trafficCoeff}):</span>
-              <strong className="text-indigo-600 font-mono font-bold">{turnaround.tRevDynamic} хв</strong>
+              <strong className="text-indigo-600 font-mono font-bold">{tRevDynamic} хв</strong>
             </div>
             <div className="border-t border-indigo-100 pt-1 flex justify-between">
               <span className="text-gray-600">Базовий інтервал руху (I = T_rev / N):</span>

@@ -342,7 +342,7 @@ export const MOCK_DRIVER_BREAK_LOCATIONS: BreakLocationConfig[] = [
     routeId: 'T3',
     locationId: 'st_lustdorf_11th',
     locationName: 'Кінцева станція «11-та ст. Люстдорфської дороги»',
-    locationType: 'terminal',
+    locationType: 'opposite_terminal',
     maxCapacityVehicles: 2,
     durationMin: 30
   }

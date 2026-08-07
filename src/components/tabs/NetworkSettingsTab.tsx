@@ -1128,7 +1128,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                   </div>
                                   <div className="flex justify-between items-center text-[10px]">
                                     <span className="text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
-                                      {b.locationType === 'dispatch_point' ? 'ДП' : b.locationType === 'terminal' ? 'Кінцева' : 'Зупинка'}
+                                      {b.locationType === 'dispatch_point' ? 'ДП' : b.locationType === 'opposite_terminal' ? 'Кінцева' : 'Зупинка'}
                                     </span>
                                     <span className="text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
                                       {b.maxCapacityVehicles} ваг. / {b.durationMin} хв.
@@ -1211,7 +1211,7 @@ export const NetworkSettingsTab: React.FC = () => {
                                   </div>
                                   <div className="flex justify-between items-center text-[10px]">
                                     <span className="text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
-                                      {b.locationType === 'dispatch_point' ? 'ДП' : b.locationType === 'terminal' ? 'Кінцева' : 'Зупинка'}
+                                      {b.locationType === 'dispatch_point' ? 'ДП' : b.locationType === 'opposite_terminal' ? 'Кінцева' : 'Зупинка'}
                                     </span>
                                     <span className="text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
                                       {b.maxCapacityVehicles} ваг. / {b.durationMin} хв.

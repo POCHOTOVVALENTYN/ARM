@@ -5,20 +5,34 @@ import { useScheduleStore } from '../../store/useScheduleStore';
 interface LiveVehicleCanvasProps {
     width: number;
     height: number;
-    // Функція-трансформер координат: Geo(lat, lon) -> Pixel(x, y)
-    projectPoint: (lat: number, lon: number) => { x: number, y: number }; 
+    projectPoint: (lat: number, lon: number) => { x: number, y: number };
     selectedVehicleId?: string;
+    selectedRouteFilter?: string; // e.g. 'ALL' or 'T3', 'Tr3', etc.
 }
 
-export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, height, projectPoint, selectedVehicleId }) => {
-    // Логіка відмальовування, яка передається в конвеєр
+export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({
+    width,
+    height,
+    projectPoint,
+    selectedVehicleId,
+    selectedRouteFilter = 'ALL'
+}) => {
     const draw = useCallback((ctx: CanvasRenderingContext2D, frameCount: number) => {
-        // Отримуємо актуальну телеметрію безпосередньо зі store без підписки на рендеринг
         const telemetry = useScheduleStore.getState().telemetry || {};
         const vehicles = Object.values(telemetry).map((v: any) => ({ ...v, id: v.id || v.vehicle_id }));
 
         vehicles.forEach(vehicle => {
             const { x, y } = projectPoint(vehicle.lat, vehicle.lon);
+
+            // Перевіряємо чи належить ТЗ обраному фільтру маршруту
+            const vehicleRoute = vehicle.route_id || vehicle.routeId || '';
+            const isRouteMatched = selectedRouteFilter === 'ALL' || 
+                vehicleRoute.toLowerCase() === selectedRouteFilter.toLowerCase() ||
+                vehicle.id.toLowerCase().includes(selectedRouteFilter.toLowerCase());
+
+            // Якщо вибрано конкретний маршрут, але вагон з іншого — зменшуємо прозорість
+            const opacity = isRouteMatched ? 1.0 : 0.25;
+            ctx.globalAlpha = opacity;
 
             // Анімація "пульсації" для об'єктів у русі
             const pulseRadius = vehicle.speed > 0 
@@ -29,7 +43,6 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
             const finalRadius = isSelected ? pulseRadius + 4 : pulseRadius;
 
             if (isSelected) {
-                // Відмальовування кільця виділення (жовте)
                 ctx.beginPath();
                 ctx.arc(x, y, finalRadius + 6, 0, 2 * Math.PI);
                 ctx.fillStyle = 'rgba(234, 179, 8, 0.4)'; // amber-500
@@ -47,17 +60,20 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
                 shadowColor = 'rgba(220, 53, 69, 0.3)';
                 coreColor = '#dc3545';
             } else if (vehicle.status === 'MODIFIED_RESERVE' || vehicle.status === 'HOT_RESERVE') {
-                shadowColor = 'rgba(147, 51, 234, 0.3)'; // purple-600
+                shadowColor = 'rgba(147, 51, 234, 0.3)';
                 coreColor = '#9333ea';
+            } else if (vehicle.type === 'electrobus' || vehicleRoute.includes('E')) {
+                shadowColor = 'rgba(16, 185, 129, 0.3)'; // emerald
+                coreColor = '#10b981';
             }
 
-            // Відмальовування тіні/світіння
+            // Тінь / Світіння
             ctx.beginPath();
             ctx.arc(x, y, finalRadius + 4, 0, 2 * Math.PI);
             ctx.fillStyle = shadowColor;
             ctx.fill();
 
-            // Відмальовування ядра вагона
+            // Ядро вагона
             ctx.beginPath();
             ctx.arc(x, y, finalRadius, 0, 2 * Math.PI);
             ctx.fillStyle = coreColor;
@@ -66,21 +82,15 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
             ctx.stroke();
             ctx.fill();
 
-            // Значок резерву (маленька блискавка або R)
-            if (vehicle.status === 'MODIFIED_RESERVE' || vehicle.status === 'HOT_RESERVE') {
-                ctx.font = 'bold 8px Inter, sans-serif';
-                ctx.fillStyle = '#ffffff';
-                ctx.textAlign = 'center';
-                ctx.fillText('R', x, y + 3);
-            }
-
-            // Ідентифікатор борту (відмальовуємо текст прямо на Canvas)
+            // Ідентифікатор
             ctx.font = 'bold 10px Inter, sans-serif';
-            ctx.fillStyle = '#333333';
+            ctx.fillStyle = isRouteMatched ? '#ffffff' : '#94a3b8';
             ctx.textAlign = 'center';
             ctx.fillText(vehicle.id || '', x, y - 12);
+
+            ctx.globalAlpha = 1.0; // Скидаємо прозорість для наступних елементів
         });
-    }, [projectPoint, selectedVehicleId]);
+    }, [projectPoint, selectedVehicleId, selectedRouteFilter]);
 
     const canvasRef = useCanvasAutomation(draw);
 
@@ -93,7 +103,7 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({ width, hei
                 left: 0,
                 width: `${width}px`,
                 height: `${height}px`,
-                pointerEvents: 'none' // Пропускаємо кліки до нижнього шару карти
+                pointerEvents: 'none'
             }}
         />
     );

@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
-import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock, AlertCircle, Clock3, Sliders, CheckCircle2 } from 'lucide-react';
+import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock, AlertCircle, Clock3, Filter, CheckCircle2, Layers } from 'lucide-react';
 import { useStationStore } from '../../store/useStationStore';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 import { LiveVehicleCanvas } from './LiveVehicleCanvas';
 import { calculateElectrobusBattery } from '../../utils/scheduleEngine';
+import { GTFS_ROUTES } from '../../data/gtfsParsedData';
+import { GTFS_STATIONS } from '../../data/gtfsStopsData';
 
 export const LiveMapView: React.FC = () => {
-  const stations = useStationStore(state => state.stations);
+  const stationsFromStore = useStationStore(state => state.stations);
   const { liveSchedule, validationWarnings, updateTripDeparture } = useScheduleStore();
   
   const liveBlocks = liveSchedule?.current_blocks || [];
@@ -16,7 +18,10 @@ export const LiveMapView: React.FC = () => {
   const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 
-  // Стан для Quick Slack Modal (Інтерактивна відтяжка на карті)
+  // Фільтр маршруту: 'ALL' або ID конкретного маршруту ('T3', 'T7', 'Tr3', 'Tr9' тощо)
+  const [routeFilter, setRouteFilter] = useState<string>('ALL');
+
+  // Quick Slack Modal State
   const [slackModal, setSlackModal] = useState<{
     isOpen: boolean;
     blockId: string;
@@ -35,7 +40,6 @@ export const LiveMapView: React.FC = () => {
 
   const [slackSuccessMsg, setSlackSuccessMsg] = useState<string | null>(null);
 
-  // Підписуємося ТІЛЬКИ на телеметрію вибраного вагона
   const selectedVehicleTelemetry = useScheduleStore(state => {
     if (!selectedVehicle) return null;
     const vNum = selectedVehicle.vehicleNumber?.split(' ')[0];
@@ -45,14 +49,14 @@ export const LiveMapView: React.FC = () => {
   });
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [mapDimensions, setMapDimensions] = useState({ width: 0, height: 0 });
+  const [mapDimensions, setMapDimensions] = useState({ width: 800, height: 380 });
 
   useEffect(() => {
     const updateDimensions = () => {
       if (mapContainerRef.current) {
         setMapDimensions({
-          width: mapContainerRef.current.clientWidth,
-          height: mapContainerRef.current.clientHeight
+          width: mapContainerRef.current.clientWidth || 800,
+          height: mapContainerRef.current.clientHeight || 380
         });
       }
     };
@@ -62,13 +66,68 @@ export const LiveMapView: React.FC = () => {
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
+  // Отримання обраного об'єкта маршруту
+  const activeRouteObj = useMemo(() => {
+    if (routeFilter === 'ALL') return null;
+    return GTFS_ROUTES.find(r => r.id.toLowerCase() === routeFilter.toLowerCase() || r.number === routeFilter);
+  }, [routeFilter]);
+
+  // Динамічний фільтр зупинок для обраного маршруту
+  const displayedStops = useMemo(() => {
+    if (routeFilter === 'ALL' || !activeRouteObj) {
+      // Режим «Усі маршрути»: повертаємо ключові магістральні вузли
+      return [
+        { id: '708889', name: 'Старосінна площа', lat: 46.4668, lng: 30.7382, isHub: true },
+        { id: '708884', name: 'пл. Тираспольська', lat: 46.4786, lng: 30.7318, isHub: true },
+        { id: '687088', name: 'станція Застава I', lat: 46.4691, lng: 30.6687, isHub: false },
+        { id: '708879', name: 'Пересипський міст', lat: 46.4982, lng: 30.7233, isHub: true },
+        { id: '708758', name: 'вул. Паустовського', lat: 46.5974, lng: 30.8041, isHub: true },
+        { id: '708912', name: '11-а ст. Люстдорфської дороги', lat: 46.3824, lng: 30.7143, isHub: true },
+        { id: '708921', name: 'селище Люстдорф', lat: 46.3503, lng: 30.7012, isHub: false },
+      ];
+    }
+
+    // Режим конкретного маршруту: фільтруємо зупинки зі списка `activeRouteObj.stations`
+    const stationIdSet = new Set(activeRouteObj.stations || []);
+    const stopsList = GTFS_STATIONS.filter(s => stationIdSet.has(s.id));
+
+    if (stopsList.length === 0) {
+      return GTFS_STATIONS.slice(0, 15); // Fallback if station array is empty
+    }
+
+    return stopsList.map(s => ({
+      ...s,
+      lng: s.lng || 30.73,
+      isHub: s.isTerminal || false
+    }));
+  }, [routeFilter, activeRouteObj]);
+
+  // Проекція координат GPS на розміри карти Canvas/SVG
   const projectPoint = (lat: number, lon: number) => {
-    const scaleX = mapDimensions.width / 800;
-    const scaleY = mapDimensions.height / 380;
-    const x = ((lon - 30.72) * 20000) * scaleX; 
-    const y = (380 - (lat - 46.47) * 20000) * scaleY;
-    return { x, y };
+    // Межі Одеси: Lat 46.34 - 46.60, Lng 30.65 - 30.82
+    const minLat = 46.34, maxLat = 46.60;
+    const minLon = 30.65, maxLon = 30.82;
+
+    const scaleX = mapDimensions.width / (maxLon - minLon);
+    const scaleY = mapDimensions.height / (maxLat - minLat);
+
+    const x = (lon - minLon) * scaleX;
+    const y = mapDimensions.height - (lat - minLat) * scaleY;
+
+    return { 
+      x: Math.max(30, Math.min(mapDimensions.width - 30, x)), 
+      y: Math.max(30, Math.min(mapDimensions.height - 30, y)) 
+    };
   };
+
+  // Розрахунок точок треку для підключення полілінії
+  const routePolylinePoints = useMemo(() => {
+    if (!displayedStops || displayedStops.length < 2) return '';
+    return displayedStops.map(s => {
+      const pt = projectPoint(s.lat, s.lng);
+      return `${pt.x},${pt.y}`;
+    }).join(' L ');
+  }, [displayedStops, mapDimensions]);
 
   // Симуляційний таймер
   useEffect(() => {
@@ -95,9 +154,9 @@ export const LiveMapView: React.FC = () => {
       const dx = clickX - x;
       const dy = clickY - y;
       
-      if (Math.sqrt(dx * dx + dy * dy) <= 18) {
+      if (Math.sqrt(dx * dx + dy * dy) <= 20) {
         const block = liveBlocks.find((b: any) => {
-           const vNum = b.vehicleNumber.split(' ')[0];
+           const vNum = b.vehicleNumber?.split(' ')[0];
            return id.includes(vNum);
         });
         if (block) {
@@ -141,17 +200,14 @@ export const LiveMapView: React.FC = () => {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
-  const MOCK_POSITIONS = [
-    { name: 'Старосінна площа', lat: 46.4682, lng: 30.7411, isHub: true },
-    { name: 'Залізничний вокзал', lat: 46.4671, lng: 30.7405, isHub: false },
-    { name: 'Тираспольська площа', lat: 46.4828, lng: 30.7315, isHub: true },
-    { name: 'Застава-2', lat: 46.4712, lng: 30.7011, isHub: false },
-    { name: 'Пересипський міст', lat: 46.4952, lng: 30.7322, isHub: false },
-    { name: 'вул. Паустовського', lat: 46.5821, lng: 30.7912, isHub: true },
-    { name: '11-та ст. Люстдорфської дороги', lat: 46.3812, lng: 30.7489, isHub: true },
-  ];
-
-  const activeVehiclesCount = liveBlocks.length;
+  // Фільтрований випуск вагонів
+  const filteredBlocksCount = useMemo(() => {
+    if (routeFilter === 'ALL') return liveBlocks.length;
+    return liveBlocks.filter((b: any) => 
+      b.routeId?.toLowerCase() === routeFilter.toLowerCase() ||
+      b.vehicleNumber?.toLowerCase().includes(routeFilter.toLowerCase())
+    ).length;
+  }, [liveBlocks, routeFilter]);
 
   return (
     <div className="space-y-6">
@@ -160,26 +216,26 @@ export const LiveMapView: React.FC = () => {
         <div>
           <div className="flex items-center space-x-2">
             <span className="bg-emerald-500 text-gray-900 font-bold px-2 py-0.5 rounded text-xs">
-              Диспетчерська Карта v3.5
+              Диспетчерська Карта v4.0
             </span>
             <h2 className="text-base font-bold text-white">
-              Інтерактивна Карта Руху ТЗ з Модулем Відтяжок (Slack Manager)
+              Інтерактивна Карта з Динамічним Фільтром Маршрутів та Зупинок
             </h2>
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            Моніторинг транспорту в реальному часі, клік по ТЗ/зупинках для оперативної відтяжки розкладу та контроль електробусів
+            Оберіть маршрут для коридорного фокусування, перегляду лише його зупинок та управління відтяжками
           </p>
         </div>
 
         <div className="flex items-center space-x-2 font-mono text-xs font-bold">
           <span className="bg-emerald-900/60 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700/60 flex items-center space-x-1.5">
             <Zap className="w-4 h-4 text-emerald-400 animate-pulse" />
-            <span>Активних ТЗ: {activeVehiclesCount}</span>
+            <span>Активних ТЗ на лінії: {filteredBlocksCount}</span>
           </span>
         </div>
       </div>
 
-      {/* Slack Success Notification */}
+      {/* Notification Banner */}
       {slackSuccessMsg && (
         <div className="bg-emerald-50 border-2 border-emerald-600 text-emerald-900 p-3.5 rounded-xl font-bold text-xs flex items-center space-x-2 animate-in fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -187,9 +243,74 @@ export const LiveMapView: React.FC = () => {
         </div>
       )}
 
-      {/* Simulation Time Control Bar */}
-      <div className="brutalist-card bg-white p-4 rounded-xl space-y-3">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+      {/* Control Bar: Route Selector & Time Slider */}
+      <div className="brutalist-card bg-white p-4 rounded-xl space-y-4">
+        {/* Route Filter Selector */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b pb-3">
+          <div className="flex items-center space-x-2">
+            <Filter className="w-4 h-4 text-indigo-600" />
+            <span className="text-xs font-extrabold text-gray-900">Фільтр відображення маршруту:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
+            <button
+              onClick={() => setRouteFilter('ALL')}
+              className={`px-3 py-1.5 rounded-xl border font-bold cursor-pointer transition-all ${
+                routeFilter === 'ALL'
+                  ? 'bg-gray-900 text-white border-gray-900 shadow-xs'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300'
+              }`}
+            >
+              Всі маршрути (Вузли)
+            </button>
+
+            {/* Tram Route Badges */}
+            {['T3', 'T7', 'T10', 'T12', 'T28'].map(r => (
+              <button
+                key={r}
+                onClick={() => setRouteFilter(r)}
+                className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer transition-all ${
+                  routeFilter === r
+                    ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
+                    : 'bg-sky-50 text-sky-800 hover:bg-sky-100 border-sky-200'
+                }`}
+              >
+                Трамвай {r}
+              </button>
+            ))}
+
+            {/* Trolleybus Route Badges */}
+            {['Tr3', 'Tr7', 'Tr9', 'Tr12'].map(r => (
+              <button
+                key={r}
+                onClick={() => setRouteFilter(r)}
+                className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer transition-all ${
+                  routeFilter === r
+                    ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200'
+                }`}
+              >
+                Тролейбус {r}
+              </button>
+            ))}
+
+            {/* Electrobus Badge */}
+            <button
+              onClick={() => setRouteFilter('Tr12')}
+              className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer flex items-center space-x-1 ${
+                routeFilter === 'Tr12'
+                  ? 'bg-emerald-600 text-white border-emerald-700'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              }`}
+            >
+              <Zap className="w-3 h-3 text-amber-300" />
+              <span>Електробус</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Time Slider & Simulation Controls */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
           <div className="flex items-center space-x-3">
             <button
               onClick={() => setIsPlaying(!isPlaying)}
@@ -248,7 +369,7 @@ export const LiveMapView: React.FC = () => {
           <div className="flex justify-between text-[10px] font-mono text-gray-500">
             <span>05:00 (Виїзд)</span>
             <span>08:00 (Ранковий пік)</span>
-            <span>12:00 (Обідній проміжок)</span>
+            <span>12:00 (Обід)</span>
             <span>17:00 (Вечірній пік)</span>
             <span>22:00 (Заходження)</span>
           </div>
@@ -270,19 +391,21 @@ export const LiveMapView: React.FC = () => {
         </div>
       )}
 
-      {/* Map Canvas Visual Area */}
+      {/* Map Area */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Map Container */}
         <div className="brutalist-card bg-slate-950 p-4 rounded-2xl lg:col-span-3 space-y-3 relative overflow-hidden min-h-[450px]">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs pointer-events-none">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs">
             <div className="flex items-center space-x-2">
               <MapPin className="w-4 h-4 text-emerald-400" />
               <span className="font-bold text-white">
-                Геопросторова схема міської мережі КП «ОМЕТ» (Одеса)
+                {routeFilter === 'ALL' 
+                  ? 'Геопросторова схема вузлів КП «ОМЕТ» (Загальний огляд)' 
+                  : `Фокусна карта: ${activeRouteObj?.name || routeFilter} (${displayedStops.length} зупинок)`}
               </span>
             </div>
             <span className="text-slate-400 font-mono text-[11px]">
-              Клікніть на ТЗ або зупинку для відтяжки
+              Клікніть на маркер ТЗ для деталізації
             </span>
           </div>
 
@@ -291,50 +414,68 @@ export const LiveMapView: React.FC = () => {
             onClick={handleMapClick}
             className="relative w-full h-[380px] bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer"
           >
-            <svg viewBox="0 0 800 380" className="w-full h-full select-none">
+            <svg viewBox={`0 0 ${mapDimensions.width} ${mapDimensions.height}`} className="w-full h-full select-none">
               <defs>
                 <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
                   <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" strokeWidth="1" />
                 </pattern>
               </defs>
-              <rect width="800" height="380" fill="url(#grid)" />
+              <rect width={mapDimensions.width} height={mapDimensions.height} fill="url(#grid)" />
 
-              {/* Tracks */}
-              <path d="M 120,320 L 250,220 L 400,180 L 550,140 L 700,80" fill="none" stroke="#38bdf8" strokeWidth="4" strokeLinecap="round" />
-              <path d="M 250,220 L 320,120 L 450,90 L 650,60" fill="none" stroke="#f59e0b" strokeWidth="3" strokeDasharray="6,4" />
-              <path d="M 180,340 L 350,280 L 500,240 L 680,200" fill="none" stroke="#10b981" strokeWidth="3" />
+              {/* Connected Route Polyline for Selected Route */}
+              {routePolylinePoints && (
+                <path
+                  d={`M ${routePolylinePoints}`}
+                  fill="none"
+                  stroke={routeFilter.startsWith('T') ? '#38bdf8' : '#f59e0b'}
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="animate-in fade-in"
+                />
+              )}
 
-              {/* Station Markers */}
-              {MOCK_POSITIONS.map((pos, idx) => {
-                const x = 120 + idx * 95;
-                const y = 320 - idx * 38;
+              {/* Render Filtered Stops / Hub Markers */}
+              {displayedStops.map((st, idx) => {
+                const pt = projectPoint(st.lat, st.lng);
                 return (
-                  <g key={idx}>
-                    <circle 
-                      cx={x} 
-                      cy={y} 
-                      r={pos.isHub ? "8" : "5"} 
-                      fill={pos.isHub ? "#f59e0b" : "#0f172a"} 
-                      stroke={pos.isHub ? "#ffffff" : "#f59e0b"} 
-                      strokeWidth="2.5" 
+                  <g key={st.id || idx} className="hover:opacity-100 transition-all">
+                    <circle
+                      cx={pt.x}
+                      cy={pt.y}
+                      r={st.isHub ? "7" : "4.5"}
+                      fill={st.isHub ? "#f59e0b" : "#0f172a"}
+                      stroke={st.isHub ? "#ffffff" : "#38bdf8"}
+                      strokeWidth="2"
                     />
-                    <text x={x} y={y + 18} fill="#cbd5e1" fontSize="10" textAnchor="middle" fontWeight="bold">
-                      {pos.name} {pos.isHub ? '(Вузол)' : ''}
+                    {/* Stop Label */}
+                    <text
+                      x={pt.x}
+                      y={pt.y + 16}
+                      fill="#cbd5e1"
+                      fontSize={routeFilter === 'ALL' ? "10" : "9"}
+                      textAnchor="middle"
+                      fontWeight="bold"
+                    >
+                      {st.name} {st.isHub ? '(Вузол)' : ''}
                     </text>
                   </g>
                 );
               })}
             </svg>
 
+            {/* Canvas for Live Vehicle Movement */}
             <LiveVehicleCanvas
               width={mapDimensions.width}
               height={mapDimensions.height}
               projectPoint={projectPoint}
-              selectedVehicleId={selectedVehicle?.vehicleNumber.split(' ')[0]}
+              selectedVehicleId={selectedVehicle?.vehicleNumber?.split(' ')[0]}
+              selectedRouteFilter={routeFilter}
             />
           </div>
         </div>
 
+        {/* Selected Vehicle Info & Incident Panel */}
         <div className="flex flex-col space-y-6 lg:col-span-1">
           {/* Selected Vehicle Info Card */}
           <div className="brutalist-card bg-white p-5 rounded-2xl space-y-4">
