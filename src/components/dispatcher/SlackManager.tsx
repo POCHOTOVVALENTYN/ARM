@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { calculateSlackEffect, SlackPropagationResult } from '../../utils/scheduleEngine';
+import { useScheduleStore } from '../../store/useScheduleStore';
 import { AlertOctagon, CheckCircle, Clock, FastForward, Play, RefreshCw, ShieldAlert, Sliders } from 'lucide-react';
 
 interface SlackManagerProps {
@@ -13,15 +14,30 @@ export const SlackManager: React.FC<SlackManagerProps> = ({
   onTruncateTrip,
   onReserveVehicle
 }) => {
+  const { draftBlocks } = useScheduleStore();
+  const allTrips = draftBlocks.flatMap(b => b.trips) || [];
+
+  const [selectedTripId, setSelectedTripId] = useState<string>('');
   const [slackValue, setSlackValue] = useState<number>(4);
   const [plannedTurnaround, setPlannedTurnaround] = useState<number>(68); // mins
   const [result, setResult] = useState<SlackPropagationResult>(
     calculateSlackEffect(4, 68, 2, 480)
   );
 
+  useEffect(() => {
+    if (allTrips.length > 0 && !selectedTripId) {
+      setSelectedTripId(allTrips[0].id);
+    }
+  }, [allTrips, selectedTripId]);
+
   const handleSlackChange = (val: number) => {
     setSlackValue(val);
-    setResult(calculateSlackEffect(val, plannedTurnaround, 2, 480));
+    setResult(calculateSlackEffect(val, plannedTurnaround, 2, 480)); // 2 min reserve, 480 shift limit
+  };
+
+  const handleTurnaroundChange = (val: number) => {
+    setPlannedTurnaround(val);
+    setResult(calculateSlackEffect(slackValue, val, 2, 480));
   };
 
   return (
@@ -49,34 +65,70 @@ export const SlackManager: React.FC<SlackManagerProps> = ({
 
       {/* Interactive Controls */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Slider input */}
-        <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-3">
-          <label className="text-xs text-slate-300 font-semibold flex justify-between">
-            <span>Величина відтяжки / затримки (Δt_slack):</span>
-            <span className="text-amber-400 font-bold">{slackValue} хвилин</span>
-          </label>
+        {/* Sliders and inputs */}
+        <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-4">
+          
+          {/* Target Trip Dropdown */}
+          <div>
+            <label className="text-xs text-slate-300 font-semibold mb-1 block">
+              Виберіть цільовий рейс:
+            </label>
+            <select
+              value={selectedTripId}
+              onChange={(e) => setSelectedTripId(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-slate-300 text-xs focus:ring-1 focus:ring-amber-500 outline-none"
+              disabled={allTrips.length === 0}
+            >
+              {allTrips.map(t => (
+                <option key={t.id} value={t.id}>
+                  Рейс {t.id} ({t.departureTime} - {t.arrivalTime})
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <input
-            type="range"
-            min="1"
-            max="10"
-            value={slackValue}
-            onChange={(e) => handleSlackChange(Number(e.target.value))}
-            className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
-          />
+          <div className="space-y-1">
+            <label className="text-xs text-slate-300 font-semibold flex justify-between">
+              <span>Величина відтяжки (Δt_slack):</span>
+              <span className="text-amber-400 font-bold">{slackValue} хв</span>
+            </label>
+            <input
+              type="range"
+              min="1"
+              max="10"
+              value={slackValue}
+              onChange={(e) => handleSlackChange(Number(e.target.value))}
+              className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
+            />
+            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>+1 хв</span>
+              <span>+5 хв</span>
+              <span>+10 хв</span>
+            </div>
+          </div>
 
-          <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-            <span>+1 хв (Легка)</span>
-            <span>+5 хв (Затор)</span>
-            <span>+10 хв (ДТП / Макс)</span>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-300 font-semibold flex justify-between">
+              <span>Запланований час на кінцевій (T_turn):</span>
+              <span className="text-amber-400 font-bold">{plannedTurnaround} хв</span>
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="120"
+              value={plannedTurnaround}
+              onChange={(e) => handleTurnaroundChange(Number(e.target.value))}
+              className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
+            />
           </div>
 
           <button
-            onClick={() => onApplySlack(slackValue, 'trip_301_1')}
-            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 rounded-xl transition-all text-xs flex items-center justify-center space-x-2 shadow-md"
+            onClick={() => onApplySlack(slackValue, selectedTripId)}
+            disabled={!selectedTripId}
+            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 rounded-xl transition-all text-xs flex items-center justify-center space-x-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Play className="w-3.5 h-3.5" />
-            <span>Застосувати відтяжку до Наряду №301</span>
+            <span>Застосувати відтяжку {selectedTripId ? `до ${selectedTripId}` : ''}</span>
           </button>
         </div>
 

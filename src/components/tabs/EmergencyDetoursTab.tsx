@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { MOCK_EMERGENCY_TEMPLATES } from '../../data/mockData';
 import { AlertTriangle, CheckCircle, Flame, Navigation, ShieldAlert, Zap } from 'lucide-react';
 
+import { useScheduleStore } from '../../store/useScheduleStore';
+
 export const EmergencyDetoursTab: React.FC = () => {
-  const [activeDetourId, setActiveDetourId] = useState<string | null>(null);
+  const { activeDetourId, setActiveDetour } = useScheduleStore();
 
   return (
     <div className="space-y-6">
@@ -76,7 +78,7 @@ export const EmergencyDetoursTab: React.FC = () => {
               {/* Action Button */}
               <div className="flex justify-end pt-1">
                 <button
-                  onClick={() => setActiveDetourId(isActivated ? null : tmpl.id)}
+                  onClick={() => setActiveDetour && setActiveDetour(isActivated ? undefined : tmpl.id)}
                   className={`px-5 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-md ${
                     isActivated
                       ? 'bg-emerald-600 hover:bg-emerald-500 text-white'

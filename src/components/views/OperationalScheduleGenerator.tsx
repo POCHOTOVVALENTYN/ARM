@@ -128,15 +128,33 @@ export const OperationalScheduleGenerator: React.FC = () => {
   const prepTimeMin = isTram ? 10 : 19; // 10 min for tram, 19 min for trolleybus
 
   // Calculate total operating hours
-  let operatingHoursStr = '16 год 22 хв';
+  let operatingHoursStr = 'Невідомо';
   if (selectedBlock?.depotExitTime && selectedBlock?.depotReturnTime) {
-    const [eH, eM] = selectedBlock.depotExitTime.split(':').map(Number);
-    const [rH, rM] = selectedBlock.depotReturnTime.split(':').map(Number);
-    let totalM = (rH * 60 + rM) - (eH * 60 + eM);
-    if (totalM < 0) totalM += 24 * 60;
-    const hours = Math.floor(totalM / 60);
-    const mins = totalM % 60;
-    operatingHoursStr = `${hours} год ${mins} хв`;
+    try {
+      const exitParts = selectedBlock.depotExitTime.split(':');
+      const returnParts = selectedBlock.depotReturnTime.split(':');
+      
+      if (exitParts.length >= 2 && returnParts.length >= 2) {
+        const eH = parseInt(exitParts[0], 10);
+        const eM = parseInt(exitParts[1], 10);
+        const rH = parseInt(returnParts[0], 10);
+        const rM = parseInt(returnParts[1], 10);
+
+        if (!isNaN(eH) && !isNaN(eM) && !isNaN(rH) && !isNaN(rM)) {
+          let totalM = (rH * 60 + rM) - (eH * 60 + eM);
+          if (totalM < 0) totalM += 24 * 60; // Handle overnight shifts
+          const hours = Math.floor(totalM / 60);
+          const mins = totalM % 60;
+          operatingHoursStr = `${hours} год ${mins} хв`;
+        } else {
+          operatingHoursStr = 'Помилка формату';
+        }
+      } else {
+        operatingHoursStr = 'Помилка формату';
+      }
+    } catch (err) {
+      operatingHoursStr = 'Помилка обчислення';
+    }
   }
 
   // Estimated mileage calculation based on trips

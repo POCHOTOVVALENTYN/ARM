@@ -53,6 +53,11 @@ interface ScheduleState {
     generateMultipleBlocks?: any;
     clearVehicleBlocks?: any;
     discardDraft?: any;
+    
+    // Активний об'їзд (Emergency Detours)
+    activeDetourId?: string;
+    setActiveDetour?: (id: string | undefined) => void;
+
     // Основний (і єдиний) графік. Оновлюється через WebSocket після транзакцій.
     liveSchedule: any | null; 
     
@@ -76,6 +81,9 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     telemetry: {},
     isProcessingTransaction: false,
     validationWarnings: [],
+    
+    activeDetourId: undefined,
+    setActiveDetour: (id) => set({ activeDetourId: id }),
     
     // UI Navigation & Theme
     currentPath: '/',

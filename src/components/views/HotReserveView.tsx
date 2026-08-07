@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
-import { Zap, AlertTriangle, CheckCircle2, ShieldAlert, ArrowRight, FileText, Bus } from 'lucide-react';
-import { MOCK_DEPOTS } from '../../data/mockData';
+import { Zap, AlertTriangle, CheckCircle2, ShieldAlert, Bus } from 'lucide-react';
 
 export const HotReserveView: React.FC = () => {
-  const { draftDuties, executeHotReserveSwap } = useScheduleStore();
-  const [brokenDutyId, setBrokenDutyId] = useState<string>(draftDuties[0]?.id || '');
-  const [reserveDutyId, setReserveDutyId] = useState<string>(
-    draftDuties.find((d) => d.id !== draftDuties[0]?.id)?.id || ''
+  const { draftBlocks, executeHotReserveSwap } = useScheduleStore();
+  
+  const [brokenBlockId, setBrokenBlockId] = useState<string>(draftBlocks[0]?.id || '');
+  const [targetTripId, setTargetTripId] = useState<string>('');
+  const [reserveBlockId, setReserveBlockId] = useState<string>(
+    draftBlocks.find((b) => b.id !== brokenBlockId)?.id || ''
   );
+  
   const [incidentTime, setIncidentTime] = useState<string>('08:30');
   const [swapResult, setSwapResult] = useState<{
     success: boolean;
@@ -16,9 +18,36 @@ export const HotReserveView: React.FC = () => {
     regeneratedBooklets?: string[];
   } | null>(null);
 
+  // Sync available trips and reserve blocks when brokenBlockId changes
+  useEffect(() => {
+    const block = draftBlocks.find(b => b.id === brokenBlockId);
+    if (block && block.trips.length > 0) {
+       // Only reset if current targetTripId is not in the new block's trips
+       if (!block.trips.find(t => t.id === targetTripId)) {
+           setTargetTripId(block.trips[0].id);
+       }
+    } else {
+       setTargetTripId('');
+    }
+    
+    // Ensure reserve block is not the same as broken block
+    if (reserveBlockId === brokenBlockId) {
+       const newReserve = draftBlocks.find(b => b.id !== brokenBlockId);
+       setReserveBlockId(newReserve?.id || '');
+    }
+  }, [brokenBlockId, draftBlocks, targetTripId, reserveBlockId]);
+
+  const selectedBrokenBlock = draftBlocks.find(b => b.id === brokenBlockId);
+  const availableTrips = selectedBrokenBlock?.trips || [];
+
   const handleExecuteSwap = async (e: React.FormEvent) => {
     e.preventDefault();
     setSwapResult(null);
+    
+    if (!brokenBlockId || !targetTripId || !reserveBlockId) {
+      setSwapResult({ success: false, message: 'Оберіть всі обов\'язкові параметри (Аварійний вагон, Рейс та Резервний вагон).' });
+      return;
+    }
 
     try {
       const response = await fetch('http://localhost:8000/api/v1/incidents/hot-reserve/activate', {
@@ -27,8 +56,8 @@ export const HotReserveView: React.FC = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          reserve_vehicle_id: reserveDutyId,
-          target_trip_id: brokenDutyId,
+          reserve_vehicle_id: reserveBlockId,
+          target_trip_id: targetTripId,
           reason: `Заміна по інциденту о ${incidentTime}`
         })
       });
@@ -46,12 +75,11 @@ export const HotReserveView: React.FC = () => {
       setSwapResult({
         success: true,
         message: `Гарячий резерв активовано. Новий борт: ${data.new_vehicle_id}`,
-        regeneratedBooklets: [data.new_vehicle_id, brokenDutyId]
+        regeneratedBooklets: [data.new_vehicle_id, brokenBlockId]
       });
       
-      // Якщо у нас є локальна функція для оновлення UI, можемо її викликати
       if (executeHotReserveSwap) {
-          executeHotReserveSwap(brokenDutyId, reserveDutyId, incidentTime);
+          executeHotReserveSwap(brokenBlockId, reserveBlockId, incidentTime);
       }
     } catch (error) {
       setSwapResult({
@@ -128,19 +156,39 @@ export const HotReserveView: React.FC = () => {
           </h3>
 
           <form onSubmit={handleExecuteSwap} className="space-y-4 font-sans text-xs">
-            {/* Step 1: Select Broken Vehicle / Duty */}
+            {/* Step 1: Select Broken Vehicle */}
             <div>
               <label className="font-bold text-gray-900 block mb-1">
-                1. Виберіть аварійний наряд (Поломка ТЗ / ДТП):
+                1. Виберіть аварійний вагон (Поломка ТЗ / ДТП):
               </label>
               <select
-                value={brokenDutyId}
-                onChange={(e) => setBrokenDutyId(e.target.value)}
+                value={brokenBlockId}
+                onChange={(e) => setBrokenBlockId(e.target.value)}
                 className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl p-3 font-mono font-bold text-gray-900 focus:ring-2 focus:ring-purple-500"
+                disabled={draftBlocks.length === 0}
               >
-                {draftDuties.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    Наряд {d.id} — {d.driverName} (Зміна: {d.shiftStartTime} - {d.shiftEndTime})
+                {draftBlocks.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    Борт {b.vehicleNumber} (Блок: {b.id}) — {b.trips.length} рейсів
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Step 1.5: Select Target Trip */}
+            <div>
+              <label className="font-bold text-gray-900 block mb-1">
+                Рейс, з якого почнеться заміна:
+              </label>
+              <select
+                value={targetTripId}
+                onChange={(e) => setTargetTripId(e.target.value)}
+                className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl p-3 font-mono font-bold text-gray-900 focus:ring-2 focus:ring-purple-500"
+                disabled={availableTrips.length === 0}
+              >
+                {availableTrips.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    Рейс {t.id} ({t.departureTime} - {t.arrivalTime})
                   </option>
                 ))}
               </select>
@@ -160,21 +208,22 @@ export const HotReserveView: React.FC = () => {
               />
             </div>
 
-            {/* Step 3: Select Reserve Vehicle / Duty */}
+            {/* Step 3: Select Reserve Vehicle */}
             <div>
               <label className="font-bold text-gray-900 block mb-1">
                 3. Виберіть резервний вагон із депо (Hot Reserve):
               </label>
               <select
-                value={reserveDutyId}
-                onChange={(e) => setReserveDutyId(e.target.value)}
+                value={reserveBlockId}
+                onChange={(e) => setReserveBlockId(e.target.value)}
                 className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl p-3 font-mono font-bold text-gray-900 focus:ring-2 focus:ring-purple-500"
+                disabled={draftBlocks.length <= 1}
               >
-                {draftDuties
-                  .filter((d) => d.id !== brokenDutyId)
-                  .map((d) => (
-                    <option key={d.id} value={d.id}>
-                      Резервний Наряд {d.id} — {d.driverName}
+                {draftBlocks
+                  .filter((b) => b.id !== brokenBlockId)
+                  .map((b) => (
+                    <option key={b.id} value={b.id}>
+                      Резервний Борт {b.vehicleNumber} (Блок: {b.id})
                     </option>
                   ))}
               </select>
@@ -182,7 +231,8 @@ export const HotReserveView: React.FC = () => {
 
             <button
               type="submit"
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-sm py-3.5 rounded-xl border-2 border-purple-800 shadow-md flex items-center justify-center space-x-2 cursor-pointer transition-all mt-4"
+              disabled={draftBlocks.length <= 1 || !targetTripId}
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-sm py-3.5 rounded-xl border-2 border-purple-800 shadow-md flex items-center justify-center space-x-2 cursor-pointer transition-all mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Zap className="w-5 h-5" />
               <span>Виконати атомарну транзакцію Гарячого Резерву</span>
@@ -208,3 +258,4 @@ export const HotReserveView: React.FC = () => {
     </div>
   );
 };
+

@@ -71,6 +71,14 @@ export const GanttChart: React.FC<GanttChartProps> = ({ duties }) => {
           const hoursWorked = (duty.totalShiftMin / 60).toFixed(1);
           const isOverLimit = duty.totalShiftMin > 600;
 
+          // Dynamic 10-Hour Cap Calculation
+          const shiftStartMin = timeToMinutes(duty.shiftStartTime);
+          const limitMin = shiftStartMin + 600; // +10 hours
+          const limitH = Math.floor(limitMin / 60) % 24;
+          const limitM = limitMin % 60;
+          const limitTimeStr = `${limitH.toString().padStart(2, '0')}:${limitM.toString().padStart(2, '0')}`;
+          const limitPct = getPercent(limitTimeStr);
+
           return (
             <div
               key={duty.id}
@@ -115,8 +123,8 @@ export const GanttChart: React.FC<GanttChartProps> = ({ duties }) => {
                 {/* 10-Hour Cap Line Indicator */}
                 <div
                   className="absolute top-0 bottom-0 border-r-2 border-dashed border-rose-500 z-10"
-                  style={{ left: `${getPercent('15:13')}%` }} // Example 10h mark
-                  title="Граничний 10-годинний ліміт КЗпП"
+                  style={{ left: `${limitPct}%` }}
+                  title={`Граничний 10-годинний ліміт КЗпП (${limitTimeStr})`}
                 />
 
                 {/* Main Shift Bar */}
