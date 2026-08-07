@@ -1,4 +1,4 @@
-export type TransportType = 'tram' | 'trolleybus';
+export type TransportType = 'tram' | 'trolleybus' | 'electrobus';
 
 export interface Station {
   id: string;
@@ -26,11 +26,11 @@ export interface DailyDeploymentPlan {
 }
 
 export type TimePeriod = 
-  | 'morning_exit'      // Ранковий виїзд (05:00 - 06:30)
-  | 'morning_peak'      // Ранковий пік (06:30 - 09:30)
-  | 'off_peak'          // Міжпіковий період (09:30 - 16:00)
-  | 'evening_peak'      // Вечірній пік (16:00 - 19:30)
-  | 'evening_decline';  // Спад перед комендантською годиною (19:30 - 22:30)
+  | 'morning_exit'    // Ранковий виїзд (05:00 - 06:30)
+  | 'morning_peak'    // Ранковий пік (06:30 - 09:30)
+  | 'off_peak'         // Міжпіковий період (09:30 - 16:00)
+  | 'evening_peak'     // Вечірній пік (16:00 - 19:30)
+  | 'evening_decline'; // Спад перед комендантською годиною (19:30 - 22:30)
 
 export type ShiftType = 'single' | 'double' | 'peak' | 'split';
 
@@ -60,7 +60,7 @@ export interface Route {
   stations: string[];
   allStations?: string[]; // Includes unique stations from both directions
   segments: RouteSegment[];
-  controlPoints?: RouteControlPoint[]; // <-- added mapping
+  controlPoints?: RouteControlPoint[];
   description?: string;
   activeVehiclesCount?: {
     workday: number;
@@ -97,11 +97,11 @@ export interface HubNode {
   routesConnecting: string[];
 }
 
-export type ControlPointNode = HubNode; // Alias for HubNode
+export type ControlPointNode = HubNode;
 
 export interface Depot {
   id: string;
-  name: string; // e.g. "Трамвайне депо №1 (Водопровідна)"
+  name: string;
   type: TransportType;
   address: string;
   lat: number;
@@ -117,10 +117,10 @@ export interface GtfsTerminal {
 }
 
 export interface GtfsLogicalRoute {
-  id: string; // e.g. "tram_3"
+  id: string;
   short_name: string;
   long_name: string;
-  type: 'tram' | 'trolleybus';
+  type: 'tram' | 'trolleybus' | 'electrobus';
   directions: {
     '0'?: GtfsTerminal;
     '1'?: GtfsTerminal;
@@ -128,34 +128,34 @@ export interface GtfsLogicalRoute {
 }
 
 export interface PullOutInDetails {
-  targetStationId: string; // The GTFS stop_id it pulls out to / pulls in from
+  targetStationId: string;
   distanceKm: number;
   durationMin: number;
   passengerPickupAllowed: boolean;
 }
 
 export interface RouteDepotConfig {
-  id: string; // UUID
-  routeId: string; // e.g. "tram_3"
-  depotId: string; // e.g. "depot-1"
+  id: string;
+  routeId: string;
+  depotId: string;
   pullOut: {
-    dir0?: PullOutInDetails; // to dir0 firstStop
-    dir1?: PullOutInDetails; // to dir1 firstStop
+    dir0?: PullOutInDetails;
+    dir1?: PullOutInDetails;
   };
   pullIn: {
-    dir0?: PullOutInDetails; // from dir0 lastStop
-    dir1?: PullOutInDetails; // from dir1 lastStop
+    dir0?: PullOutInDetails;
+    dir1?: PullOutInDetails;
   };
 }
 
 export interface BreakLocationConfig {
   id: string;
   routeId: string;
-  locationId: string; // ID of the stop or dispatch point
+  locationId: string; // ID of the stop, terminal or dispatch point
   locationName: string;
-  locationType: 'dispatch_point' | 'terminal' | 'stop';
+  locationType: 'dispatch_point' | 'opposite_terminal' | 'global_hub';
   maxCapacityVehicles: number;
-  durationMin: number;
+  durationMin: number; // Standard: 15/10 min for tram, 20 min for trolleybus
 }
 
 export interface Trip {
@@ -163,7 +163,7 @@ export interface Trip {
   blockId: string;
   dutyId: string;
   routeId: string;
-  direction: 1 | 2; // 1: Forward, 2: Reverse
+  direction: 1 | 2;
   departureTime: string; // HH:mm
   arrivalTime: string;   // HH:mm
   startStationId: string;
@@ -176,33 +176,45 @@ export interface Trip {
 }
 
 export interface VehicleBlock {
-  id: string; // e.g. BlockID-301
+  id: string;
   vehicleNumber: string;
   type: TransportType;
   depotId: string;
   routeId: string;
-  date?: string; // YYYY-MM-DD
+  date?: string;
   dayType?: DayType;
   scheduleType?: ShiftType;
   initialDestination?: 'dispatcher_point' | 'opposite_terminal';
-  depotExitTime: string;  // HH:mm
-  depotReturnTime: string; // HH:mm
+  depotExitTime: string;
+  depotReturnTime: string;
   trips: Trip[];
+  // Electrobus specific battery parameters
+  batteryCapacitykWh?: number; // e.g. 200 kWh
+  currentSoC?: number;         // State of Charge in % (0 - 100)
+  consumptionPerKm?: number;   // kWh per km (1.1 - 1.8)
+  chargingPowerkW?: number;    // e.g. 150 kW pantograph / fast charger
 }
 
 export interface DriverDuty {
-  id: string; // e.g. DutyID-101
+  id: string;
   driverName: string;
   driverBadge: string;
   shiftType: ShiftType;
-  shiftStartTime: string; // HH:mm
-  shiftEndTime: string;   // HH:mm
+  transportType?: TransportType; // 'tram' | 'trolleybus' | 'electrobus'
+  shiftStartTime: string;        // HH:mm
+  shiftEndTime: string;          // HH:mm
   totalShiftMin: number;
-  lunchStartTime?: string; // HH:mm
-  lunchDurationMin: number;
+  drivingTimeMin?: number;       // pure driving time
+  prepTimeMin?: number;          // 10 min tram, 19 min trolleybus
+  lunchStartTime?: string;       // HH:mm
+  lunchDurationMin: number;      // Actual lunch/break duration
+  standardLunchMin?: number;     // 15/10 min tram, 20 min trolleybus
+  overtimeLunchMin?: number;     // Extra break time added to total work time
+  lunchLocationName?: string;    // e.g. "Старосінна площа"
   assignedBlockIds: string[];
   isViolating10hLimit: boolean;
   isLunchCompliant: boolean;
+  lunchWindowViolation?: boolean;// Violation if lunch is outside 4h-6h window
 }
 
 export interface ScheduleConflict {
@@ -224,7 +236,7 @@ export interface ScheduleConflict {
 export interface EmergencyDetourTemplate {
   id: string;
   title: string;
-  cause: string; // e.g. "ДТП / Обрив контактної мережі"
+  cause: string;
   affectedRouteIds: string[];
   affectedStationIds: string[];
   detourDescription: string;
@@ -243,18 +255,4 @@ export interface EmergencyDetour {
   alternativeStations: string[];
   startTime: string;
   estimatedEndTime: string;
-}
-
-export interface DutyTypeCount {
-  singleShift: number;
-  doubleShift: number;
-  peak: number;
-  split: number;
-}
-
-export interface DailyDeploymentPlan {
-  id: string; // e.g. "2026-08-05_T3"
-  date: string; // YYYY-MM-DD
-  routeId: string;
-  dutiesCount: DutyTypeCount;
 }
