@@ -28,14 +28,36 @@ import { useWebSocket } from './hooks/useWebSocket';
 export default function App() {
   useWebSocket(); // Активуємо WebSocket підключення при старті додатку
 
-  const { currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, applySlackToNode } = useScheduleStore();
-  const { routes } = useRouteStore();
+  const { currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, applySlackToNode, setInitialSchedule } = useScheduleStore();
+  const { routes, setInitialRoutes } = useRouteStore();
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     document.body.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Fetch initial configuration on mount
+  useEffect(() => {
+    const fetchInitData = async () => {
+      try {
+        const response = await fetch('/api/schedule/init');
+        if (response.ok) {
+          const data = await response.json();
+          setInitialRoutes(data.routes || []);
+          setInitialSchedule(data.vehicle_blocks || [], data.driver_duties || []);
+        } else {
+          console.error('Failed to load initial schedule data', response.status);
+        }
+      } catch (err) {
+        console.error('API Error:', err);
+      } finally {
+        setIsDataLoaded(true);
+      }
+    };
+    fetchInitData();
+  }, [setInitialRoutes, setInitialSchedule]);
 
   const handleApplySlack = (slackMin: number, tripId: string) => {
     applySlackToNode(tripId, 'st_starosinna', slackMin);
@@ -53,6 +75,17 @@ export default function App() {
   if (currentPath.startsWith('/driver/')) {
     const vehicleId = currentPath.split('/')[2];
     return <SmartWaybillView vehicleId={vehicleId || '0000'} />;
+  }
+
+  if (!isDataLoaded) {
+    return (
+      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-600 font-medium">Завантаження розкладів...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

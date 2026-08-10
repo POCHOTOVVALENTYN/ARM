@@ -5,7 +5,7 @@ import { useStationStore } from '../../store/useStationStore';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 import { LiveVehicleCanvas } from './LiveVehicleCanvas';
 import { calculateElectrobusBattery } from '../../utils/scheduleEngine';
-import { GTFS_ROUTES } from '../../data/gtfsParsedData';
+// Removed GTFS_ROUTES import
 import { GTFS_STATIONS } from '../../data/gtfsStopsData';
 
 export const LiveMapView: React.FC = () => {
@@ -69,7 +69,8 @@ export const LiveMapView: React.FC = () => {
   // Отримання обраного об'єкта маршруту
   const activeRouteObj = useMemo(() => {
     if (routeFilter === 'ALL') return null;
-    return GTFS_ROUTES.find(r => r.id.toLowerCase() === routeFilter.toLowerCase() || r.number === routeFilter);
+    const allRoutes = useRouteStore.getState().routes;
+    return allRoutes.find(r => r.id.toLowerCase() === routeFilter.toLowerCase() || r.number === routeFilter);
   }, [routeFilter]);
 
   // Динамічний фільтр зупинок для обраного маршруту

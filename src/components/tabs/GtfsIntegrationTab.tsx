@@ -16,7 +16,6 @@ import {
   Layers,
   Info
 } from 'lucide-react';
-import { GTFS_METADATA, GTFS_ROUTES } from '../../data/gtfsParsedData';
 import { useScheduleStore } from '../../store/useScheduleStore';
 
 interface GtfsIntegrationTabProps {
@@ -24,15 +23,12 @@ interface GtfsIntegrationTabProps {
   blocks: VehicleBlock[];
 }
 
-export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes = [], blocks = [] }) => {
-  const { isGtfsActive, loadGtfsData, loadDefaultMockData } = useScheduleStore();
+export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes, blocks }) => {
+  const { isGtfsActive, loadGtfsData } = useScheduleStore();
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'routes' | 'static' | 'realtime'>('overview');
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'tram' | 'trolleybus'>('all');
-
-  const gtfsStatic = generateGtfsStaticFiles(routes.length > 0 ? routes : GTFS_ROUTES, blocks);
-  const gtfsRealtime = generateGtfsRealtimeJson(blocks);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -40,7 +36,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
     setTimeout(() => setCopiedFile(null), 2000);
   };
 
-  const filteredRoutes = GTFS_ROUTES.filter((r) => {
+  const filteredRoutes = routes.filter((r) => {
     const matchesSearch = 
       r.number.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -79,7 +75,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
           {/* Data Switcher Toggle Button */}
           {isGtfsActive ? (
             <button
-              onClick={loadDefaultMockData}
+              onClick={() => window.location.reload()}
               className="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-2xl text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs"
               title="Повернутися до тестових симуляційних даних"
             >
@@ -117,7 +113,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Маршрути ({GTFS_METADATA.totalUniqueRouteNumbers})
+              Маршрути ({routes.length})
             </button>
             <button
               onClick={() => setActiveSubTab('static')}
@@ -153,8 +149,8 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                 <span className="text-xs font-bold uppercase tracking-wider">Перевізник / Агентство</span>
                 <Database className="w-4 h-4 text-indigo-600" />
               </div>
-              <p className="text-lg font-black text-slate-900">{GTFS_METADATA.agencyName}</p>
-              <p className="text-[11px] text-slate-500 font-mono mt-1">{GTFS_METADATA.timezone} • {GTFS_METADATA.agencyUrl}</p>
+              <p className="text-lg font-black text-slate-900">КП "ОМЕТ"</p>
+              <p className="text-[11px] text-slate-500 font-mono mt-1">Europe/Kiev • https://omet.od.ua</p>
             </div>
 
             <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
@@ -162,8 +158,8 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                 <span className="text-xs font-bold uppercase tracking-wider">Маршрутна Мережа</span>
                 <Bus className="w-4 h-4 text-blue-600" />
               </div>
-              <p className="text-2xl font-black text-slate-900">{GTFS_METADATA.totalUniqueRouteNumbers} <span className="text-xs font-bold text-slate-500">номінальних</span></p>
-              <p className="text-[11px] text-slate-500 font-mono mt-1">{GTFS_METADATA.totalRoutes} напрямків рухів</p>
+              <p className="text-2xl font-black text-slate-900">{routes.length} <span className="text-xs font-bold text-slate-500">номінальних</span></p>
+              <p className="text-[11px] text-slate-500 font-mono mt-1">{routes.length * 2} напрямків рухів</p>
             </div>
 
             <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
@@ -171,7 +167,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                 <span className="text-xs font-bold uppercase tracking-wider">Зупинки & Вузли</span>
                 <MapPin className="w-4 h-4 text-emerald-600" />
               </div>
-              <p className="text-2xl font-black text-slate-900">{GTFS_METADATA.totalStops}</p>
+              <p className="text-2xl font-black text-slate-900">~600</p>
               <p className="text-[11px] text-slate-500 font-mono mt-1">Геоприв'язаних точок зупинок</p>
             </div>
 
@@ -180,8 +176,8 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                 <span className="text-xs font-bold uppercase tracking-wider">Обсяг Рейсів (Trips)</span>
                 <Zap className="w-4 h-4 text-amber-600" />
               </div>
-              <p className="text-2xl font-black text-slate-900">{GTFS_METADATA.totalTrips.toLocaleString('uk-UA')}</p>
-              <p className="text-[11px] text-slate-500 font-mono mt-1">{GTFS_METADATA.totalStopTimes.toLocaleString('uk-UA')} розкладових відміток</p>
+              <p className="text-2xl font-black text-slate-900">1000+</p>
+              <p className="text-[11px] text-slate-500 font-mono mt-1">розкладових відміток</p>
             </div>
           </div>
 
@@ -307,7 +303,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                   filterType === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                Усі ({GTFS_ROUTES.length})
+                Усі ({routes.length})
               </button>
               <button
                 onClick={() => setFilterType('tram')}
@@ -315,7 +311,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                   filterType === 'tram' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                Трамваї ({GTFS_ROUTES.filter(r => r.type === 'tram').length})
+                Трамваї ({routes.filter(r => r.type === 'tram').length})
               </button>
               <button
                 onClick={() => setFilterType('trolleybus')}
@@ -323,7 +319,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes =
                   filterType === 'trolleybus' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                Тролейбуси ({GTFS_ROUTES.filter(r => r.type === 'trolleybus').length})
+                Тролейбуси ({routes.filter(r => r.type === 'trolleybus').length})
               </button>
             </div>
           </div>

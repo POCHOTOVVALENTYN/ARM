@@ -32,7 +32,7 @@ import {
   Map as MapIcon
 } from 'lucide-react';
 import { useScheduleStore } from '../../store/useScheduleStore';
-import { GTFS_ROUTES, GTFS_VEHICLE_BLOCKS, GTFS_METADATA } from '../../data/gtfsParsedData';
+// Removed static GTFS_ROUTES, GTFS_VEHICLE_BLOCKS import
 import { GTFS_MAP_ROUTES, GTFS_MAP_STOPS, ODESA_DISTRICTS, GtfsMapRoute, GtfsStop, OdesaDistrict } from '../../data/gtfsMapData';
 
 // Vehicle skin types
@@ -453,7 +453,7 @@ export const SimulationMapView: React.FC = () => {
     const map = mapRef.current;
     const zoom = map.getZoom();
 
-    const activeBlocks = liveBlocks.length > 0 ? liveBlocks : GTFS_VEHICLE_BLOCKS;
+    const activeBlocks = liveBlocks;
 
     // Filter by transport type & route
     const filteredBlocks = activeBlocks.filter((b) => {

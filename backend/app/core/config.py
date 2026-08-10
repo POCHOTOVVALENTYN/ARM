@@ -22,4 +22,6 @@ class Settings:
     DEPOT_ENTRY_LON: float = 30.736664
     DEPOT_RADIUS_KM: float = 0.05  # 50 метрів радіус для воріт
 
+    DATABASE_URL: str = "sqlite+aiosqlite:///./omet.db"
+
 settings = Settings()

@@ -1,6 +1,6 @@
 # backend/app/models/models.py
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON
 
 Base = declarative_base()
 
@@ -26,3 +26,41 @@ class IncidentLog(Base):
     action = Column(String)
     reason = Column(String)
     timestamp = Column(DateTime)
+
+class RouteModel(Base):
+    __tablename__ = "routes"
+    id = Column(String, primary_key=True, index=True)
+    number = Column(String)
+    name = Column(String)
+    type = Column(String)
+    status = Column(String)
+    primaryTerminalId = Column(String)
+    secondaryTerminalId = Column(String)
+    lengthDir1Km = Column(Float)
+    lengthDir2Km = Column(Float)
+    stations = Column(JSON)
+    allStations = Column(JSON)
+    segments = Column(JSON)
+    activeVehiclesCount = Column(JSON)
+    description = Column(String)
+
+class VehicleBlockModel(Base):
+    __tablename__ = "vehicle_blocks"
+    id = Column(String, primary_key=True, index=True)
+    route_id = Column(String)
+    vehicle_id = Column(String)
+    status = Column(String)
+    trips = Column(JSON)
+    start_time = Column(Integer)
+    end_time = Column(Integer)
+    is_completed = Column(Boolean, default=False)
+    
+class DriverDutyModel(Base):
+    __tablename__ = "driver_duties"
+    id = Column(String, primary_key=True, index=True)
+    driver_id = Column(String)
+    block_id = Column(String)
+    start_time = Column(Integer)
+    end_time = Column(Integer)
+    status = Column(String)
+    breaks = Column(JSON)

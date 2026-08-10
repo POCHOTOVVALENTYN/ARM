@@ -1,9 +1,5 @@
 import { create } from 'zustand';
 import { Route, RouteStatus, TimePeriod, TransportType } from '../types';
-import { GTFS_ROUTES } from '../data/gtfsParsedData';
-
-// Use only GTFS routes
-const ALL_INITIAL_ROUTES: Route[] = GTFS_ROUTES;
 
 interface RouteState {
   routes: Route[];
@@ -15,6 +11,7 @@ interface RouteState {
   validationErrors: Record<string, string>; // e.g., "routeId-segIdx-period": "error msg"
 
   // Setters / Filters
+  setInitialRoutes: (routes: Route[]) => void;
   setSearchQuery: (query: string) => void;
   setTypeFilter: (filter: 'all' | TransportType) => void;
   setStatusFilter: (filter: 'all' | RouteStatus) => void;
@@ -46,14 +43,15 @@ interface RouteState {
 }
 
 export const useRouteStore = create<RouteState>((set, get) => ({
-  routes: ALL_INITIAL_ROUTES,
+  routes: [],
   searchQuery: '',
   typeFilter: 'all',
   statusFilter: 'all',
-  selectedRouteId: ALL_INITIAL_ROUTES[0]?.id || null,
+  selectedRouteId: null,
   activeViewMode: 'overview',
   validationErrors: {},
 
+  setInitialRoutes: (routes) => set({ routes, selectedRouteId: routes[0]?.id || null }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setTypeFilter: (typeFilter) => set({ typeFilter }),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
@@ -232,8 +230,7 @@ export const useRouteStore = create<RouteState>((set, get) => ({
 
   resetToDefaults: () => {
     set({
-      routes: GTFS_ROUTES,
-      selectedRouteId: GTFS_ROUTES[0]?.id || null,
+      selectedRouteId: get().routes[0]?.id || null,
       validationErrors: {},
       searchQuery: '',
       typeFilter: 'all',

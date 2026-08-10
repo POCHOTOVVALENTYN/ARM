@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 import asyncio
 
 from app.api.routes import router as solver_router
-from app.api.websocket import router as ws_router # <--- ДОДАНО 07.08.2026
+from app.api.websocket import router as ws_router 
 from app.api.incidents import router as incidents_router
-from app.api.blocks import router as blocks_router # <--- ДОДАНО 07.08.2026
+from app.api.blocks import router as blocks_router 
+from app.api.schedule_init import router as schedule_router
 from app.services.telemetry_worker import telemetry_service
-from app.api.websocket import manager as ws_manager # <--- ДОДАНО 07.08.2026
+from app.api.websocket import manager as ws_manager
 
 # Lifespan контекст для запуску фонових процесів
 @asynccontextmanager
@@ -35,7 +36,8 @@ app.add_middleware(
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
 app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(blocks_router, prefix="/api/v1")
-app.include_router(ws_router) # <--- ДОДАНО 07.08.2026
+app.include_router(schedule_router, prefix="/api/schedule", tags=["Schedule Init"])
+app.include_router(ws_router)
 
 # Ендпоінт для перевірки поточного стану телеметрії (для тестування)
 @app.get("/api/v1/telemetry", tags=["Telemetry"])

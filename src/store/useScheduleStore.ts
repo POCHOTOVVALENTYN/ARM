@@ -66,7 +66,7 @@ interface ScheduleState {
   setTheme: (theme: string) => void;
   setUserRole: (role: string) => void;
   
-  loadDefaultMockData: () => Promise<void>;
+  setInitialSchedule: (blocks: VehicleBlock[], duties: DriverDuty[]) => void;
   updateTripDeparture: (blockId: string, tripId: string, startTime: number, delayMinutes: number) => Promise<void>;
 }
 
@@ -130,6 +130,7 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   commitDraft: () => set((state) => ({
     liveBlocks: [...state.draftBlocks],
     liveDuties: [...state.draftDuties],
+    liveSchedule: { current_blocks: [...state.draftBlocks] },
     isDraftModified: false,
     historyStack: [...state.historyStack, { timestamp: Date.now(), label: 'Затвердження нарядів' }]
   })),
@@ -165,19 +166,12 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   setTheme: (theme) => set({ theme }),
   setUserRole: (role) => set({ userRole: role }),
 
-  loadDefaultMockData: async () => {
-    set({ isProcessingTransaction: true });
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/solver/schedule');
-      if (response.ok) {
-        const data = await response.json();
-        set({ liveSchedule: { current_blocks: data } });
-      }
-    } catch (error) {
-      console.error("Error loading mock data:", error);
-    } finally {
-      set({ isProcessingTransaction: false });
-    }
+  setInitialSchedule: (blocks, duties) => {
+    set({
+      draftBlocks: blocks,
+      draftDuties: duties,
+      liveSchedule: { current_blocks: blocks }
+    });
   },
 
   updateTripDeparture: async (blockId: string, tripId: string, startTime: number, delayMinutes: number) => {
