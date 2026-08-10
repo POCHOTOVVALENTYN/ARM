@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Download, Upload, Trash2, Zap, FileText, CheckCircle2, Radio, Database } from 'lucide-react';
+import { Lock, Download, Upload, Trash2, Zap, FileText, CheckCircle2, Radio, Database, Settings } from 'lucide-react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useRouteStore } from '../../store/useRouteStore';
 import { AdminTab } from "../tabs/AdminTab";

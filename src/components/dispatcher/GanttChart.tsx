@@ -1,13 +1,11 @@
+import { useScheduleStore } from '../../store/useScheduleStore';
 import React, { useState } from 'react';
 import { DriverDuty, TransportType } from '../../types';
 import { timeToMinutes, validateDriverDuty } from '../../utils/scheduleEngine';
 import { AlertCircle, CheckCircle2, Clock, ShieldAlert, UserCheck, Coffee, Zap, Layers, User } from 'lucide-react';
 
-interface GanttChartProps {
-  duties: DriverDuty[];
-}
-
-export const GanttChart: React.FC<GanttChartProps> = ({ duties }) => {
+export const GanttChart: React.FC = () => {
+  const duties = useScheduleStore(state => state.draftDuties);
   const [viewMode, setViewMode] = useState<'driver' | 'vehicle'>('driver');
   const START_MIN = 300;  // 05:00
   const END_MIN = 1380;  // 23:00

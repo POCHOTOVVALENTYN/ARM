@@ -331,7 +331,6 @@ export const NetworkSettingsTab: React.FC = () => {
           {/* VIEW 1: Overview Route Master Table */}
           {activeViewMode === 'overview' && (
             <RouteTable
-              routes={filteredRoutes}
               selectedRouteId={selectedRouteId}
               onSelectRoute={handleSelectRoute}
               onEditRoute={handleOpenEditModal}

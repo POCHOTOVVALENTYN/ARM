@@ -7,11 +7,11 @@ import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 import { LiveVehicleCanvas } from './LiveVehicleCanvas';
 import { calculateElectrobusBattery } from '../../utils/scheduleEngine';
 // Removed GTFS_ROUTES import
-import { GTFS_STATIONS } from '../../data/gtfsStopsData';
+
 
 export const LiveMapView: React.FC = () => {
   const stationsFromStore = useStationStore(state => state.stations);
-  const { liveSchedule, validationWarnings, updateTripDeparture } = useScheduleStore();
+  const { liveSchedule, validationWarnings, updateTripDeparture, stops } = useScheduleStore();
   
   const liveBlocks = liveSchedule?.current_blocks || [];
   const [simTimeMin, setSimTimeMin] = useState<number>(450); // 07:30 default
@@ -91,10 +91,10 @@ export const LiveMapView: React.FC = () => {
 
     // Режим конкретного маршруту: фільтруємо зупинки зі списка `activeRouteObj.stations`
     const stationIdSet = new Set(activeRouteObj.stations || []);
-    const stopsList = GTFS_STATIONS.filter(s => stationIdSet.has(s.id));
+    const stopsList = stops.filter(s => stationIdSet.has(s.id));
 
     if (stopsList.length === 0) {
-      return GTFS_STATIONS.slice(0, 15); // Fallback if station array is empty
+      return stops.slice(0, 15); // Fallback if station array is empty
     }
 
     return stopsList.map(s => ({

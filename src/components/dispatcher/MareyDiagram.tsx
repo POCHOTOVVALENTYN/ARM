@@ -1,4 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import { useStationStore } from '../../store/useStationStore';
+import { useScheduleStore } from '../../store/useScheduleStore';
 import * as d3 from 'd3';
 import './MareyDiagram.css';
 
@@ -22,18 +24,44 @@ export interface Trip {
 }
 
 interface MareyDiagramProps {
-    stops: Stop[];
-    trips: Trip[];
     width?: number;
     height?: number;
 }
 
+
 export const MareyDiagram: React.FC<MareyDiagramProps> = ({ 
-    stops, 
-    trips, 
     width = 1200, 
     height = 800 
 }) => {
+    const stations = useStationStore((state) => state.stations);
+    const liveSchedule = useScheduleStore((state) => state.liveSchedule);
+
+    const stops: Stop[] = useMemo(() => {
+        return stations.map((s, i) => ({
+            id: s.id,
+            name: s.name,
+            distance_from_start: i * 0.5,
+        }));
+    }, [stations]);
+
+    const trips: Trip[] = useMemo(() => {
+        if (!liveSchedule || !liveSchedule.current_blocks) return [];
+        return liveSchedule.current_blocks.map((block) => {
+            const events = block.trips.flatMap((trip) => 
+                trip.nodes.map((node) => ({
+                    stop_id: node.node_id,
+                    timestamp: node.arrival_time,
+                    is_actual: false,
+                }))
+            );
+            return {
+                id: block.block_id,
+                vehicle_id: block.vehicle_id || block.block_id,
+                events,
+            };
+        });
+    }, [liveSchedule]);
+
     const xAxisRef = useRef<SVGGElement>(null);
     const yAxisRef = useRef<SVGGElement>(null);
 

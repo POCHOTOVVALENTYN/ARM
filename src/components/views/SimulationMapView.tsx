@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 // Removed static GTFS_ROUTES, GTFS_VEHICLE_BLOCKS import
-import { GTFS_MAP_ROUTES, GTFS_MAP_STOPS, ODESA_DISTRICTS, GtfsMapRoute, GtfsStop, OdesaDistrict } from '../../data/gtfsMapData';
+// No static GTFS_MAP imports needed
 
 // Vehicle skin types
 export type VehicleSkin = 'halo' | 'dual-tone' | 'muted' | 'balanced';
@@ -176,11 +176,11 @@ function parseTimeToSeconds(timeStr: string): number {
   return 0;
 }
 
-function findNextStopName(lat: number, lon: number): string {
+function findNextStopName(lat: number, lon: number, stops: any[]): string {
   let minDistance = Infinity;
   let nearestStopName = 'ст. Старосінна';
 
-  GTFS_MAP_STOPS.forEach((stop) => {
+  stops.forEach((stop) => {
     const dLat = stop.lat - lat;
     const dLon = stop.lon - lon;
     const distSq = dLat * dLat + dLon * dLon;
@@ -200,7 +200,7 @@ const DRIVERS_LIST = [
 ];
 
 export const SimulationMapView: React.FC = () => {
-  const { liveBlocks, isGtfsActive, loadGtfsData, fetchInitialData, theme } = useScheduleStore();
+  const { liveBlocks, isGtfsActive, loadGtfsData, fetchInitialData, theme, routes, stops } = useScheduleStore();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
@@ -326,7 +326,7 @@ export const SimulationMapView: React.FC = () => {
 
     // B. DRAW GTFS ROUTES
     if (showRoutes) {
-      GTFS_MAP_ROUTES.forEach((route) => {
+      routes.forEach((route) => {
         // Filter by transport type
         if (filterType !== 'all' && route.type !== filterType) return;
         // Filter by selected route number
@@ -363,33 +363,9 @@ export const SimulationMapView: React.FC = () => {
       });
     }
 
-    // C. DRAW ODESA ADMINISTRATIVE DISTRICTS & MICRODISTRICTS
-    if (showDistricts) {
-      ODESA_DISTRICTS.forEach((district) => {
-        // Draw Polygon if bounds exist
-        if (district.bounds && district.bounds.length > 0) {
-          const poly = L.polygon(district.bounds, {
-            color: district.color,
-            fillColor: district.color,
-            fillOpacity: 0.08,
-            weight: 1.8,
-            dashArray: '6, 6'
-          });
-          poly.bindTooltip(`<b>${district.ukrName}</b><br/>${district.description}`, { sticky: true });
-          districtsGroup.addLayer(poly);
-        }
-
-        // Draw District Label Badge
-        const labelMarker = L.marker(district.center, {
-          icon: createDistrictLabelIcon(district.ukrName, district.description, district.color)
-        });
-        districtsGroup.addLayer(labelMarker);
-      });
-    }
-
     // D. DRAW GTFS STOPS & CHECKPOINTS
     if (showStops) {
-      GTFS_MAP_STOPS.forEach((stop) => {
+      stops.forEach((stop) => {
         if (stop.isCheckpoint) {
           const checkpointMarker = L.marker([stop.lat, stop.lon], {
             icon: createCheckpointIcon()
@@ -476,11 +452,11 @@ export const SimulationMapView: React.FC = () => {
       let progressPct = 0;
 
       // Find GTFS Map Route matching block
-      const matchedRoute = GTFS_MAP_ROUTES.find((r) => 
+      const matchedRoute = routes.find((r) => 
         r.id === block.routeId || 
         r.number === block.routeId || 
         r.gtfsRouteIds?.includes(block.routeId)
-      ) || GTFS_MAP_ROUTES[index % GTFS_MAP_ROUTES.length];
+      ) || routes[index % routes.length];
 
       // Check if block has active GTFS trips for current simulation time
       const trips = block.trips || [];
@@ -538,7 +514,7 @@ export const SimulationMapView: React.FC = () => {
 
       const vehicleNumber = block.vehicleNumber || block.id.replace(/[^0-9]/g, '') || `${1000 + index}`;
       const driverName = `${DRIVERS_LIST[index % DRIVERS_LIST.length]} (КП ОМЕТ)`;
-      const nextStopName = findNextStopName(lat, lon);
+      const nextStopName = findNextStopName(lat, lon, stops);
       const delayVal = (index % 3 === 0 ? 0.7 : index % 2 === 0 ? -0.3 : 0.0) + Math.sin((simulationTime + index * 100) / 200) * 0.3;
       const delayMin = delayVal.toFixed(1);
       const passengers = Math.max(8, Math.min(96, Math.round(34 + Math.cos(simulationTime / 80 + index) * 20)));
@@ -837,7 +813,7 @@ export const SimulationMapView: React.FC = () => {
                     className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs cursor-pointer"
                   >
                     <option value="all">Всі 20 Маршрутів Одеси</option>
-                    {GTFS_MAP_ROUTES.map((r) => (
+                    {routes.map((r) => (
                       <option key={r.id} value={r.number}>
                         {r.code}: {r.name}
                       </option>

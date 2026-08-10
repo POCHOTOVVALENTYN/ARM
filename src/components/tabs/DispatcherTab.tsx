@@ -94,7 +94,7 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
       )}
 
       {/* Main Diagram View */}
-      <GanttChart duties={duties} />
+      <GanttChart />
 
       {/* Slack Manager Widget */}
       <SlackManager

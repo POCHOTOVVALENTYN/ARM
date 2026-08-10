@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Route, RouteStatus, TransportType } from '../../types';
+import { useScheduleStore } from '../../store/useScheduleStore';
 import { 
   Navigation, 
   Bus, 
@@ -16,7 +17,6 @@ import {
 } from 'lucide-react';
 
 interface RouteTableProps {
-  routes: Route[];
   selectedRouteId: string | null;
   onSelectRoute: (id: string, viewMode: 'passport' | 'matrix') => void;
   onEditRoute: (route: Route) => void;
@@ -25,13 +25,13 @@ interface RouteTableProps {
 }
 
 export const RouteTable: React.FC<RouteTableProps> = ({
-  routes,
   selectedRouteId,
   onSelectRoute,
   onEditRoute,
   onDuplicateRoute,
   onDeleteRoute,
 }) => {
+  const routes = useScheduleStore(state => state.routes);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
