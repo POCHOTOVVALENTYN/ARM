@@ -22,16 +22,22 @@ import { AlgorithmSimulatorTab } from './components/tabs/AlgorithmSimulatorTab';
 import { StaticDutiesArchiveView } from './components/views/StaticDutiesArchiveView';
 import { SmartWaybillView } from './components/views/SmartWaybillView';
 import { useScheduleStore } from './store/useScheduleStore';
+import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
 import { useWebSocket } from './hooks/useWebSocket';
+import { GlobalLoader } from './components/GlobalLoader';
+import { Toaster } from 'sonner';
 
 export default function App() {
   useWebSocket(); // Активуємо WebSocket підключення при старті додатку
 
-  const { currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, applySlackToNode, setInitialSchedule } = useScheduleStore();
-  const { routes, setInitialRoutes } = useRouteStore();
+  const { 
+    currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, 
+    applySlackToNode, isInitialized, fetchInitialData 
+  } = useScheduleStore();
+  const { isLoaded: isConfigLoaded, fetchConfigs } = useConfigStore();
+  const { routes } = useRouteStore();
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -40,24 +46,13 @@ export default function App() {
 
   // Fetch initial configuration on mount
   useEffect(() => {
-    const fetchInitData = async () => {
-      try {
-        const response = await fetch('/api/schedule/init');
-        if (response.ok) {
-          const data = await response.json();
-          setInitialRoutes(data.routes || []);
-          setInitialSchedule(data.vehicle_blocks || [], data.driver_duties || []);
-        } else {
-          console.error('Failed to load initial schedule data', response.status);
-        }
-      } catch (err) {
-        console.error('API Error:', err);
-      } finally {
-        setIsDataLoaded(true);
-      }
-    };
-    fetchInitData();
-  }, [setInitialRoutes, setInitialSchedule]);
+    if (!isInitialized) {
+      fetchInitialData();
+    }
+    if (!isConfigLoaded) {
+      fetchConfigs();
+    }
+  }, [isInitialized, fetchInitialData, isConfigLoaded, fetchConfigs]);
 
   const handleApplySlack = (slackMin: number, tripId: string) => {
     applySlackToNode(tripId, 'st_starosinna', slackMin);
@@ -77,12 +72,12 @@ export default function App() {
     return <SmartWaybillView vehicleId={vehicleId || '0000'} />;
   }
 
-  if (!isDataLoaded) {
+  if (!isInitialized || !isConfigLoaded) {
     return (
       <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
           <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-600 font-medium">Завантаження розкладів...</p>
+          <p className="text-slate-600 font-medium">Завантаження даних...</p>
         </div>
       </div>
     );
@@ -90,6 +85,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased selection:bg-indigo-200 selection:text-indigo-900 transition-colors duration-200">
+      <GlobalLoader />
+      <Toaster position="top-right" richColors />
+      
       {/* Primary Navigation & Header */}
       <Header onOpenReport={() => setIsReportOpen(true)} />
 

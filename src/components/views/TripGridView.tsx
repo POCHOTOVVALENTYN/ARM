@@ -20,16 +20,16 @@ const parseTime = (timeStr: string) => {
 
 export const TripGridView: React.FC = () => {
   const stations = useStationStore(state => state.stations);
-  const { liveSchedule, updateTripDeparture, isDraftModified, loadDefaultMockData } = useScheduleStore();
+  const { liveSchedule, updateTripDeparture, isDraftModified, fetchInitialData } = useScheduleStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [editingTripId, setEditingTripId] = useState<string | null>(null);
   const [newTimeInput, setNewTimeInput] = useState('');
 
   useEffect(() => {
     if (!liveSchedule?.current_blocks || liveSchedule.current_blocks.length === 0) {
-      loadDefaultMockData();
+      fetchInitialData();
     }
-  }, [liveSchedule?.current_blocks, loadDefaultMockData]);
+  }, [liveSchedule?.current_blocks, fetchInitialData]);
 
   const currentBlocks = liveSchedule?.current_blocks || [];
 

@@ -200,7 +200,7 @@ const DRIVERS_LIST = [
 ];
 
 export const SimulationMapView: React.FC = () => {
-  const { liveBlocks, isGtfsActive, loadGtfsData, loadDefaultMockData, theme } = useScheduleStore();
+  const { liveBlocks, isGtfsActive, loadGtfsData, fetchInitialData, theme } = useScheduleStore();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
@@ -728,7 +728,7 @@ export const SimulationMapView: React.FC = () => {
                 <div className="pt-1">
                   {isGtfsActive ? (
                     <button
-                      onClick={loadDefaultMockData}
+                      onClick={fetchInitialData}
                       className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-2 px-3 rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5 text-slate-400" />

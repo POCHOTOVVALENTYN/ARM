@@ -1,4 +1,6 @@
-class Settings:
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
     T_PREP_TRAM: int = 10  # хв підготовчого часу для трамваїв
     T_PREP_TROLLEYBUS: int = 19  # хв для тролейбусів
     MAX_SHIFT_MINUTES: int = 10 * 60  # 10 годин ліміт зміни
@@ -22,6 +24,9 @@ class Settings:
     DEPOT_ENTRY_LON: float = 30.736664
     DEPOT_RADIUS_KM: float = 0.05  # 50 метрів радіус для воріт
 
-    DATABASE_URL: str = "sqlite+aiosqlite:///./omet.db"
+    DATABASE_URL: str = "postgresql+asyncpg://omet_user:omet_password@localhost:5432/omet_db"
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

@@ -1,18 +1,18 @@
 import { create } from 'zustand';
 import { ControlPointNode } from '../types';
-import { MOCK_HUBS } from '../data/mockData';
-
 interface ControlPointStoreState {
   controlPoints: ControlPointNode[];
   // Actions for global control points
+  setControlPoints: (points: ControlPointNode[]) => void;
   addControlPoint: (point: ControlPointNode) => void;
   updateControlPoint: (updatedPoint: ControlPointNode) => void;
   deleteControlPoint: (id: string) => void;
 }
 
 export const useControlPointStore = create<ControlPointStoreState>((set) => ({
-  controlPoints: MOCK_HUBS, // Initialize with MOCK_HUBS
+  controlPoints: [], // Initialize empty
   
+  setControlPoints: (points) => set({ controlPoints: points }),
   addControlPoint: (point) => set((state) => ({
     controlPoints: [...state.controlPoints, point]
   })),

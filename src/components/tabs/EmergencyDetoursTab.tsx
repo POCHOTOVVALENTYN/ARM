@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { MOCK_EMERGENCY_TEMPLATES } from '../../data/mockData';
+import { useConfigStore } from '../../store/useConfigStore';
 import { AlertTriangle, CheckCircle, Flame, Navigation, ShieldAlert, Zap } from 'lucide-react';
 
 import { useScheduleStore } from '../../store/useScheduleStore';
 
 export const EmergencyDetoursTab: React.FC = () => {
   const { activeDetourId, setActiveDetour } = useScheduleStore();
+  const { emergencyTemplates } = useConfigStore();
 
   return (
     <div className="space-y-6">
@@ -35,7 +36,7 @@ export const EmergencyDetoursTab: React.FC = () => {
 
       {/* Emergency Templates Grid */}
       <div className="grid grid-cols-1 gap-4">
-        {MOCK_EMERGENCY_TEMPLATES.map((tmpl) => {
+        {emergencyTemplates.map((tmpl) => {
           const isActivated = activeDetourId === tmpl.id;
 
           return (

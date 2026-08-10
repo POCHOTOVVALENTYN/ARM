@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock, AlertCircle, Clock3, Filter, CheckCircle2, Layers } from 'lucide-react';
 import { useStationStore } from '../../store/useStationStore';
+import { useRouteStore } from '../../store/useRouteStore';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 import { LiveVehicleCanvas } from './LiveVehicleCanvas';
 import { calculateElectrobusBattery } from '../../utils/scheduleEngine';

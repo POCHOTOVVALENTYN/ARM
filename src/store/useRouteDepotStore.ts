@@ -1,9 +1,8 @@
 import { create } from 'zustand';
 import { RouteDepotConfig, PullOutInDetails } from '../types';
-import { MOCK_ROUTE_DEPOT_CONFIGS } from '../data/mockData';
-
 interface RouteDepotStore {
   configs: RouteDepotConfig[];
+  setConfigs: (configs: RouteDepotConfig[]) => void;
   addConfig: (config: RouteDepotConfig) => void;
   updateConfig: (config: RouteDepotConfig) => void;
   deleteConfig: (id: string) => void;
@@ -11,7 +10,9 @@ interface RouteDepotStore {
 }
 
 export const useRouteDepotStore = create<RouteDepotStore>((set) => ({
-  configs: [...MOCK_ROUTE_DEPOT_CONFIGS],
+  configs: [],
+
+  setConfigs: (configs) => set({ configs }),
 
   addConfig: (config) =>
     set((state) => ({ configs: [...state.configs, config] })),

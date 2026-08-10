@@ -87,3 +87,52 @@ class ControlPointEtaModel(Base):
     estimated_arrival_time = Column(DateTime)
     actual_arrival_time = Column(DateTime, nullable=True)
     timestamp = Column(DateTime)
+
+class EmergencyTemplateModel(Base):
+    __tablename__ = "emergency_templates"
+    id = Column(String, primary_key=True, index=True)
+    title = Column(String)
+    cause = Column(String)
+    affectedRouteIds = Column(JSON)
+    affectedStationIds = Column(JSON)
+    detourDescription = Column(String)
+    alternativeStations = Column(JSON)
+
+class HubNodeModel(Base):
+    __tablename__ = "hub_nodes"
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    locationDescription = Column(String)
+    availableTracksCount = Column(Integer)
+    minHeadwayMin = Column(Integer)
+    routesConnecting = Column(JSON)
+    channels = Column(JSON)
+
+class DepotModel(Base):
+    __tablename__ = "depots"
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    type = Column(String)
+    address = Column(String)
+    lat = Column(Float)
+    lng = Column(Float)
+    prepTimeMin = Column(Integer)
+
+class RouteDepotConfigModel(Base):
+    __tablename__ = "route_depot_configs"
+    id = Column(String, primary_key=True, index=True)
+    routeId = Column(String)
+    primaryDepotId = Column(String)
+    secondaryDepotId = Column(String, nullable=True)
+    defaultOutboundTime = Column(String)
+    defaultInboundTime = Column(String)
+
+class BreakLocationConfigModel(Base):
+    __tablename__ = "break_location_configs"
+    id = Column(String, primary_key=True, index=True)
+    routeId = Column(String)
+    locationId = Column(String)
+    locationName = Column(String)
+    locationType = Column(String)
+    maxCapacityVehicles = Column(Integer)
+    durationMin = Column(Integer)

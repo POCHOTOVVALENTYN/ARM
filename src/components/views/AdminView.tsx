@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Lock, Download, Upload, Trash2, Zap, FileText, CheckCircle2, Radio, Database } from 'lucide-react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useRouteStore } from '../../store/useRouteStore';
+import { AdminTab } from "../tabs/AdminTab";
 import { GtfsIntegrationTab } from '../tabs/GtfsIntegrationTab';
 import { ConfirmActionModal, ConfirmModalConfig } from '../ConfirmActionModal';
 
@@ -126,6 +127,17 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'config' }) =
         {/* Tab Navigation inside Admin */}
         <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 text-xs font-bold shrink-0">
           <button
+            onClick={() => setActiveTab('database')}
+            className={`px-4 py-2.5 rounded-xl flex items-center space-x-2 transition-all cursor-pointer ${
+              activeTab === 'database'
+                ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Database className="w-4 h-4 text-indigo-600" />
+            <span>База Даних</span>
+          </button>
+          <button
             onClick={() => setActiveTab('config')}
             className={`px-4 py-2.5 rounded-xl flex items-center space-x-2 transition-all cursor-pointer ${
               activeTab === 'config'
@@ -133,8 +145,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'config' }) =
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Database className="w-4 h-4 text-indigo-600" />
-            <span>Конфігурація & Резервування</span>
+            <Settings className="w-4 h-4 text-indigo-600" />
+            <span>Система & Резервування</span>
           </button>
           <button
             onClick={() => setActiveTab('gtfs')}
@@ -153,6 +165,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'config' }) =
       {/* Active Tab Content */}
       {activeTab === 'gtfs' ? (
         <GtfsIntegrationTab routes={routes} blocks={liveBlocks} />
+      ) : activeTab === 'database' ? (
+        <AdminTab />
       ) : (
         /* Main 2-Column Grid */
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

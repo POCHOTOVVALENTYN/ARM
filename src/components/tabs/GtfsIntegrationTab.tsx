@@ -44,6 +44,9 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes, 
     return matchesSearch && matchesType;
   });
 
+  const gtfsStatic = React.useMemo(() => generateGtfsStaticFiles(routes, blocks), [routes, blocks]);
+  const gtfsRealtime = React.useMemo(() => generateGtfsRealtimeJson(blocks), [blocks]);
+
 
   return (
     <div className="space-y-6">
@@ -378,7 +381,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes, 
                       <span>{filename}</span>
                     </span>
                     <button
-                      onClick={() => copyToClipboard(content, filename)}
+                      onClick={() => copyToClipboard(content as string, filename)}
                       className="text-slate-400 hover:text-indigo-600 p-1 transition-colors cursor-pointer"
                       title="Скопіювати у буфер"
                     >
@@ -390,7 +393,7 @@ export const GtfsIntegrationTab: React.FC<GtfsIntegrationTabProps> = ({ routes, 
                   </pre>
                 </div>
                 <button
-                  onClick={() => copyToClipboard(content, filename)}
+                  onClick={() => copyToClipboard(content as string, filename)}
                   className="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5 text-slate-500" />

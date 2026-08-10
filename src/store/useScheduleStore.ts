@@ -70,6 +70,12 @@ interface ScheduleState {
   
   setInitialSchedule: (blocks: VehicleBlock[], duties: DriverDuty[]) => void;
   updateTripDeparture: (blockId: string, tripId: string, startTime: number, delayMinutes: number) => Promise<void>;
+
+  // Global Initialization
+  routes: any[];
+  stops: any[];
+  isInitialized: boolean;
+  fetchInitialData: () => Promise<void>;
 }
 
 export const useScheduleStore = create<ScheduleState>()(
@@ -83,6 +89,27 @@ export const useScheduleStore = create<ScheduleState>()(
     theme: 'system',
     user: { name: 'Головний Диспетчер', role: UserRole.ADMIN, badge: '12345' },
     userRole: 'DISPATCHER',
+
+    routes: [],
+    stops: [],
+    isInitialized: false,
+
+    fetchInitialData: async () => {
+      try {
+        const response = await apiClient.get('/schedule/init');
+        set((draft) => {
+          draft.routes = response.data.routes || [];
+          draft.stops = response.data.stops || [];
+          // Assuming blocks and duties also come from this endpoint based on schedule_init.py
+          draft.liveBlocks = response.data.blocks || [];
+          draft.liveDuties = response.data.driver_duties || [];
+          draft.liveSchedule = { current_blocks: response.data.blocks || [] };
+          draft.isInitialized = true;
+        });
+      } catch (error) {
+        console.error('Критична помилка ініціалізації розкладу', error);
+      }
+    },
 
     // Restored Mock Data Defaults to prevent crashes
     draftBlocks: [],

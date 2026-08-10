@@ -9,7 +9,7 @@ import { GlobalHubFormModal } from '../network/GlobalHubFormModal';
 import { BreakLocationFormModal } from '../network/BreakLocationFormModal';
 import { useBreakStore } from '../../store/useBreakStore';
 import { JsonImportModal } from '../routes/JsonImportModal';
-import { MOCK_DEPOTS, MOCK_DRIVER_BREAK_LOCATIONS } from '../../data/mockData';
+import { useConfigStore } from '../../store/useConfigStore';
 import { useRouteDepotStore } from '../../store/useRouteDepotStore';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useStationStore } from '../../store/useStationStore';
@@ -40,6 +40,7 @@ import {
 
 export const NetworkSettingsTab: React.FC = () => {
   const stations = useStationStore(state => state.stations);
+  const { depots: mockDepots, breakLocations: mockBreakLocations } = useConfigStore();
   const { currentPath } = useScheduleStore();
   let activeSubTab = 'routes';
   if (currentPath.includes('/intersections')) activeSubTab = 'hubs';
@@ -600,8 +601,8 @@ export const NetworkSettingsTab: React.FC = () => {
         <div className="space-y-4">
           <h3 className="text-gray-900 font-bold text-base">Довідник депо та нульових пробігів (Depot & Zero-Run Master)</h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {MOCK_DEPOTS.map((dep) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {mockDepots.map((dep) => (
               <div
                 key={dep.id}
                 className="bg-white border-2 border-gray-900 rounded-xl p-4 space-y-2 shadow-sm"
@@ -665,7 +666,7 @@ export const NetworkSettingsTab: React.FC = () => {
                     {isExpanded && (
                       <div className="p-3 border-t border-gray-200 space-y-3 bg-white">
                         {configs.map(cfg => {
-                          const depot = MOCK_DEPOTS.find(d => d.id === cfg.depotId);
+                          const depot = mockDepots.find(d => d.id === cfg.depotId);
                           return (
                             <div key={cfg.id} className="border border-indigo-100 rounded-lg bg-indigo-50/30 p-3 relative">
                               <div className="flex items-center justify-between mb-3">
@@ -806,7 +807,8 @@ export const NetworkSettingsTab: React.FC = () => {
                         {/* Assign depot button */}
                         <button
                           onClick={() => {
-                            const tramDepots = MOCK_DEPOTS.filter(d => d.type === 'tram');
+                            const tramDepots = mockDepots.filter(d => d.type === 'tram');
+                            const activeConfigs = mockBreakLocations.filter(b => b.routeId === route.id);
                             const assignedDepotIds = configs.map(c => c.depotId);
                             const availableDepots = tramDepots.filter(d => !assignedDepotIds.includes(d.id));
                             if (availableDepots.length === 0) {
@@ -878,7 +880,7 @@ export const NetworkSettingsTab: React.FC = () => {
                     {isExpanded && (
                       <div className="p-3 border-t border-gray-200 space-y-3 bg-white">
                         {configs.map(cfg => {
-                          const depot = MOCK_DEPOTS.find(d => d.id === cfg.depotId);
+                          const depot = mockDepots.find(d => d.id === cfg.depotId);
                           return (
                             <div key={cfg.id} className="border border-indigo-100 rounded-lg bg-indigo-50/30 p-3 relative">
                               <div className="flex items-center justify-between mb-3">
@@ -1019,7 +1021,7 @@ export const NetworkSettingsTab: React.FC = () => {
                         {/* Assign depot button */}
                         <button
                           onClick={() => {
-                            const trolleyDepots = MOCK_DEPOTS.filter(d => d.type === 'trolleybus');
+                            const trolleyDepots = mockDepots.filter(d => d.type === 'trolleybus');
                             const assignedDepotIds = configs.map(c => c.depotId);
                             const availableDepots = trolleyDepots.filter(d => !assignedDepotIds.includes(d.id));
                             if (availableDepots.length === 0) {

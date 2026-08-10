@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 const apiClient = axios.create({
   // Забираємо хардкод. URL має підтягуватись з .env файлу
+  // @ts-ignore
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
   timeout: 15000,
   headers: {
