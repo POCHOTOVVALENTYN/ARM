@@ -51,3 +51,19 @@ class HotReserveActivationResponse(BaseModel):
     trip_id: str
     new_vehicle_id: str
     activation_time: datetime
+
+class DriverAssignRequest(BaseModel):
+    driver_id: str
+    vehicle_id: str
+
+class DriverStatusUpdate(BaseModel):
+    status: str  # 'WORK', 'BREAK', 'OFF'
+
+class StationStatusUpdate(BaseModel):
+    status: str  # 'ACTIVE', 'OFFLINE', 'MAINTENANCE'
+
+class EtaUpdateRequest(BaseModel):
+    trip_id: str
+    station_id: str
+    estimated_arrival_time: datetime
+    actual_arrival_time: Optional[datetime] = None

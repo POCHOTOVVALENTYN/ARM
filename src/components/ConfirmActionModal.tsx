@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { AlertTriangle, CheckCircle2, Trash2, Zap, Download, X, ListCheck, ShieldAlert, History } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Trash2, Zap, Download, X, ListCheck, ShieldAlert, Loader2 } from 'lucide-react';
 
 export interface ConfirmModalConfig {
   isOpen: boolean;
@@ -12,7 +12,7 @@ export interface ConfirmModalConfig {
   icon?: 'trash' | 'check' | 'warning' | 'zap' | 'download';
   changesList?: string[];
   conflictsCount?: number;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void> | void;
   onCancel: () => void;
 }
 
@@ -30,16 +30,27 @@ export const ConfirmActionModal: React.FC<ConfirmModalConfig> = ({
   onConfirm,
   onCancel,
 }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Close on Escape key press
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !isSubmitting) {
         onCancel();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onCancel]);
+  }, [isOpen, onCancel, isSubmitting]);
+
+  const handleConfirmClick = async () => {
+    setIsSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -180,16 +191,22 @@ export const ConfirmActionModal: React.FC<ConfirmModalConfig> = ({
         <div className="flex items-center justify-end space-x-3 pt-2 border-t border-slate-100">
           <button
             onClick={onCancel}
-            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs shadow-2xs transition-all cursor-pointer"
+            disabled={isSubmitting}
+            className={`px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs shadow-2xs transition-all cursor-pointer ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {cancelText}
           </button>
           <button
-            onClick={onConfirm}
-            className={`px-5 py-2.5 rounded-xl font-extrabold text-xs shadow-sm transition-all cursor-pointer flex items-center space-x-1.5 ${styles.confirmBtn}`}
+            onClick={handleConfirmClick}
+            disabled={isSubmitting}
+            className={`px-5 py-2.5 rounded-xl font-extrabold text-xs shadow-sm transition-all flex items-center space-x-1.5 ${styles.confirmBtn} ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
           >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>{confirmText}</span>
+            {isSubmitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4" />
+            )}
+            <span>{isSubmitting ? 'Обробка...' : confirmText}</span>
           </button>
         </div>
       </div>

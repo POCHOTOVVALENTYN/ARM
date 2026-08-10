@@ -8,12 +8,18 @@ from app.api.websocket import router as ws_router
 from app.api.incidents import router as incidents_router
 from app.api.blocks import router as blocks_router 
 from app.api.schedule_init import router as schedule_router
+from app.api.drivers import router as drivers_router
+from app.api.stations import router as stations_router
+from app.api.control_points import router as control_points_router
 from app.services.telemetry_worker import telemetry_service
 from app.api.websocket import manager as ws_manager
+from app.core.database import init_db
 
 # Lifespan контекст для запуску фонових процесів
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Створюємо таблиці БД
+    await init_db()
     # Запускаємо воркер Wialon у фоновому режимі при старті сервера
     polling_task = asyncio.create_task(telemetry_service.polling_loop(ws_manager))
     # Запускаємо слухача Redis для WebSocket
@@ -37,6 +43,9 @@ app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver
 app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(blocks_router, prefix="/api/v1")
 app.include_router(schedule_router, prefix="/api/schedule", tags=["Schedule Init"])
+app.include_router(drivers_router, prefix="/api/v1")
+app.include_router(stations_router, prefix="/api/v1")
+app.include_router(control_points_router, prefix="/api/v1")
 app.include_router(ws_router)
 
 # Ендпоінт для перевірки поточного стану телеметрії (для тестування)

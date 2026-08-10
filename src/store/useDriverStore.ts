@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import apiClient from '../utils/apiClient';
 
 export interface TripData {
   id: string;
@@ -36,12 +37,8 @@ export const useDriverStore = create<DriverStoreState>((set) => ({
   fetchBlock: async (vehicleId: string) => {
     set({ isLoading: true, error: null });
     try {
-      // Assuming API endpoint is running on localhost:8000
-      const response = await fetch(`http://localhost:8000/api/v1/blocks/${vehicleId}/today`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch schedule');
-      }
-      const data: BlockData = await response.json();
+      const response = await apiClient.get(`/api/v1/blocks/${vehicleId}/today`);
+      const data: BlockData = response.data;
       set({ 
         currentBlock: data, 
         isLoading: false,

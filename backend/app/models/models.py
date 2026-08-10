@@ -64,3 +64,26 @@ class DriverDutyModel(Base):
     end_time = Column(Integer)
     status = Column(String)
     breaks = Column(JSON)
+
+class DriverModel(Base):
+    __tablename__ = "drivers"
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    status = Column(String)  # 'WORK', 'BREAK', 'OFF'
+    current_vehicle_id = Column(String, nullable=True)
+
+class StationModel(Base):
+    __tablename__ = "stations"
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    type = Column(String)  # 'HUB', 'DEPOT', 'STOP'
+    status = Column(String)  # 'ACTIVE', 'OFFLINE', 'MAINTENANCE'
+
+class ControlPointEtaModel(Base):
+    __tablename__ = "eta_logs"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    trip_id = Column(String, index=True)
+    station_id = Column(String)
+    estimated_arrival_time = Column(DateTime)
+    actual_arrival_time = Column(DateTime, nullable=True)
+    timestamp = Column(DateTime)

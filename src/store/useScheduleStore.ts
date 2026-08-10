@@ -2,6 +2,8 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export enum UserRole { ADMIN = 'ADMIN', DISPATCHER = 'DISPATCHER', DRIVER = 'DRIVER', OBSERVER = 'OBSERVER' }
 
 import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
+import apiClient from '../utils/apiClient';
 import { VehicleBlock, TransportType, DriverDuty } from '../types';
 
 export interface TelemetryData {
@@ -58,7 +60,7 @@ interface ScheduleState {
 
   // Action Handlers
   setLiveSchedule: (schedule: any) => void;
-  updateTelemetry: (data: TelemetryData) => void;
+  updateTelemetry: (data: any) => void;
   setIsProcessingTransaction: (status: boolean) => void;
   setValidationWarnings: (warnings: string[]) => void;
   setActiveDetour: (id: string | undefined) => void;
@@ -70,138 +72,146 @@ interface ScheduleState {
   updateTripDeparture: (blockId: string, tripId: string, startTime: number, delayMinutes: number) => Promise<void>;
 }
 
-export const useScheduleStore = create<ScheduleState>((set, get) => ({
-  liveSchedule: null,
-  telemetry: {},
-  isProcessingTransaction: false,
-  validationWarnings: [],
-  activeDetourId: undefined,
-  currentPath: '/',
-  theme: 'system',
-  user: { name: 'Головний Диспетчер', role: UserRole.ADMIN, badge: '12345' },
-  userRole: 'DISPATCHER',
+export const useScheduleStore = create<ScheduleState>()(
+  immer((set, get) => ({
+    liveSchedule: null,
+    telemetry: {},
+    isProcessingTransaction: false,
+    validationWarnings: [],
+    activeDetourId: undefined,
+    currentPath: '/',
+    theme: 'system',
+    user: { name: 'Головний Диспетчер', role: UserRole.ADMIN, badge: '12345' },
+    userRole: 'DISPATCHER',
 
-  // Restored Mock Data Defaults to prevent crashes
-  draftBlocks: [],
-  selectedDate: new Date().toISOString().split('T')[0],
-  setSelectedDate: (date: string) => set({ selectedDate: date }),
-  generateMultipleBlocks: (routeId: string, transportType: TransportType, count: number, date?: string) => {
-    set((state) => {
-      const newBlocks = Array.from({ length: count }).map((_, i) => ({
-        id: `B_${routeId}_${Date.now()}_${i}`,
-        vehicleNumber: '',
-        type: transportType,
-        depotId: 'depot_1',
-        routeId,
-        date: date || state.selectedDate,
-        depotExitTime: '05:00',
-        depotReturnTime: '23:00',
-        trips: []
-      }));
-      return {
-        draftBlocks: [...state.draftBlocks, ...newBlocks],
-        isDraftModified: true
-      };
-    });
-  },
-  updateVehicleBlockInfo: (blockId, info) => set((state) => ({
-    draftBlocks: state.draftBlocks.map((b: VehicleBlock) => b.id === blockId ? { ...b, ...info } : b),
-    isDraftModified: true
-  })),
-  deleteVehicleBlock: (blockId) => set((state) => ({
-    draftBlocks: state.draftBlocks.filter((b: VehicleBlock) => b.id !== blockId),
-    isDraftModified: true
-  })),
-  clearVehicleBlocks: (blockIds) => set((state) => ({
-    draftBlocks: blockIds ? state.draftBlocks.filter(b => !blockIds.includes(b.id)) : [],
-    isDraftModified: true
-  })),
-  reorderVehicleBlocks: (activeId, overId) => set((state) => {
-    const oldIndex = state.draftBlocks.findIndex(b => b.id === activeId);
-    const newIndex = state.draftBlocks.findIndex(b => b.id === overId);
-    if (oldIndex === -1 || newIndex === -1) return state;
-
-    const newBlocks = [...state.draftBlocks];
-    const [moved] = newBlocks.splice(oldIndex, 1);
-    newBlocks.splice(newIndex, 0, moved);
-    return { draftBlocks: newBlocks, isDraftModified: true };
-  }),
-  discardDraft: () => set({ draftBlocks: [], draftDuties: [], isDraftModified: false }),
-  commitDraft: () => set((state) => ({
-    liveBlocks: [...state.draftBlocks],
-    liveDuties: [...state.draftDuties],
-    liveSchedule: { current_blocks: [...state.draftBlocks] },
-    isDraftModified: false,
-    historyStack: [...state.historyStack, { timestamp: Date.now(), label: 'Затвердження нарядів' }]
-  })),
-  draftDuties: [],
-  liveBlocks: [],
-  liveDuties: [],
-  conflicts: [],
-  deploymentPlans: [],
-  updateDeploymentPlan: (plan: any) => set((state: any) => ({
-      deploymentPlans: [...state.deploymentPlans.filter((p: any) => p.id !== plan.id), plan]
-  })),
-  applySlackToNode: () => {},
-  
-  // History
-  redoStack: [],
-  historyStack: [],
-  isDraftModified: false,
-
-  setLiveSchedule: (schedule) => {
-    set((state) => {
-      if (JSON.stringify(state.liveSchedule) === JSON.stringify(schedule)) {
-        return state;
+    // Restored Mock Data Defaults to prevent crashes
+    draftBlocks: [],
+    selectedDate: new Date().toISOString().split('T')[0],
+    setSelectedDate: (date: string) => set((state) => { state.selectedDate = date; }),
+    generateMultipleBlocks: (routeId: string, transportType: TransportType, count: number, date?: string) => {
+      set((state) => {
+        const newBlocks = Array.from({ length: count }).map((_, i) => ({
+          id: `B_${routeId}_${Date.now()}_${i}`,
+          vehicleNumber: '',
+          type: transportType,
+          depotId: 'depot_1',
+          routeId,
+          date: date || state.selectedDate,
+          depotExitTime: '05:00',
+          depotReturnTime: '23:00',
+          trips: []
+        }));
+        state.draftBlocks.push(...newBlocks);
+        state.isDraftModified = true;
+      });
+    },
+    updateVehicleBlockInfo: (blockId, info) => set((state) => {
+      const blockIndex = state.draftBlocks.findIndex((b: VehicleBlock) => b.id === blockId);
+      if (blockIndex !== -1) {
+        state.draftBlocks[blockIndex] = { ...state.draftBlocks[blockIndex], ...info };
+        state.isDraftModified = true;
       }
-      return { liveSchedule: schedule };
-    });
-  },
+    }),
+    deleteVehicleBlock: (blockId) => set((state) => {
+      state.draftBlocks = state.draftBlocks.filter((b: VehicleBlock) => b.id !== blockId);
+      state.isDraftModified = true;
+    }),
+    clearVehicleBlocks: (blockIds) => set((state) => {
+      state.draftBlocks = blockIds ? state.draftBlocks.filter((b: VehicleBlock) => !blockIds.includes(b.id)) : [];
+      state.isDraftModified = true;
+    }),
+    reorderVehicleBlocks: (activeId, overId) => set((state) => {
+      const oldIndex = state.draftBlocks.findIndex((b: VehicleBlock) => b.id === activeId);
+      const newIndex = state.draftBlocks.findIndex((b: VehicleBlock) => b.id === overId);
+      if (oldIndex === -1 || newIndex === -1) return;
 
-  updateTelemetry: (data) => set({ telemetry: data }),
-  setIsProcessingTransaction: (status) => set({ isProcessingTransaction: status }),
-  setValidationWarnings: (warnings) => set({ validationWarnings: warnings }),
-  setActiveDetour: (id) => set({ activeDetourId: id }),
-  setPath: (path) => set({ currentPath: path }),
-  setTheme: (theme) => set({ theme }),
-  setUserRole: (role) => set({ userRole: role }),
+      const [moved] = state.draftBlocks.splice(oldIndex, 1);
+      state.draftBlocks.splice(newIndex, 0, moved);
+      state.isDraftModified = true;
+    }),
+    discardDraft: () => set((state) => {
+      state.draftBlocks = [];
+      state.draftDuties = [];
+      state.isDraftModified = false;
+    }),
+    commitDraft: () => set((state) => {
+      state.liveBlocks = [...state.draftBlocks];
+      state.liveDuties = [...state.draftDuties];
+      state.liveSchedule = { current_blocks: [...state.draftBlocks] };
+      state.isDraftModified = false;
+      state.historyStack.push({ timestamp: Date.now(), label: 'Затвердження нарядів' });
+    }),
+    draftDuties: [],
+    liveBlocks: [],
+    liveDuties: [],
+    conflicts: [],
+    deploymentPlans: [],
+    updateDeploymentPlan: (plan: any) => set((state) => {
+        state.deploymentPlans = [...state.deploymentPlans.filter((p: any) => p.id !== plan.id), plan];
+    }),
+    applySlackToNode: () => {},
+    
+    // History
+    redoStack: [],
+    historyStack: [],
+    isDraftModified: false,
 
-  setInitialSchedule: (blocks, duties) => {
-    set({
-      draftBlocks: blocks,
-      draftDuties: duties,
-      liveSchedule: { current_blocks: blocks }
-    });
-  },
+    setLiveSchedule: (schedule) => {
+      set((state) => {
+        if (JSON.stringify(state.liveSchedule) !== JSON.stringify(schedule)) {
+          state.liveSchedule = schedule;
+        }
+      });
+    },
 
-  updateTripDeparture: async (blockId: string, tripId: string, startTime: number, delayMinutes: number) => {
-    set({ isProcessingTransaction: true });
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/solver/apply-delay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    updateTelemetry: (incomingData: any) => set((draft) => {
+      // Якщо це об'єкт з багатьма vehicle_id (наприклад, початкове завантаження)
+      if (Object.keys(incomingData).length > 0 && !incomingData.vehicle_id) {
+        Object.keys(incomingData).forEach(key => {
+          draft.telemetry[key] = incomingData[key];
+        });
+      } else if (incomingData.vehicle_id) {
+        // Безпечна пряма мутація для конкретного ТЗ
+        draft.telemetry[incomingData.vehicle_id] = incomingData;
+      }
+    }),
+    setIsProcessingTransaction: (status) => set((state) => { state.isProcessingTransaction = status; }),
+    setValidationWarnings: (warnings) => set((state) => { state.validationWarnings = warnings; }),
+    setActiveDetour: (id) => set((state) => { state.activeDetourId = id; }),
+    setPath: (path) => set((state) => { state.currentPath = path; }),
+    setTheme: (theme) => set((state) => { state.theme = theme; }),
+    setUserRole: (role) => set((state) => { state.userRole = role; }),
+
+    setInitialSchedule: (blocks, duties) => {
+      set((state) => {
+        state.draftBlocks = blocks;
+        state.draftDuties = duties;
+        state.liveSchedule = { current_blocks: blocks };
+      });
+    },
+
+    updateTripDeparture: async (blockId: string, tripId: string, startTime: number, delayMinutes: number) => {
+      set((state) => { state.isProcessingTransaction = true; });
+      try {
+        const response = await apiClient.post('/api/v1/solver/apply-delay', {
           block_id: blockId,
           start_time: startTime,
           delay_minutes: delayMinutes,
           schedule_data: get().liveSchedule?.current_blocks || []
-        })
-      });
-      if (response.ok) {
-        const result = await response.json();
+        });
+        
+        const result = response.data;
         if (result.updated_schedule) {
-          set({ 
-            liveSchedule: { current_blocks: result.updated_schedule },
-            validationWarnings: result.warnings || []
+          set((state) => { 
+            state.liveSchedule = { current_blocks: result.updated_schedule };
+            state.validationWarnings = result.warnings || [];
           });
         }
-      } else {
-        console.error("Failed to apply delay on server");
+      } catch (error) {
+        console.error("Error applying delay:", error);
+      } finally {
+        set((state) => { state.isProcessingTransaction = false; });
       }
-    } catch (error) {
-      console.error("Error applying delay:", error);
-    } finally {
-      set({ isProcessingTransaction: false });
     }
-  }
-}));
+  }))
+);
