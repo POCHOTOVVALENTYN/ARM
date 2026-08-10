@@ -4,10 +4,9 @@ import { useScheduleStore } from '../store/useScheduleStore';
 import { useIncidentStore } from '../store/useIncidentStore';
 import { useDriverStore } from '../store/useDriverStore';
 
-const WS_URL = 'ws://localhost:8000/ws';
-
-export const useWebSocket = () => {
+export const useWebSocket = (url: string) => {
   const wsRef = useRef<WebSocket | null>(null);
+  const isInitialized = useScheduleStore((state) => state.isInitialized);
   
   // Додайте дію updateTelemetry у ваш useScheduleStore, якщо її ще немає
   const updateTelemetry = useScheduleStore(state => (state as any).updateTelemetry);
@@ -22,7 +21,8 @@ export const useWebSocket = () => {
     let reconnectTimeout: any = null;
 
     const connect = () => {
-      ws = new WebSocket(WS_URL);
+      if (!isInitialized) return;
+      ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -103,7 +103,7 @@ export const useWebSocket = () => {
         ws.close();
       }
     };
-  }, [updateTelemetry, setLiveSchedule, setValidationWarnings]);
+  }, [url, isInitialized, updateTelemetry, setLiveSchedule, setValidationWarnings]);
 
   return wsRef.current;
 };

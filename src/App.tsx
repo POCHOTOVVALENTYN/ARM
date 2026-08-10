@@ -29,7 +29,9 @@ import { GlobalLoader } from './components/GlobalLoader';
 import { Toaster } from 'sonner';
 
 export default function App() {
-  useWebSocket(); // Активуємо WebSocket підключення при старті додатку
+  // Активуємо WebSocket підключення при старті додатку,
+  // воно запрацює тільки після isInitialized === true
+  useWebSocket('ws://localhost:8000/ws');
 
   const { 
     currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, 
