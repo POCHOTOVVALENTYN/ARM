@@ -2,6 +2,7 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export enum UserRole { ADMIN = 'ADMIN', DISPATCHER = 'DISPATCHER', DRIVER = 'DRIVER', OBSERVER = 'OBSERVER' }
 
 import { create } from 'zustand';
+import { VehicleBlock, TransportType, DriverDuty } from '../types';
 
 export interface TelemetryData {
   [vehicle_id: string]: {
@@ -27,32 +28,33 @@ interface ScheduleState {
   // Restored mock fields
   loadGtfsData?: any;
   isGtfsActive?: any;
-  liveBlocks?: any;
   undoLastAction?: any;
   assignDriverToDuty?: any;
-  commitDraft?: any;
   applySlackToNode?: any;
-  setSelectedDate?: any;
   historyStack?: any;
   assignDriverToBlockShift?: any;
-  selectedDate?: any;
   revertToHistoryIndex?: any;
   conflicts?: any;
-  liveDuties?: any;
-  isDraftModified?: any;
   executeHotReserveSwap?: any;
-  reorderVehicleBlocks?: any;
-  deleteVehicleBlock?: any;
   redoAction?: any;
-  draftBlocks?: any;
-  updateVehicleBlockInfo?: any;
   redoStack?: any;
-  draftDuties?: any;
   deploymentPlans?: any;
   updateDeploymentPlan?: any;
-  generateMultipleBlocks?: any;
-  clearVehicleBlocks?: any;
-  discardDraft?: any;
+
+  liveBlocks: VehicleBlock[];
+  liveDuties: DriverDuty[];
+  draftDuties: DriverDuty[];
+  isDraftModified: boolean;
+  commitDraft: () => void;
+  selectedDate: string;
+  setSelectedDate: (date: string) => void;
+  draftBlocks: VehicleBlock[];
+  generateMultipleBlocks: (routeId: string, transportType: TransportType, count: number, date?: string) => void;
+  updateVehicleBlockInfo: (blockId: string, info: Partial<VehicleBlock>) => void;
+  deleteVehicleBlock: (blockId: string) => void;
+  clearVehicleBlocks: (blockIds?: string[]) => void;
+  reorderVehicleBlocks: (activeId: string, overId: string) => void;
+  discardDraft: () => void;
 
   // Action Handlers
   setLiveSchedule: (schedule: any) => void;
@@ -81,6 +83,56 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
 
   // Restored Mock Data Defaults to prevent crashes
   draftBlocks: [],
+  selectedDate: new Date().toISOString().split('T')[0],
+  setSelectedDate: (date: string) => set({ selectedDate: date }),
+  generateMultipleBlocks: (routeId: string, transportType: TransportType, count: number, date?: string) => {
+    set((state) => {
+      const newBlocks = Array.from({ length: count }).map((_, i) => ({
+        id: `B_${routeId}_${Date.now()}_${i}`,
+        vehicleNumber: '',
+        type: transportType,
+        depotId: 'depot_1',
+        routeId,
+        date: date || state.selectedDate,
+        depotExitTime: '05:00',
+        depotReturnTime: '23:00',
+        trips: []
+      }));
+      return {
+        draftBlocks: [...state.draftBlocks, ...newBlocks],
+        isDraftModified: true
+      };
+    });
+  },
+  updateVehicleBlockInfo: (blockId, info) => set((state) => ({
+    draftBlocks: state.draftBlocks.map((b: VehicleBlock) => b.id === blockId ? { ...b, ...info } : b),
+    isDraftModified: true
+  })),
+  deleteVehicleBlock: (blockId) => set((state) => ({
+    draftBlocks: state.draftBlocks.filter((b: VehicleBlock) => b.id !== blockId),
+    isDraftModified: true
+  })),
+  clearVehicleBlocks: (blockIds) => set((state) => ({
+    draftBlocks: blockIds ? state.draftBlocks.filter(b => !blockIds.includes(b.id)) : [],
+    isDraftModified: true
+  })),
+  reorderVehicleBlocks: (activeId, overId) => set((state) => {
+    const oldIndex = state.draftBlocks.findIndex(b => b.id === activeId);
+    const newIndex = state.draftBlocks.findIndex(b => b.id === overId);
+    if (oldIndex === -1 || newIndex === -1) return state;
+
+    const newBlocks = [...state.draftBlocks];
+    const [moved] = newBlocks.splice(oldIndex, 1);
+    newBlocks.splice(newIndex, 0, moved);
+    return { draftBlocks: newBlocks, isDraftModified: true };
+  }),
+  discardDraft: () => set({ draftBlocks: [], draftDuties: [], isDraftModified: false }),
+  commitDraft: () => set((state) => ({
+    liveBlocks: [...state.draftBlocks],
+    liveDuties: [...state.draftDuties],
+    isDraftModified: false,
+    historyStack: [...state.historyStack, { timestamp: Date.now(), label: 'Затвердження нарядів' }]
+  })),
   draftDuties: [],
   liveBlocks: [],
   liveDuties: [],
