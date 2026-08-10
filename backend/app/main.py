@@ -51,7 +51,7 @@ app.add_middleware(
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
 app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(blocks_router, prefix="/api/v1")
-app.include_router(schedule_router, prefix="/api/schedule", tags=["Schedule Init"])
+app.include_router(schedule_router, prefix="/api", tags=["Schedule Init"])
 app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(stations_router, prefix="/api/v1")
 app.include_router(control_points_router, prefix="/api/v1")

@@ -108,6 +108,7 @@ export const useScheduleStore = create<ScheduleState>()(
         });
       } catch (error) {
         console.error('Критична помилка ініціалізації розкладу', error);
+        set((draft) => { draft.isInitialized = true; });
       }
     },
 

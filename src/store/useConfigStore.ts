@@ -113,6 +113,7 @@ export const useConfigStore = create<ConfigState>()(
       } catch (error) {
         console.error('Failed to fetch configs', error);
         toast.error('Помилка завантаження конфігурацій');
+        set((state) => { state.isLoaded = true; });
       } finally {
         setLoading(false);
       }
