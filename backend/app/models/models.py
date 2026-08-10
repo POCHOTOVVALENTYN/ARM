@@ -43,6 +43,7 @@ class RouteModel(Base):
     segments = Column(JSON)
     activeVehiclesCount = Column(JSON)
     description = Column(String)
+    color = Column(String, nullable=True)
 
 class VehicleBlockModel(Base):
     __tablename__ = "vehicle_blocks"
@@ -78,6 +79,8 @@ class StationModel(Base):
     name = Column(String)
     type = Column(String)  # 'HUB', 'DEPOT', 'STOP'
     status = Column(String)  # 'ACTIVE', 'OFFLINE', 'MAINTENANCE'
+    lat = Column(Float, nullable=True)
+    lon = Column(Float, nullable=True)
 
 class ControlPointEtaModel(Base):
     __tablename__ = "eta_logs"
