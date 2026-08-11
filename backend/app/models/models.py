@@ -81,6 +81,8 @@ class StationModel(Base):
     status = Column(String)  # 'ACTIVE', 'OFFLINE', 'MAINTENANCE'
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)
+    is_dispatch_station = Column(Boolean, default=False)
+    break_capacity = Column(Integer, default=0)
 
 class ControlPointEtaModel(Base):
     __tablename__ = "eta_logs"
