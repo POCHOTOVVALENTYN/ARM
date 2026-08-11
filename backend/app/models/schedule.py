@@ -51,6 +51,8 @@ class StaticTrip(Base):
     shift_id = Column(Integer, ForeignKey("static_shifts.id", ondelete="CASCADE"), nullable=False)
     trip_sequence = Column(Integer, nullable=False)
     direction = Column(SQLEnum(TripDirection), nullable=False)
+    smoothing_state = Column(String, default="normal")
+    smoothing_delta = Column(Float, default=0.0)
     
     shift = relationship("StaticShift", back_populates="trips")
     stop_times = relationship("StaticStopTime", back_populates="trip", cascade="all, delete-orphan")

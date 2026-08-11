@@ -32,7 +32,20 @@ class StaticStopTimeResponse(BaseModel):
 class StaticTripResponse(BaseModel):
     trip_sequence: int
     direction: TripDirection
+    smoothing_state: str = "normal"
+    smoothing_delta: float = 0.0
     stop_times: List[StaticStopTimeResponse]
+
+    class Config:
+        from_attributes = True
+
+class StaticShiftResponse(BaseModel):
+    id: int
+    shift_sequence: int
+    has_break: bool
+    break_start_time: time | None = None
+    break_duration_minutes: int | None = None
+    trips: List[StaticTripResponse]
 
     class Config:
         from_attributes = True
@@ -40,7 +53,7 @@ class StaticTripResponse(BaseModel):
 class StaticDutyResponse(BaseModel):
     id: int
     duty_number: str
-    trips: List[StaticTripResponse]
+    shifts: List[StaticShiftResponse]
 
     class Config:
         from_attributes = True

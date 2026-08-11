@@ -6,6 +6,7 @@ import { AlertCircle, CheckCircle2, Clock, ShieldAlert, UserCheck, Coffee, Zap, 
 
 export const GanttChart: React.FC = () => {
   const duties = useScheduleStore(state => state.draftDuties);
+  const blocks = useScheduleStore(state => state.draftBlocks);
   const [viewMode, setViewMode] = useState<'driver' | 'vehicle'>('driver');
   const START_MIN = 300;  // 05:00
   const END_MIN = 1380;  // 23:00
@@ -62,24 +63,41 @@ export const GanttChart: React.FC = () => {
 
       {/* Legend Bar */}
       <div className="flex flex-wrap items-center justify-between text-xs gap-3 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 bg-sky-500 rounded" />
-            <span className="text-slate-300">Робочий час (Рух)</span>
+        {viewMode === 'driver' ? (
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-sky-500 rounded" />
+              <span className="text-slate-300">Робочий час (Рух)</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-purple-500 rounded" />
+              <span className="text-slate-300">Нормативний обід (10-15 / 20 хв)</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-amber-500 rounded" />
+              <span className="text-slate-300">Понаднормовий обід (&gt;норма)</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-rose-500 rounded" />
+              <span className="text-slate-300">Порушення (10 год / Вікно обіду)</span>
+            </div>
           </div>
-          <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 bg-purple-500 rounded" />
-            <span className="text-slate-300">Нормативний обід (10-15 / 20 хв)</span>
+        ) : (
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-slate-200 border border-slate-300 rounded" />
+              <span className="text-slate-300">Нормальний рейс</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-orange-100 border border-orange-400 rounded" />
+              <span className="text-slate-300">Затримка (Відтяжка)</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3 h-3 bg-blue-100 border border-blue-400 rounded" />
+              <span className="text-slate-300">Прискорення (Нагін)</span>
+            </div>
           </div>
-          <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 bg-amber-500 rounded" />
-            <span className="text-slate-300">Понаднормовий обід (&gt;норма)</span>
-          </div>
-          <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 bg-rose-500 rounded" />
-            <span className="text-slate-300">Порушення (10 год / Вікно обіду)</span>
-          </div>
-        </div>
+        )}
 
         <span className="text-[11px] text-slate-400 font-mono">
           Шкала: 05:00 — 23:00 (18 годин)
@@ -88,7 +106,7 @@ export const GanttChart: React.FC = () => {
 
       {/* Gantt Rows */}
       <div className="space-y-3">
-        {duties.map((rawDuty) => {
+        {viewMode === 'driver' && duties.map((rawDuty) => {
           const type: TransportType = rawDuty.transportType || 'tram';
           const duty = validateDriverDuty(rawDuty, type);
 
@@ -242,6 +260,60 @@ export const GanttChart: React.FC = () => {
                   <span>Локація: {duty.lunchLocationName || 'Старосінна площа (Вузол)'}</span>
                 </div>
               )}
+            </div>
+          );
+        })}
+
+        {viewMode === 'vehicle' && blocks.map((block) => {
+          return (
+            <div
+              key={block.id}
+              className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 space-y-2 transition-all hover:border-slate-700"
+            >
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center space-x-2">
+                  <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-300 font-bold">
+                    <Layers className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-white text-sm">
+                      Блок: {block.id}
+                    </span>
+                    <span className="text-slate-400 ml-2">
+                      (Маршрут: {block.routeId} — Тип: {block.type})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Timeline Bar Container */}
+              <div className="relative h-7 bg-slate-950 rounded-lg overflow-hidden border border-slate-800">
+                {block.trips.map((trip, idx) => {
+                  const leftPct = getPercent(trip.departureTime);
+                  const rightPct = getPercent(trip.arrivalTime);
+                  const widthPct = Math.max(0.5, rightPct - leftPct);
+                  
+                  let bgClass = 'bg-slate-200 border-slate-300'; // normal
+                  let tooltip = `Рейс ${idx + 1} | Звичайний хід`;
+                  
+                  if (trip.smoothing_state === 'delay') {
+                    bgClass = 'bg-orange-100 border-orange-400';
+                    tooltip = `Рейс ${idx + 1} | Відтяжка: +${trip.smoothing_delta || 0} хв`;
+                  } else if (trip.smoothing_state === 'catchup') {
+                    bgClass = 'bg-blue-100 border-blue-400';
+                    tooltip = `Рейс ${idx + 1} | Нагін: -${trip.smoothing_delta || 0} хв`;
+                  }
+
+                  return (
+                    <div
+                      key={trip.id}
+                      className={`absolute top-1 bottom-1 rounded border z-20 hover:opacity-80 cursor-help ${bgClass}`}
+                      style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                      title={`${tooltip} (${trip.departureTime} - ${trip.arrivalTime})`}
+                    />
+                  );
+                })}
+              </div>
             </div>
           );
         })}

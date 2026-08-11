@@ -82,36 +82,32 @@ class ElasticSmoother:
                 self._apply_catchup(sorted_trips[trip_idx]["trip"], self.MAX_CATCHUP_FACTOR)
 
     def _apply_delay(self, trip: dict, delay_minutes: float):
-        """Зсуває всі зупинки рейсу вперед у часі (імітація затримки відправлення)"""
+        """Відтяжка: зсув вперед у часі"""
+        trip["smoothing_state"] = "delay"
+        trip["smoothing_delta"] = round(delay_minutes, 1)
         for st in trip["stop_times"]:
             st["arrival_minute"] += delay_minutes
             st["departure_minute"] += delay_minutes
 
     def _apply_catchup(self, trip: dict, catchup_factor: float):
-        """
-        Прискорює рейс на маршруті. Відправлення з першої зупинки залишається тим самим, 
-        але час прибуття на наступні зупинки скорочується.
-        """
+        """Нагін: компресія часу ходу"""
         stop_times = trip["stop_times"]
         if not stop_times:
             return
             
-        current_time = stop_times[0]["departure_minute"]
+        # Розраховуємо, скільки сумарно хвилин було зекономлено
+        original_duration = stop_times[-1]["arrival_minute"] - stop_times[0]["departure_minute"]
         
+        current_time = stop_times[0]["departure_minute"]
         for i in range(len(stop_times) - 1):
-            current_st = stop_times[i]
-            next_st = stop_times[i+1]
-            
-            # Оригінальний час проїзду до наступної зупинки
-            original_travel_time = next_st["arrival_minute"] - current_st["departure_minute"]
-            
-            # Стиснутий час (нагін)
+            original_travel_time = stop_times[i+1]["arrival_minute"] - stop_times[i]["departure_minute"]
             fast_travel_time = original_travel_time * catchup_factor
-            
             current_time += fast_travel_time
-            
-            # Оновлюємо розклад для наступної зупинки
-            next_st["arrival_minute"] = current_time
-            # Якщо це не кінцева/обід, відправлення дорівнює прибуттю
-            if not next_st.get("is_break_location", False):
-                next_st["departure_minute"] = current_time
+            stop_times[i+1]["arrival_minute"] = current_time
+            if not stop_times[i+1].get("is_break_location", False):
+                stop_times[i+1]["departure_minute"] = current_time
+                
+        new_duration = stop_times[-1]["arrival_minute"] - stop_times[0]["departure_minute"]
+        
+        trip["smoothing_state"] = "catchup"
+        trip["smoothing_delta"] = round(original_duration - new_duration, 1) # Збережено хвилин

@@ -158,12 +158,21 @@ export interface BreakLocationConfig {
   durationMin: number; // Standard: 15/10 min for tram, 20 min for trolleybus
 }
 
+export type SmoothingState = 'normal' | 'delay' | 'catchup';
+
+export interface StopTime {
+  stop_id: string;
+  stop_sequence: number;
+  arrival_time: string;
+  departure_time: string;
+}
+
 export interface Trip {
   id: string;
   blockId: string;
   dutyId: string;
   routeId: string;
-  direction: 1 | 2;
+  direction: 1 | 2 | 'FORWARD' | 'BACKWARD';
   departureTime: string; // HH:mm
   arrivalTime: string;   // HH:mm
   startStationId: string;
@@ -173,6 +182,12 @@ export interface Trip {
   isTruncated?: boolean;
   slackMin?: number; // Delay / slack added in minutes
   status: 'normal' | 'delayed' | 'truncated' | 'reserve';
+  
+  // Fields from StaticSchedule API response
+  duty_id?: string;
+  smoothing_state?: SmoothingState;
+  smoothing_delta?: number;
+  stop_times?: StopTime[];
 }
 
 export interface VehicleBlock {
