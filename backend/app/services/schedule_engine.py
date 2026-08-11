@@ -6,17 +6,23 @@ class ScheduleEnginePipeline:
         self.duties = []
 
     def execute(self):
-        # Прохід 1: Базова сітка (ідеальні умови)
+        # 1. Створюємо ідеальну маятникову сітку
         self._generate_base_grid()
         
-        # Прохід 2: Виїзди, Заїзди та Розриви змін
+        # 2. Нарізаємо на зміни (ранок/вечір/пік), додаємо нульові рейси в/з депо
         self._apply_duty_types_and_depot_runs()
         
-        # Прохід 3: Призначення обідів у шаховому порядку
+        # 3. Розподіляємо обіди, перевіряючи місткість (Break Allocator)
+        # Це створить "дірки" у розкладі
         self._allocate_staggered_breaks()
         
-        # Прохід 4: Еластичне згладжування (Нагін/Відтяжка)
-        self._apply_elastic_smoothing()
+        # 4. Згладжуємо утворені дірки еластичним методом
+        base_headway = self._calculate_base_headway()
+        smoother = ElasticSmoother(self.duties, base_headway)
+        self.duties = smoother.execute()
+        
+        # 5. Конвертуємо всі `minute` у `datetime.time` для SQLAlchemy
+        self._finalize_time_formats()
         
         return self.duties
         
@@ -38,13 +44,11 @@ class ScheduleEnginePipeline:
                     # Якщо ліміт станції вичерпано (інші вже обідають) -> переносимо обід на наступне коло
                     pass
 
-    def _apply_elastic_smoothing(self):
-        """Прохід 4: Еластичне згладжування інтервалів"""
-        # Розраховуємо базовий інтервал (headway) для поточного маршруту
+    def _calculate_base_headway(self):
         time_forward = sum(s.travel_time_to_next for s in self.params.stops_forward)
         time_backward = sum(s.travel_time_to_next for s in self.params.stops_backward)
         round_trip_time = time_forward + self.params.layover_minutes + time_backward + self.params.layover_minutes
-        base_headway = round_trip_time / self.params.num_vehicles
+        return round_trip_time / self.params.num_vehicles
 
-        smoother = ElasticSmoother(self.duties, base_headway)
-        smoother.execute()
+    def _finalize_time_formats(self):
+        pass
