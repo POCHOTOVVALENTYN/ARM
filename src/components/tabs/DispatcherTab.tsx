@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Route, VehicleBlock, DriverDuty, ScheduleConflict } from '../../types';
 import { GanttChart } from '../dispatcher/GanttChart';
 import { LinearRouteMap } from '../dispatcher/LinearRouteMap';
+import { DeviationDashboard } from '../dispatcher/DeviationDashboard';
 import { SlackManager } from '../dispatcher/SlackManager';
-import { AlertTriangle, CheckCircle, ChevronDown, Clock, Play, Radio, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronDown, Clock, Play, Radio, ShieldAlert, BarChart2, List, Map } from 'lucide-react';
 
 interface DispatcherTabProps {
   routes: Route[];
@@ -25,6 +26,7 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
   onReserveVehicle = () => {}
 }) => {
   const [selectedRouteId, setSelectedRouteId] = useState<string>(routes[0]?.id || '');
+  const [activeView, setActiveView] = useState<'gantt' | 'linear' | 'deviation'>('gantt');
 
   const selectedRoute = routes.find((r) => r.id === selectedRouteId) || routes[0];
   const routeBlocks = blocks.filter((b) => b.routeId === selectedRouteId);
@@ -67,6 +69,37 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
               <ChevronDown className="w-4 h-4 text-blue-600 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
+          
+          {/* View Switcher Tabs */}
+          <div className="flex items-center bg-blue-50/60 p-1 rounded-xl border border-blue-200 shadow-xs">
+            <button
+              onClick={() => setActiveView('gantt')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeView === 'gantt' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              <BarChart2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Гант</span>
+            </button>
+            <button
+              onClick={() => setActiveView('linear')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeView === 'linear' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              <Map className="w-4 h-4" />
+              <span className="hidden sm:inline">Лінійна Схема</span>
+            </button>
+            <button
+              onClick={() => setActiveView('deviation')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeView === 'deviation' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              <List className="w-4 h-4" />
+              <span className="hidden sm:inline">Матриця Відхилень</span>
+            </button>
+          </div>
 
         </div>
       </div>
@@ -96,8 +129,9 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
 
       {/* Main Diagram View */}
       <div className="space-y-6">
-        <LinearRouteMap />
-        <GanttChart />
+        {activeView === 'gantt' && <GanttChart />}
+        {activeView === 'linear' && <LinearRouteMap />}
+        {activeView === 'deviation' && <DeviationDashboard />}
       </div>
 
       {/* Slack Manager Widget */}
