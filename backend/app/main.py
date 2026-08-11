@@ -13,6 +13,7 @@ from app.api.stations import router as stations_router
 from app.api.control_points import router as control_points_router
 from app.api.settings import router as settings_router
 from app.api.emergencies import router as emergencies_router
+from app.api.schedules import router as new_schedules_router
 from app.services.telemetry_worker import telemetry_service
 from app.api.websocket import manager as ws_manager
 from app.core.database import init_db
@@ -57,6 +58,7 @@ app.include_router(stations_router, prefix="/api/v1")
 app.include_router(control_points_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(emergencies_router, prefix="/api/v1")
+app.include_router(new_schedules_router, prefix="/api/v1")
 app.include_router(ws_router)
 
 # Ендпоінт для перевірки поточного стану телеметрії (для тестування)
