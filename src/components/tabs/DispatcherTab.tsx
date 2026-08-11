@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Route, VehicleBlock, DriverDuty, ScheduleConflict } from '../../types';
 import { GanttChart } from '../dispatcher/GanttChart';
+import { LinearRouteMap } from '../dispatcher/LinearRouteMap';
 import { SlackManager } from '../dispatcher/SlackManager';
 import { AlertTriangle, CheckCircle, ChevronDown, Clock, Play, Radio, ShieldAlert } from 'lucide-react';
 
@@ -94,7 +95,10 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
       )}
 
       {/* Main Diagram View */}
-      <GanttChart />
+      <div className="space-y-6">
+        <LinearRouteMap />
+        <GanttChart />
+      </div>
 
       {/* Slack Manager Widget */}
       <SlackManager
