@@ -1,3 +1,5 @@
+from app.services.elastic_smoother import ElasticSmoother
+
 class ScheduleEnginePipeline:
     def __init__(self, params):
         self.params = params
@@ -37,12 +39,12 @@ class ScheduleEnginePipeline:
                     pass
 
     def _apply_elastic_smoothing(self):
-        """
-        Алгоритм компенсації 'дірок' за рахунок нагону (допустимого ПДР)
-        та відтяжок на кінцевих.
-        """
-        # 1. Знаходимо розрив в інтервалі > базового headway
-        # 2. Беремо попередні 2 і наступні 2 наряди
-        # 3. Скорочуємо travel_time_to_next на дозволений % (нагін)
-        # 4. Перераховуємо arrival_time
-        pass
+        """Прохід 4: Еластичне згладжування інтервалів"""
+        # Розраховуємо базовий інтервал (headway) для поточного маршруту
+        time_forward = sum(s.travel_time_to_next for s in self.params.stops_forward)
+        time_backward = sum(s.travel_time_to_next for s in self.params.stops_backward)
+        round_trip_time = time_forward + self.params.layover_minutes + time_backward + self.params.layover_minutes
+        base_headway = round_trip_time / self.params.num_vehicles
+
+        smoother = ElasticSmoother(self.duties, base_headway)
+        smoother.execute()
