@@ -1,5 +1,15 @@
 export type TransportType = 'tram' | 'trolleybus' | 'electrobus';
 
+export type ScheduleStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
+export interface ScheduleResponse {
+  id: number;
+  route_id: string;
+  active_date: string;
+  status: ScheduleStatus;
+  created_at: string;
+  duties: any[]; // we'll use any[] for now, or define StaticDutyResponse if needed, wait, we use duties to extract trips
+}
 export interface Station {
   id: string;
   name: string;

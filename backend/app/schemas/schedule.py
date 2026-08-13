@@ -1,7 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import List
-from datetime import time
-from app.models.schedule import TripDirection
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional
+from datetime import time, date, datetime
+from app.models.schedule import TripDirection, ScheduleStatus
 
 # --- ВХІДНІ ДАНІ (Request) ---
 
@@ -21,39 +21,50 @@ class GenerateGridRequest(BaseModel):
 # --- ВИХІДНІ ДАНІ (Response) ---
 
 class StaticStopTimeResponse(BaseModel):
+    id: int
     stop_id: str
     stop_sequence: int
     arrival_time: time
     departure_time: time
+    is_break_location: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class StaticTripResponse(BaseModel):
+    id: int
     trip_sequence: int
     direction: TripDirection
-    smoothing_state: str = "normal"
-    smoothing_delta: float = 0.0
-    stop_times: List[StaticStopTimeResponse]
+    smoothing_state: str = Field(default="normal")
+    smoothing_delta: float = Field(default=0.0)
+    stop_times: List[StaticStopTimeResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class StaticShiftResponse(BaseModel):
     id: int
     shift_sequence: int
     has_break: bool
-    break_start_time: time | None = None
-    break_duration_minutes: int | None = None
-    trips: List[StaticTripResponse]
+    break_start_time: Optional[time] = None
+    break_duration_minutes: Optional[int] = None
+    trips: List[StaticTripResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class StaticDutyResponse(BaseModel):
     id: int
     duty_number: str
-    shifts: List[StaticShiftResponse]
+    shifts: List[StaticShiftResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+class ScheduleResponse(BaseModel):
+    id: int
+    route_id: str
+    active_date: date
+    status: ScheduleStatus
+    created_at: datetime
+    duties: List[StaticDutyResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+

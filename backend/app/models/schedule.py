@@ -1,7 +1,24 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Time, Float, Boolean, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, ForeignKey, Time, Float, Boolean, Enum as SQLEnum, Date, DateTime
 from sqlalchemy.orm import relationship
-from app.core.database import Base
+from app.models.models import Base
+from datetime import datetime
 import enum
+
+class ScheduleStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    route_id = Column(String, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)
+    active_date = Column(Date, nullable=False)
+    status = Column(SQLEnum(ScheduleStatus), default=ScheduleStatus.DRAFT, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    duties = relationship("StaticDuty", back_populates="schedule", cascade="all, delete-orphan")
 
 class ServiceDay(str, enum.Enum):
     WORKDAY = "WORKDAY"       # Будні
@@ -23,11 +40,13 @@ class TripDirection(str, enum.Enum):
 class StaticDuty(Base):
     __tablename__ = "static_duties"
     id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False)
     route_id = Column(String, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)
     service_id = Column(SQLEnum(ServiceDay), nullable=False) # Графік робочого чи вихідного дня
     duty_number = Column(String, nullable=False)
     duty_type = Column(SQLEnum(DutyType), nullable=False)
 
+    schedule = relationship("Schedule", back_populates="duties")
     shifts = relationship("StaticShift", back_populates="duty", cascade="all, delete-orphan")
 
 class StaticShift(Base):

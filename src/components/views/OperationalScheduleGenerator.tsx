@@ -31,7 +31,7 @@ export const OperationalScheduleGenerator: React.FC = () => {
     assignDriverToBlockShift,
     deleteVehicleBlock,
     clearVehicleBlocks,
-    setGeneratedTrips,
+    setDraftSchedule,
     setPath
   } = useScheduleStore();
 
@@ -83,33 +83,8 @@ export const OperationalScheduleGenerator: React.FC = () => {
       };
       
       const response = await apiClient.post('/schedules/generate', params);
-      
-      const trips: Trip[] = [];
-      response.data.forEach((duty: any) => {
-        duty.shifts.forEach((shift: any) => {
-          shift.trips.forEach((trip: any) => {
-            if (trip.stop_times && trip.stop_times.length > 0) {
-              trips.push({
-                id: `T${trip.trip_sequence}`,
-                blockId: `B-${duty.id}`,
-                dutyId: duty.duty_number,
-                routeId: params.route_id,
-                direction: trip.direction === 'FORWARD' ? 1 : 2,
-                departureTime: trip.stop_times[0].departure_time.substring(0, 5),
-                arrivalTime: trip.stop_times[trip.stop_times.length - 1].arrival_time.substring(0, 5),
-                startStationId: trip.stop_times[0].stop_id,
-                endStationId: trip.stop_times[trip.stop_times.length - 1].stop_id,
-                status: 'normal',
-                smoothing_state: trip.smoothing_state,
-                smoothing_delta: trip.smoothing_delta,
-                stop_times: trip.stop_times
-              });
-            }
-          });
-        });
-      });
-      
-      setGeneratedTrips(trips);
+      const scheduleData = response.data;
+      setDraftSchedule(scheduleData);
       setIsGenModalOpen(false);
       setPath('/dispatch/gantt');
       

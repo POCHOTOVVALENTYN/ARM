@@ -19,7 +19,11 @@ export interface TelemetryData {
 interface ScheduleState {
   generatedTrips: Trip[];
   currentTime: number;
+  currentScheduleId: number | null;
+  currentScheduleStatus: any | null; // ScheduleStatus
   setGeneratedTrips: (trips: Trip[]) => void;
+  setCurrentScheduleInfo: (id: number, status: any) => void;
+  setDraftSchedule: (schedulePayload: any) => void;
   setCurrentTime: (time: number) => void;
   clearGeneratedSchedule: () => void;
   
@@ -88,11 +92,55 @@ export const useScheduleStore = create<ScheduleState>()(
   immer((set, get) => ({
     generatedTrips: [],
     currentTime: 360,
+    currentScheduleId: null,
+    currentScheduleStatus: null,
     setGeneratedTrips: (trips) => set((state) => { state.generatedTrips = trips; }),
+    setCurrentScheduleInfo: (id, status) => set((state) => { 
+      state.currentScheduleId = id; 
+      state.currentScheduleStatus = status; 
+    }),
+    setDraftSchedule: (schedulePayload) => {
+      const allTrips: Trip[] = [];
+      
+      if (schedulePayload?.duties) {
+        schedulePayload.duties.forEach((duty: any) => {
+          if (duty.shifts) {
+            duty.shifts.forEach((shift: any) => {
+              if (shift.trips) {
+                shift.trips.forEach((trip: any) => {
+                  if (trip.stop_times && trip.stop_times.length > 0) {
+                    allTrips.push({
+                      ...trip,
+                      id: `T${trip.id || trip.trip_sequence}`,
+                      blockId: `B-${duty.id}`,
+                      duty_id: duty.duty_number,
+                      direction: trip.direction === 'FORWARD' ? 1 : 2,
+                      departureTime: trip.stop_times[0].arrival_time?.substring(0, 5) || trip.stop_times[0].arrival_time,
+                      arrivalTime: trip.stop_times[trip.stop_times.length - 1].arrival_time?.substring(0, 5) || trip.stop_times[trip.stop_times.length - 1].arrival_time,
+                      startStationId: trip.stop_times[0].stop_id,
+                      endStationId: trip.stop_times[trip.stop_times.length - 1].stop_id,
+                      status: 'normal'
+                    });
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
+
+      set((state) => { 
+        state.currentScheduleId = schedulePayload.id;
+        state.currentScheduleStatus = schedulePayload.status;
+        state.generatedTrips = allTrips; 
+      });
+    },
     setCurrentTime: (time) => set((state) => { state.currentTime = time; }),
     clearGeneratedSchedule: () => set((state) => { 
       state.generatedTrips = []; 
       state.currentTime = 360; 
+      state.currentScheduleId = null;
+      state.currentScheduleStatus = null;
     }),
 
     liveSchedule: null,
