@@ -4,7 +4,7 @@ export enum UserRole { ADMIN = 'ADMIN', DISPATCHER = 'DISPATCHER', DRIVER = 'DRI
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import apiClient from '../utils/apiClient';
-import { VehicleBlock, TransportType, DriverDuty } from '../types';
+import { VehicleBlock, TransportType, DriverDuty, Trip } from '../types';
 
 export interface TelemetryData {
   [vehicle_id: string]: {
@@ -17,6 +17,12 @@ export interface TelemetryData {
 }
 
 interface ScheduleState {
+  generatedTrips: Trip[];
+  currentTime: number;
+  setGeneratedTrips: (trips: Trip[]) => void;
+  setCurrentTime: (time: number) => void;
+  clearGeneratedSchedule: () => void;
+  
   liveSchedule: any | null;
   telemetry: TelemetryData;
   isProcessingTransaction: boolean;
@@ -80,6 +86,15 @@ interface ScheduleState {
 
 export const useScheduleStore = create<ScheduleState>()(
   immer((set, get) => ({
+    generatedTrips: [],
+    currentTime: 360,
+    setGeneratedTrips: (trips) => set((state) => { state.generatedTrips = trips; }),
+    setCurrentTime: (time) => set((state) => { state.currentTime = time; }),
+    clearGeneratedSchedule: () => set((state) => { 
+      state.generatedTrips = []; 
+      state.currentTime = 360; 
+    }),
+
     liveSchedule: null,
     telemetry: {},
     isProcessingTransaction: false,

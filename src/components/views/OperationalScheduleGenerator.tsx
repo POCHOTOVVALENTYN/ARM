@@ -17,9 +17,11 @@ import {
   Check,
   Calendar,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  Play
 } from 'lucide-react';
-import { VehicleBlock, TransportType, DayType, ShiftType } from '../../types';
+import { VehicleBlock, TransportType, DayType, ShiftType, Trip } from '../../types';
+import apiClient from '../../utils/apiClient';
 
 export const OperationalScheduleGenerator: React.FC = () => {
   const { 
@@ -28,8 +30,13 @@ export const OperationalScheduleGenerator: React.FC = () => {
     updateVehicleBlockInfo, 
     assignDriverToBlockShift,
     deleteVehicleBlock,
-    clearVehicleBlocks
+    clearVehicleBlocks,
+    setGeneratedTrips,
+    setPath
   } = useScheduleStore();
+
+  const [isGenModalOpen, setIsGenModalOpen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const { routes } = useRouteStore();
 
   const [selectedBlockId, setSelectedBlockId] = useState<string>(draftBlocks[0]?.id || '');
@@ -61,6 +68,57 @@ export const OperationalScheduleGenerator: React.FC = () => {
   }>({ isOpen: false, type: 'single' });
 
   const selectedBlock = draftBlocks.find((b) => b.id === selectedBlockId) || draftBlocks[0];
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      const params = {
+        route_id: selectedBlock?.routeId || draftBlocks[0]?.routeId || 'route_1',
+        num_vehicles: 10,
+        start_time_minutes: 360,
+        end_time_minutes: 1380,
+        layover_minutes: 5,
+        stops_forward: [],
+        stops_backward: []
+      };
+      
+      const response = await apiClient.post('/schedules/generate', params);
+      
+      const trips: Trip[] = [];
+      response.data.forEach((duty: any) => {
+        duty.shifts.forEach((shift: any) => {
+          shift.trips.forEach((trip: any) => {
+            if (trip.stop_times && trip.stop_times.length > 0) {
+              trips.push({
+                id: `T${trip.trip_sequence}`,
+                blockId: `B-${duty.id}`,
+                dutyId: duty.duty_number,
+                routeId: params.route_id,
+                direction: trip.direction === 'FORWARD' ? 1 : 2,
+                departureTime: trip.stop_times[0].departure_time.substring(0, 5),
+                arrivalTime: trip.stop_times[trip.stop_times.length - 1].arrival_time.substring(0, 5),
+                startStationId: trip.stop_times[0].stop_id,
+                endStationId: trip.stop_times[trip.stop_times.length - 1].stop_id,
+                status: 'normal',
+                smoothing_state: trip.smoothing_state,
+                smoothing_delta: trip.smoothing_delta,
+                stop_times: trip.stop_times
+              });
+            }
+          });
+        });
+      });
+      
+      setGeneratedTrips(trips);
+      setIsGenModalOpen(false);
+      setPath('/dispatch/gantt');
+      
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   // Assigned drivers (duties) linked to this vehicle block
   const assignedDuties = draftDuties.filter((duty) =>
@@ -182,6 +240,15 @@ export const OperationalScheduleGenerator: React.FC = () => {
               Моніторинг та редагування оперативних розкладів. Внесення корективів щодо фактичних обставин руху електротранспорту.
             </p>
           </div>
+        </div>
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={() => setIsGenModalOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold px-4 py-2 rounded-xl flex items-center space-x-2 shadow-xs transition-colors"
+          >
+            <Play className="w-4 h-4" />
+            <span>Генерувати розклад</span>
+          </button>
         </div>
       </div>
 
@@ -738,6 +805,51 @@ export const OperationalScheduleGenerator: React.FC = () => {
                 className="px-4 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors cursor-pointer shadow-xs text-sm"
               >
                 Підтвердити Видалення
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generation Modal */}
+      {isGenModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-3 text-blue-600">
+                <Play className="w-6 h-6" />
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  Генерація розкладу
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsGenModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <p className="text-sm text-slate-600 font-semibold leading-relaxed">
+              Ви збираєтесь запустити алгоритм генерації розкладу для маршруту.
+              Це запустить 4 проходи, включаючи еластичне згладжування (Elastic Smoother).
+            </p>
+            
+            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
+              <button
+                onClick={() => setIsGenModalOpen(false)}
+                disabled={isGenerating}
+                className="px-4 py-2 font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer text-sm"
+              >
+                Скасувати
+              </button>
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className="px-4 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-xl transition-colors cursor-pointer shadow-xs text-sm flex items-center space-x-2"
+              >
+                {isGenerating && <RefreshCw className="w-4 h-4 animate-spin" />}
+                <span>{isGenerating ? 'Генерується...' : 'Запустити генерацію'}</span>
               </button>
             </div>
           </div>

@@ -1,21 +1,66 @@
-import { useScheduleStore } from '../../store/useScheduleStore';
-import React, { useState } from 'react';
-import { DriverDuty, TransportType } from '../../types';
+import React, { useState, useMemo } from 'react';
+import { DriverDuty, TransportType, Trip, VehicleBlock } from '../../types';
 import { timeToMinutes, validateDriverDuty } from '../../utils/scheduleEngine';
 import { AlertCircle, CheckCircle2, Clock, ShieldAlert, UserCheck, Coffee, Zap, Layers, User } from 'lucide-react';
 
-export const GanttChart: React.FC = () => {
-  const duties = useScheduleStore(state => state.draftDuties);
-  const blocks = useScheduleStore(state => state.draftBlocks);
-  const [viewMode, setViewMode] = useState<'driver' | 'vehicle'>('driver');
-  const START_MIN = 300;  // 05:00
-  const END_MIN = 1380;  // 23:00
-  const TOTAL_MIN = END_MIN - START_MIN;
+interface GanttChartProps {
+  trips: Trip[];
+  duties?: DriverDuty[];
+  currentTime?: number;
+}
 
+export const GanttChart: React.FC<GanttChartProps> = ({ trips, duties = [], currentTime }) => {
+  const [viewMode, setViewMode] = useState<'driver' | 'vehicle'>('driver');
+
+  // Збираємо блоки на льоту з переданих рейсів
+  const blocks = useMemo(() => {
+    const blockMap = new Map<string, VehicleBlock>();
+    
+    trips.forEach(trip => {
+      if (!trip.duty_id) return;
+      
+      const blockId = `B-${trip.duty_id}`;
+      if (!blockMap.has(blockId)) {
+        blockMap.set(blockId, {
+          id: blockId,
+          vehicleNumber: `V-${trip.duty_id}`,
+          type: 'tram', // За замовчуванням
+          depotId: 'D1',
+          routeId: trip.routeId || 'Невідомо',
+          depotExitTime: trip.departureTime || '05:00',
+          depotReturnTime: trip.arrivalTime || '23:00',
+          trips: []
+        });
+      }
+      
+      const block = blockMap.get(blockId)!;
+      block.trips.push(trip);
+      // Оновлюємо час заїзду в депо по останньому рейсу
+      if (trip.arrivalTime > block.depotReturnTime) {
+        block.depotReturnTime = trip.arrivalTime;
+      }
+      // Оновлюємо час виїзду по першому рейсу
+      if (trip.departureTime < block.depotExitTime || block.depotExitTime === '05:00') {
+        block.depotExitTime = trip.departureTime;
+      }
+    });
+    
+    // Сортуємо рейси всередині блоків за часом відправлення
+    blockMap.forEach(block => {
+      block.trips.sort((a, b) => (a.departureTime || '').localeCompare(b.departureTime || ''));
+    });
+    
+    return Array.from(blockMap.values());
+  }, [trips]);
+  
   const getPercent = (timeStr: string) => {
-    const min = timeToMinutes(timeStr);
-    const clamped = Math.max(START_MIN, Math.min(END_MIN, min));
-    return ((clamped - START_MIN) / TOTAL_MIN) * 100;
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return ((h * 60 + m) / 1440) * 100;
+  };
+
+  const getPercentFromMinutes = (minutes: number) => {
+    return (minutes / 1440) * 100;
   };
 
   return (
@@ -99,13 +144,31 @@ export const GanttChart: React.FC = () => {
           </div>
         )}
 
-        <span className="text-[11px] text-slate-400 font-mono">
-          Шкала: 05:00 — 23:00 (18 годин)
-        </span>
+        <div className="h-6 flex justify-between text-xs text-slate-400 font-mono border-b border-slate-800 pb-1">
+          <span>00:00</span>
+          <span>06:00</span>
+          <span>12:00</span>
+          <span>18:00</span>
+          <span>24:00</span>
+        </div>
       </div>
 
       {/* Gantt Rows */}
-      <div className="space-y-3">
+      <div className="space-y-3 relative">
+        {/* Global Current Time Vertical Line */}
+        {currentTime !== undefined && (
+          <div 
+            className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-30 pointer-events-none transition-all duration-200"
+            style={{ 
+              left: `${(currentTime / 1440) * 100}%`,
+              boxShadow: '0 0 4px rgba(239, 68, 68, 0.5)' 
+            }}
+          >
+            {/* Трикутник зверху для краси */}
+            <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-red-500"></div>
+          </div>
+        )}
+
         {viewMode === 'driver' && duties.map((rawDuty) => {
           const type: TransportType = rawDuty.transportType || 'tram';
           const duty = validateDriverDuty(rawDuty, type);
