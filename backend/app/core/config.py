@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List
 
 class Settings(BaseSettings):
     T_PREP_TRAM: int = 10  # хв підготовчого часу для трамваїв
@@ -8,7 +9,7 @@ class Settings(BaseSettings):
     MAX_BREAK_WINDOW_MINUTES: int = 6 * 60  # обід не пізніше 6 год
     DEFAULT_SAFETY_HEADWAY: int = 2  # 2 хв буфер між вагонами
     
-    #Wialon Settings
+    # Wialon Settings
     WIALON_HOST: str = "https://hst-api.wialon.com/wialon/ajax.html"
     WIALON_TOKEN: str = "YOUR_WIALON_TOKEN_HERE" # Замініть на реальний токен
     POLLING_INTERVAL_SEC: int = 10
@@ -24,9 +25,22 @@ class Settings(BaseSettings):
     DEPOT_ENTRY_LON: float = 30.736664
     DEPOT_RADIUS_KM: float = 0.05  # 50 метрів радіус для воріт
 
-    DATABASE_URL: str = "postgresql+asyncpg://omet_user:omet_password@localhost:5432/omet_db"
+    DATABASE_URL: str = "postgresql+asyncpg://omet_admin:secure_password_123@localhost:5433/omet_db"
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # JWT Authentication & Security Settings
+    SECRET_KEY: str = "9f714865dd76012a49bd46755ed846ab157a4a8884d186a455610103c8c07fe9"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 600
+
+    # CORS
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost",
+        "http://localhost:80",
+        "http://localhost:5173",
+        "https://dispatch.omet.ua"
+    ]
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

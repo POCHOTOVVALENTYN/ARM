@@ -1,153 +1,139 @@
 import React, { useState } from 'react';
-import { useScheduleStore, UserRole } from '../../store/useScheduleStore';
-import { ShieldCheck, UserCheck, Key, Lock, Radio, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useScheduleStore } from '../../store/useScheduleStore';
+import { authApi } from '../../services/authApi';
+import { Radio, ArrowRight, Lock, User, ShieldCheck, AlertCircle } from 'lucide-react';
+import { toast } from 'sonner';
 
 export const AuthLoginView: React.FC = () => {
-  const { user, setUserRole, setPath } = useScheduleStore();
-  const [selectedRole, setSelectedRole] = useState<UserRole>(user.role);
-  const [badgeInput, setBadgeInput] = useState(user.badge);
-  const [nameInput, setNameInput] = useState(user.name);
-  const [isSaved, setIsSaved] = useState(false);
+  const { setAuth } = useAuthStore();
+  const { setPath } = useScheduleStore();
+  const [username, setUsername] = useState<string>('admin');
+  const [password, setPassword] = useState<string>('admin123');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setUserRole(selectedRole);
-    setIsSaved(true);
-    setTimeout(() => {
-      setIsSaved(false);
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await authApi.login(username, password);
+      
+      // Якщо бекенд не повернув user у відповіді логіну, отримуємо через getMe
+      let userData = data.user;
+      if (!userData) {
+        // Встановлюємо тимчасово токен у стор для виклику getMe
+        useAuthStore.setState({ token: data.access_token });
+        userData = await authApi.getMe();
+      }
+
+      setAuth(data.access_token, userData);
+      toast.success(`Вітаємо, ${userData.full_name || userData.username}! Успішний вхід.`);
       setPath('/dispatch/marey');
-    }, 1000);
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || "Помилка авторизації. Перевірте логін та пароль.";
+      setErrorMessage(detail);
+      toast.error(detail);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="max-w-xl mx-auto py-8 space-y-6">
+    <div className="max-w-md mx-auto py-12 px-4 space-y-6">
       {/* Login Card */}
-      <div className="brutalist-card bg-white p-8 rounded-2xl space-y-6 shadow-xl">
+      <div className="bg-white p-8 rounded-2xl border-2 border-gray-900 shadow-2xl space-y-6">
         <div className="flex items-center space-x-3 border-b-2 border-gray-900 pb-4">
           <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold border-2 border-gray-900 shadow-md">
             <Radio className="w-6 h-6 text-white" />
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-gray-900">
-              Авторизація та Вибір Ролі Диспетчера
+              АРМ Диспетчера
             </h2>
-            <p className="text-xs text-gray-600">
-              КП «Одесміськелектротранс» • АРМ «Розклади» v2.4 (JWT HttpOnly Session)
+            <p className="text-xs text-gray-600 font-mono">
+              КП «Одесміськелектротранс» • v2.4
             </p>
           </div>
         </div>
 
-        {isSaved && (
-          <div className="bg-emerald-50 border-2 border-emerald-500 text-emerald-900 p-3 rounded-xl flex items-center space-x-2 text-xs font-bold animate-bounce">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <span>Сесію успішно оновлено! Перенаправлення на Диспетчерський панель...</span>
+        {errorMessage && (
+          <div className="bg-rose-50 border-2 border-rose-500 text-rose-900 p-3 rounded-xl flex items-center space-x-2 text-xs font-bold animate-shake">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
         <form onSubmit={handleLogin} className="space-y-4 text-xs font-sans">
           <div>
             <label className="font-bold text-gray-900 block mb-1">
-              ПІБ Співробітника / Диспетчера:
+              Логін (Username):
             </label>
-            <input
-              type="text"
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl p-3 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              required
-            />
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                <User className="w-4 h-4" />
+              </div>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Введіть логін (напр. admin)"
+                className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl py-3 pl-10 pr-3 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+                autoFocus
+              />
+            </div>
           </div>
 
           <div>
             <label className="font-bold text-gray-900 block mb-1">
-              Табельний номер / Нагрудний жетон:
+              Пароль:
             </label>
-            <input
-              type="text"
-              value={badgeInput}
-              onChange={(e) => setBadgeInput(e.target.value)}
-              className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl p-3 font-bold text-gray-900 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              required
-            />
-          </div>
-
-          {/* Role selector */}
-          <div className="space-y-2 pt-2">
-            <label className="font-bold text-gray-900 block">
-              Виберіть рівень доступу та роль у системі:
-            </label>
-
-            <div className="grid grid-cols-1 gap-2">
-              {[
-                {
-                  id: 'dispatcher',
-                  title: 'Головний Диспетчер Зміни (Dispatcher)',
-                  desc: 'Повний доступ до Графіка Марея, відтяжок Slack Manager, Hot Reserve та оперативного редагування.',
-                  badge: 'Рівень 2 (Динаміка)',
-                },
-                {
-                  id: 'admin',
-                  title: 'Інженер-Технолог Розкладів (Admin)',
-                  desc: 'Адміністрування довідників маршрутів, матриць часу, каналів вузлів та експорт GTFS.',
-                  badge: 'Рівень 1 (Статика)',
-                },
-                {
-                  id: 'viewer',
-                  title: 'Спостерігач / Інспектор (Viewer)',
-                  desc: 'Перегляд аналітики, табелів водіїв, карти руху без права внесення оперативно-диспетчерських змін.',
-                  badge: 'Read-Only Mode',
-                },
-              ].map((r) => (
-                <label
-                  key={r.id}
-                  onClick={() => setSelectedRole(r.id as UserRole)}
-                  className={`p-3.5 rounded-xl border-2 cursor-pointer flex items-start space-x-3 transition-all ${
-                    selectedRole === r.id
-                      ? 'bg-indigo-50 border-indigo-600 shadow-sm'
-                      : 'bg-white border-gray-300 hover:border-gray-900'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="role"
-                    value={r.id}
-                    checked={selectedRole === r.id}
-                    onChange={() => setSelectedRole(r.id as UserRole)}
-                    className="mt-1"
-                  />
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold text-gray-900">{r.title}</span>
-                      <span className="text-[10px] font-mono bg-gray-900 text-white px-2 py-0.5 rounded">
-                        {r.badge}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-gray-600 mt-0.5">{r.desc}</p>
-                  </div>
-                </label>
-              ))}
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                <Lock className="w-4 h-4" />
+              </div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Введіть пароль"
+                className="w-full bg-gray-50 border-2 border-gray-900 rounded-xl py-3 pl-10 pr-3 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
             </div>
           </div>
 
           <button
             type="submit"
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-sm py-3.5 rounded-xl border-2 border-indigo-700 shadow-md flex items-center justify-center space-x-2 cursor-pointer transition-all mt-4"
+            disabled={isLoading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-sm py-3.5 rounded-xl border-2 border-indigo-700 shadow-md flex items-center justify-center space-x-2 cursor-pointer transition-all mt-6"
           >
-            <span>Авторизувати сесію та увійти</span>
-            <ArrowRight className="w-4 h-4" />
+            {isLoading ? (
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <>
+                <span>Авторизуватись у системі</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
-        <div className="bg-gray-100 border border-gray-300 p-3 rounded-xl text-[11px] text-gray-600 space-y-1">
+        <div className="bg-gray-50 border border-gray-300 p-3.5 rounded-xl text-[11px] text-gray-600 space-y-1.5 font-sans">
           <div className="flex items-center space-x-1.5 font-bold text-gray-900">
-            <Lock className="w-3.5 h-3.5 text-indigo-600" />
+            <ShieldCheck className="w-4 h-4 text-indigo-600" />
             <span>Безпека та авторизація:</span>
           </div>
           <p>
-            Сесія захищенаHttpOnly Secure Cookie. Токени доступу (JWT Access/Refresh) автоматично оновлюються у фоновому режимі.
+            Доступ захищено за стандартом <strong>OAuth2 + JWT</strong> (термін дії сесії — 10 годин).
           </p>
         </div>
       </div>
     </div>
   );
 };
+
+export default AuthLoginView;

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useScheduleStore, UserRole, ThemeMode } from '../store/useScheduleStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { ConfirmActionModal, ConfirmModalConfig } from './ConfirmActionModal';
 import { HistoryLogModal } from './HistoryLogModal';
 import { 
@@ -26,6 +27,7 @@ import {
   ChevronDown,
   LayoutDashboard,
   Lock,
+  LogOut,
   Palette,
   Sun,
   Moon,
@@ -42,6 +44,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
+  const { user: authUser, isAuthenticated, logout } = useAuthStore();
   const {
     currentPath,
     setPath,
@@ -289,11 +292,26 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
             title="Обліковий запис користувача"
           >
             <Lock className="w-3.5 h-3.5 text-blue-700" />
-            <span>{user.name}</span>
+            <span>{authUser?.full_name || authUser?.username || user.name}</span>
             <span className="text-[10px] bg-blue-50 text-blue-800 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 uppercase">
-              {userRole}
+              {authUser?.is_superuser ? 'Admin' : (authUser ? 'Dispatcher' : userRole)}
             </span>
           </button>
+
+          {/* Logout Button */}
+          {isAuthenticated && (
+            <button
+              onClick={() => {
+                logout();
+                setPath('/login');
+              }}
+              className="flex items-center space-x-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
+              title="Вийти з системи"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <span>Вихід</span>
+            </button>
+          )}
 
           {/* History & Draft Tools */}
           <div className="flex items-center space-x-1 bg-white border border-blue-200 rounded-xl p-1 shadow-2xs">

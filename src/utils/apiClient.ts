@@ -1,21 +1,27 @@
 import axios from 'axios';
 import { useUIStore } from '../store/useUIStore';
-import { toast } from 'sonner'; 
+import { useAuthStore } from '../store/useAuthStore';
+import { useScheduleStore } from '../store/useScheduleStore';
+import { toast } from 'sonner';
 
-const apiClient = axios.create({
-  // Забираємо хардкод. URL має підтягуватись з .env файлу
-  // @ts-ignore
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+// Створення базового екземпляра Axios
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Перехоплювач запитів: вмикаємо спінер перед відправкою
-apiClient.interceptors.request.use(
+// 1. Інтерцептор ЗАПИТІВ (додаємо Bearer токен та вмикаємо спінер)
+api.interceptors.request.use(
   (config) => {
     useUIStore.getState().setLoading(true);
+
+    const token = useAuthStore.getState().token;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => {
@@ -24,8 +30,8 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Перехоплювач відповідей: вимикаємо спінер та глобально обробляємо помилки
-apiClient.interceptors.response.use(
+// 2. Інтерцептор ВІДПОВІДЕЙ (обробка 401 Unauthorized та глобальних помилок)
+api.interceptors.response.use(
   (response) => {
     useUIStore.getState().setLoading(false);
     return response;
@@ -37,8 +43,12 @@ apiClient.interceptors.response.use(
       const status = error.response.status;
       const detail = error.response.data?.detail;
 
-      // Специфічна обробка бізнес-логіки
-      if (status === 409) {
+      if (status === 401) {
+        // Якщо токен недійсний або прострочений - очищаємо стор
+        useAuthStore.getState().logout();
+        useScheduleStore.getState().setPath('/login');
+        toast.error("Сесія завершилась. Будь ласка, авторизуйтесь знову.");
+      } else if (status === 409) {
         toast.error(detail || "Конфлікт даних. Цю дію вже виконано іншим диспетчером.");
       } else if (status === 422) {
         toast.warning("Помилка валідації даних. Перевірте введені значення.");
@@ -48,7 +58,7 @@ apiClient.interceptors.response.use(
         toast.error(detail || `Помилка запиту: ${status}`);
       }
     } else if (error.request) {
-      toast.error("Відсутній зв'язок з сервером. Перевірте з'єднання або VPN.");
+      toast.error("Відсутній зв'язок з сервером. Перевірте з'єднання.");
     } else {
       toast.error("Сталася помилка при формуванні запиту.");
     }
@@ -57,4 +67,4 @@ apiClient.interceptors.response.use(
   }
 );
 
-export default apiClient;
+export default api;

@@ -24,6 +24,8 @@ import { SmartWaybillView } from './components/views/SmartWaybillView';
 import { useScheduleStore } from './store/useScheduleStore';
 import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
+import { useAuthStore } from './store/useAuthStore';
+import { authApi } from './services/authApi';
 import { useWebSocket } from './hooks/useWebSocket';
 import { GlobalLoader } from './components/GlobalLoader';
 import { Toaster } from 'sonner';
@@ -32,6 +34,9 @@ export default function App() {
   // Активуємо WebSocket підключення при старті додатку,
   // воно запрацює тільки після isInitialized === true
   useWebSocket('ws://localhost:8000/ws');
+
+  const { token, isAuthenticated, setUser, logout } = useAuthStore();
+  const [isVerifyingSession, setIsVerifyingSession] = useState<boolean>(true);
 
   const { 
     currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, 
@@ -46,15 +51,40 @@ export default function App() {
     document.body.setAttribute('data-theme', theme);
   }, [theme]);
 
+  // Session verification on mount
+  useEffect(() => {
+    const verifyAuth = async () => {
+      if (token) {
+        try {
+          const userData = await authApi.getMe();
+          setUser(userData);
+        } catch (err) {
+          console.error("Session expired or invalid:", err);
+          logout();
+          setPath('/login');
+        }
+      } else {
+        if (currentPath !== '/login' && !currentPath.startsWith('/driver/')) {
+          setPath('/login');
+        }
+      }
+      setIsVerifyingSession(false);
+    };
+
+    verifyAuth();
+  }, [token, setUser, logout, setPath]);
+
   // Fetch initial configuration on mount
   useEffect(() => {
-    if (!isInitialized) {
-      fetchInitialData();
+    if (isAuthenticated) {
+      if (!isInitialized) {
+        fetchInitialData();
+      }
+      if (!isConfigLoaded) {
+        fetchConfigs();
+      }
     }
-    if (!isConfigLoaded) {
-      fetchConfigs();
-    }
-  }, [isInitialized, fetchInitialData, isConfigLoaded, fetchConfigs]);
+  }, [isAuthenticated, isInitialized, fetchInitialData, isConfigLoaded, fetchConfigs]);
 
   const handleApplySlack = (slackMin: number, tripId: string) => {
     applySlackToNode(tripId, 'st_starosinna', slackMin);
@@ -68,10 +98,34 @@ export default function App() {
     setPath('/dispatch/hot-reserve');
   };
 
+  if (isVerifyingSession) {
+    return (
+      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-600 font-medium font-sans">Перевірка сесії диспетчера...</p>
+        </div>
+      </div>
+    );
+  }
+
   // If path is a driver view, render it directly without standard layout
   if (currentPath.startsWith('/driver/')) {
     const vehicleId = currentPath.split('/')[2];
     return <SmartWaybillView vehicleId={vehicleId || '0000'} />;
+  }
+
+  // If not authenticated or on /login, render Login view directly
+  if (!isAuthenticated || currentPath === '/login') {
+    return (
+      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased">
+        <GlobalLoader />
+        <Toaster position="top-right" richColors />
+        <main className="flex-1 flex items-center justify-center p-4">
+          <AuthLoginView />
+        </main>
+      </div>
+    );
   }
 
   if (!isInitialized || !isConfigLoaded) {
@@ -79,7 +133,7 @@ export default function App() {
       <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
           <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-600 font-medium">Завантаження даних...</p>
+          <p className="text-slate-600 font-medium">Завантаження даних АРМ...</p>
         </div>
       </div>
     );

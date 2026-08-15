@@ -1,5 +1,4 @@
 services:
-  # База даних PostgreSQL (порт хоста 5433, щоб не конфліктувати з локальним Postgres на 5432)
   postgres:
     image: postgres:15-alpine
     container_name: omet_postgres
@@ -8,13 +7,12 @@ services:
       POSTGRES_USER: omet_admin
       POSTGRES_PASSWORD: secure_password_123
       POSTGRES_DB: omet_db
-      TZ: Europe/Kyiv # Встановлюємо локальний час
+      TZ: Europe/Kyiv
     ports:
-      - "5433:5432"
+      - "5433:5432" # 5433 на хості для уникнення конфліктів, 5432 всередині мережі
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # Графічний інтерфейс для зручного керування базою (аналог DBeaver)
   pgadmin:
     image: dpage/pgadmin4
     container_name: omet_pgadmin
@@ -27,7 +25,6 @@ services:
     depends_on:
       - postgres
 
-  # Redis (для WebSocket та черг завдань)
   redis:
     image: redis:7-alpine
     container_name: omet_redis
@@ -37,7 +34,49 @@ services:
     volumes:
       - redis_data:/data
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omet_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://omet_admin:secure_password_123@postgres:5432/omet_db
+      REDIS_URL: redis://redis:6379/0
+      TZ: Europe/Kyiv
+    depends_on:
+      - postgres
+      - redis
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omet_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80" # Веб-додаток доступний на http://localhost
+    depends_on:
+      - backend
+
+  db_backup:
+    image: postgres:15-alpine
+    container_name: omet_db_backup
+    restart: unless-stopped
+    environment:
+      PGUSER: omet_admin
+      PGPASSWORD: secure_password_123
+      PGHOST: postgres
+      PGDATABASE: omet_db
+      TZ: Europe/Kyiv
+    volumes:
+      - ./backups:/backups
+    # Вбудований планувальник (cron) запускає створення дампу щодня о 03:00 ночі
+    entrypoint: |
+      sh -c 'echo "0 3 * * * pg_dump -Fc > /backups/omet_db_$$(date +\%Y\%m\%d_\%H\%M\%S).dump" > /etc/crontabs/root && crond -f -d 8'
+    depends_on:
+      - postgres
+
 volumes:
-  # Іменовані томи для збереження даних
   postgres_data:
   redis_data:
