@@ -18,10 +18,14 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
+from app.core.config import settings
 from app.core.database import Base
 from app.models.models import *
 from app.models.schedule import *
 target_metadata = Base.metadata
+
+# Dynamically set DB URL from app configuration (.env / environment variable)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -47,6 +51,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=True,
+        compare_type=True,
     )
 
     with context.begin_transaction():
@@ -54,7 +60,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=True,
+        compare_type=True,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
