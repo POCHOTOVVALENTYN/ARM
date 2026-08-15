@@ -1,28 +1,43 @@
-version: '3.8'
-
 services:
-  db:
+  # База даних PostgreSQL (порт хоста 5433, щоб не конфліктувати з локальним Postgres на 5432)
+  postgres:
     image: postgres:15-alpine
     container_name: omet_postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: omet_user
-      POSTGRES_PASSWORD: omet_password
+      POSTGRES_USER: omet_admin
+      POSTGRES_PASSWORD: secure_password_123
       POSTGRES_DB: omet_db
+      TZ: Europe/Kyiv # Встановлюємо локальний час
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # Графічний інтерфейс для зручного керування базою (аналог DBeaver)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: omet_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@omet.ua
+      PGADMIN_DEFAULT_PASSWORD: admin_password
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+  # Redis (для WebSocket та черг завдань)
   redis:
     image: redis:7-alpine
     container_name: omet_redis
-    restart: always
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
 
 volumes:
+  # Іменовані томи для збереження даних
   postgres_data:
   redis_data:
