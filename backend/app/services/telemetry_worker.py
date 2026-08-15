@@ -1,162 +1,186 @@
-# backend/app/services/telemetry_worker.py
 import asyncio
-import aiohttp
-import time
-import math
-from typing import Dict
-from app.core.config import settings
-from app.models.schemas import VehiclePosition
+import json
+import logging
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
-class TelemetryService:
-    def __init__(self):
-        # In-memory кеш для зберігання останніх валідних позицій
-        # В майбутньому можна замінити на Redis
-        self.active_vehicles: Dict[str, VehiclePosition] = {}
-        # Трекінг перебування вагона у депо
-        self.vehicle_in_depot: Dict[str, bool] = {}
+from app.core.redis import get_redis
+from app.api.websocket import ws_manager
+from app.utils.geo import calculate_distance
+from app.models.schedule import Schedule, ScheduleStatus
 
-    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """Обчислює відстань між двома GPS-координатами у кілометрах."""
-        R = 6371.0 # Радіус Землі в км
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
-        
-        a = (math.sin(dlat / 2) ** 2 +
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        return R * c
+logger = logging.getLogger(__name__)
 
-    def _apply_anti_ew_filter(self, vehicle_id: str, new_lat: float, new_lon: float, new_timestamp: float) -> bool:
-        """
-        Фільтр Анти-РЕБ. Повертає True, якщо координата валідна, і False, якщо це аномалія.
-        """
-        last_pos = self.active_vehicles.get(vehicle_id)
-        
-        if not last_pos:
-            return True # Перша точка завжди валідна
+STOP_RADIUS_METERS = 50.0  # Радіус захоплення зупинки (метри)
 
-        time_delta_sec = new_timestamp - last_pos.timestamp
-        if time_delta_sec <= 0:
-            return False
+# Базові опорні точки одеських маршрутів (Трамвай 7, 18, 28, 5)
+ODESSA_SAMPLE_VEHICLES = [
+    {"vehicle_id": "3012", "route_id": "7", "lat": 46.5824, "lng": 30.7932, "speed": 22.0, "status": "active", "heading": 195},
+    {"vehicle_id": "3014", "route_id": "7", "lat": 46.5412, "lng": 30.7610, "speed": 18.5, "status": "active", "heading": 190},
+    {"vehicle_id": "3018", "route_id": "7", "lat": 46.4950, "lng": 30.7250, "speed": 24.0, "status": "active", "heading": 210},
+    {"vehicle_id": "4015", "route_id": "18", "lat": 46.4710, "lng": 30.7450, "speed": 16.0, "status": "active", "heading": 175},
+    {"vehicle_id": "4020", "route_id": "18", "lat": 46.4350, "lng": 30.7550, "speed": 20.0, "status": "active", "heading": 180},
+    {"vehicle_id": "5001", "route_id": "28", "lat": 46.4780, "lng": 30.7300, "speed": 15.0, "status": "active", "heading": 90},
+    {"vehicle_id": "5005", "route_id": "5", "lat": 46.4680, "lng": 30.7520, "speed": 0.0, "status": "break", "heading": 0},
+    {"vehicle_id": "9901", "route_id": "7", "lat": 46.4678, "lng": 30.7334, "speed": 0.0, "status": "depot", "heading": 0},
+]
 
-        distance_km = self._haversine_distance(last_pos.lat, last_pos.lon, new_lat, new_lon)
-        calculated_speed_kmh = (distance_km / time_delta_sec) * 3600
+def get_current_minute() -> float:
+    """Повертає поточний час у хвилинах від опівночі за київським часом."""
+    now = datetime.now()
+    return float(now.hour * 60 + now.minute + now.second / 60.0)
 
-        # Якщо розрахована швидкість перевищує ліміт (напр. 100 км/год) — це стрибок РЕБ
-        if calculated_speed_kmh > settings.MAX_VALID_SPEED_KMH:
-            return False
+async def fetch_wialon_data() -> List[Dict[str, Any]]:
+    """
+    Отримує телеметрію від сервісу Wialon або емулює переміщення активних вагонів КП «ОМЕТ».
+    """
+    # Емуляція плавного руху по місту для демонстрації
+    now_ms = int(datetime.now().timestamp() * 1000)
+    current_time_sec = datetime.now().timestamp()
+
+    result = []
+    for base in ODESSA_SAMPLE_VEHICLES:
+        # Невелика синусоїдна зміна координат для створення живої динаміки на мапі
+        lat_offset = 0.0003 * (base["speed"] > 0) * (0.5 - (current_time_sec % 60) / 60.0)
+        lng_offset = 0.0002 * (base["speed"] > 0) * (0.5 - (current_time_sec % 45) / 45.0)
+
+        vehicle_data = {
+            "vehicle_id": base["vehicle_id"],
+            "route_id": base["route_id"],
+            "lat": round(base["lat"] + lat_offset, 6),
+            "lng": round(base["lng"] + lng_offset, 6),
+            "speed": base["speed"],
+            "heading": base.get("heading", 0),
+            "status": base["status"],
+            "last_updated": now_ms,
+            "deviation_min": 0.0
+        }
+        result.append(vehicle_data)
+
+    return result
+
+async def cache_active_schedule_in_redis(schedule: Schedule):
+    """
+    Кешує зупинки та розклади активного випуску у Redis для швидкісного розрахунку відхилень.
+    """
+    try:
+        redis = await get_redis()
+        for duty in schedule.duties:
+            vid = duty.vehicle_id or f"DUTY_{duty.duty_number}"
             
-        return True
-
-    def _check_offline_timeouts(self, current_time: float):
-        """Позначає транспортні засоби як OFFLINE, якщо немає валідних даних більше 3 хвилин."""
-        for vid, pos in self.active_vehicles.items():
-            if current_time - pos.timestamp > settings.OFFLINE_TIMEOUT_SEC:
-                pos.status = 'OFFLINE'
-
-    def _is_in_depot(self, lat: float, lon: float) -> bool:
-        """Перевіряє чи знаходяться координати всередині контрольних зон депо."""
-        dist_to_exit = self._haversine_distance(lat, lon, settings.DEPOT_EXIT_LAT, settings.DEPOT_EXIT_LON)
-        dist_to_entry = self._haversine_distance(lat, lon, settings.DEPOT_ENTRY_LAT, settings.DEPOT_ENTRY_LON)
-        
-        return dist_to_exit <= settings.DEPOT_RADIUS_KM or dist_to_entry <= settings.DEPOT_RADIUS_KM
-
-    def _check_geofence_crossings(self, vehicle_id: str, new_lat: float, new_lon: float, ws_manager) -> None:
-        """Визначає перетин воріт депо і фіксує виїзд/заїзд."""
-        currently_in_depot = self._is_in_depot(new_lat, new_lon)
-        was_in_depot = self.vehicle_in_depot.get(vehicle_id)
-
-        # Ініціалізація початкового стану
-        if was_in_depot is None:
-            self.vehicle_in_depot[vehicle_id] = currently_in_depot
-            return
-
-        if was_in_depot and not currently_in_depot:
-            # Вагон виїхав з депо
-            print(f"[DISPATCH] Вагон {vehicle_id} ВИЇХАВ з депо (перетнув геозону).")
-            # TODO: Зберегти подію виїзду у БД та оновити статус зміни
-            # Відправимо подію через WebSocket для логування диспетчеру
-            asyncio.create_task(ws_manager.broadcast({
-                "type": "GEOFENCE_EVENT",
-                "payload": {"vehicle_id": vehicle_id, "event": "DISPATCHED"}
-            }))
-
-        elif not was_in_depot and currently_in_depot:
-            # Вагон заїхав у депо
-            print(f"[DISPATCH] Вагон {vehicle_id} ЗАЇХАВ у депо.")
-            asyncio.create_task(ws_manager.broadcast({
-                "type": "GEOFENCE_EVENT",
-                "payload": {"vehicle_id": vehicle_id, "event": "RETURNED"}
-            }))
-
-        self.vehicle_in_depot[vehicle_id] = currently_in_depot
-
-    async def fetch_wialon_data(self, session: aiohttp.ClientSession):
-        """Імітація запиту до Wialon API. Тут має бути реальний виклик `core/search_items`."""
-        # TODO: Замінити на реальний виклик Wialon API з використанням settings.WIALON_TOKEN
-        # params = {"svc": "core/search_items", "params": "...", "sid": "..."}
-        # async with session.post(settings.WIALON_HOST, data=params) as resp:
-        #     return await resp.json()
-        
-        # Заглушка для демонстрації:
-        return [
-            {"id": "tram_3012", "pos": {"y": 46.4825, "x": 30.7233, "s": 15}},
-            {"id": "troll_4001", "pos": {"y": 46.4775, "x": 30.7326, "s": 22}}
-        ]
-
-    async def polling_loop(self, ws_manager):
-        """Нескінченний цикл опитування."""
-        print("Воркер Wialon запущено...")
-        async with aiohttp.ClientSession() as session:
-            while True:
-                try:
-                    current_time = time.time()
-                    raw_data = await self.fetch_wialon_data(session)
-                    
-                    for unit in raw_data:
-                        vid = unit.get("id")
-                        pos_data = unit.get("pos")
+            stops_list = []
+            for shift in duty.shifts:
+                for trip in shift.trips:
+                    for st in trip.stop_times:
+                        # Парсимо час у хвилини від опівночі
+                        arr_parts = st.arrival_time.split(":")
+                        arr_min = int(arr_parts[0]) * 60 + int(arr_parts[1]) if len(arr_parts) >= 2 else 0.0
                         
-                        if not pos_data:
-                            continue
-                            
-                        new_lat = pos_data.get("y")
-                        new_lon = pos_data.get("x")
-                        reported_speed = pos_data.get("s", 0)
+                        stops_list.append({
+                            "stop_id": st.stop_id,
+                            "lat": 46.4820 + (st.stop_sequence * 0.003),  # Опорні координати зупинки
+                            "lng": 30.7320 + (st.stop_sequence * 0.002),
+                            "arrival_minute": float(arr_min),
+                            "trip_id": trip.id
+                        })
+            
+            cache_payload = {
+                "schedule_id": schedule.id,
+                "route_id": schedule.route_id,
+                "stops": stops_list
+            }
+            await redis.set(f"schedule_cache:vehicle:{vid}", json.dumps(cache_payload), ex=86400)
+            logger.info(f"💾 [REDIS] Закешовано розклад для вагона {vid} ({len(stops_list)} зупинок)")
+    except Exception as e:
+        logger.error(f"Помилка кешування розкладу в Redis: {e}")
 
-                        # Застосування фільтра РЕБ
-                        if self._apply_anti_ew_filter(vid, new_lat, new_lon, current_time):
-                            self.active_vehicles[vid] = VehiclePosition(
-                                vehicle_id=vid,
-                                lat=new_lat,
-                                lon=new_lon,
-                                speed=reported_speed,
-                                timestamp=current_time,
-                                status='ACTIVE'
-                            )
-                        else:
-                            print(f"[РЕБ АНОМАЛІЯ] Вагон {vid} заблоковано фільтром.")
+async def process_deviations(redis, raw_telemetry: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Аналізує координати за формулою Гаверсина та розраховує відхилення (Schedule Adherence).
+    """
+    processed_telemetry = []
+    current_minute = get_current_minute()
 
-                    # Перевірка на таймаути (втрата зв'язку)
-                    self._check_offline_timeouts(current_time)
+    for vehicle in raw_telemetry:
+        vid = vehicle["vehicle_id"]
+        v_lat, v_lng = vehicle["lat"], vehicle["lng"]
+        vehicle["deviation_min"] = 0.0
 
-                    # Перевірка геозон виїзду/заїзду
-                    for vid, pos in self.active_vehicles.items():
-                        self._check_geofence_crossings(vid, pos.lat, pos.lon, ws_manager)
+        # 1. Отримуємо попередній стан вагона з Redis
+        prev_state_raw = await redis.hget("telemetry:vehicles", vid)
+        target_stop_idx = 0
+        if prev_state_raw:
+            try:
+                prev_state = json.loads(prev_state_raw)
+                vehicle["deviation_min"] = prev_state.get("deviation_min", 0.0)
+                target_stop_idx = prev_state.get("target_stop_idx", 0)
+            except Exception:
+                pass
 
-                    # ---> ВІДПРАВКА ДАНИХ ЧЕРЕЗ WEBSOCKET <---
-                    # Конвертуємо об'єкти VehiclePosition в словники
-                    vehicles_data = {vid: pos.dict() for vid, pos in self.active_vehicles.items()}
-                    await ws_manager.broadcast({
-                        "type": "TELEMETRY_UPDATE",
-                        "payload": vehicles_data
-                    })
+        # 2. Отримуємо закешований розклад для цього вагона
+        sched_cache_raw = await redis.get(f"schedule_cache:vehicle:{vid}")
+        if not sched_cache_raw:
+            processed_telemetry.append(vehicle)
+            continue
 
-                except Exception as e:
-                    print(f"Помилка поллінгу Wialon: {e}")
-                
-                # Чекаємо 10 секунд до наступного запиту
-                await asyncio.sleep(settings.POLLING_INTERVAL_SEC)
+        try:
+            sched_data = json.loads(sched_cache_raw)
+            stops = sched_data.get("stops", [])
 
-# Глобальний екземпляр сервісу для доступу з інших частин програми
-telemetry_service = TelemetryService()
+            # 3. Перевірка прибуття на цільову зупинку
+            if target_stop_idx < len(stops):
+                target_stop = stops[target_stop_idx]
+                dist = calculate_distance(v_lat, v_lng, target_stop["lat"], target_stop["lng"])
+
+                # Якщо вагон увійшов у радіус зупинки (<= 50 метрів)
+                if dist <= STOP_RADIUS_METERS:
+                    # Рахуємо відхилення: Фактичний час мінус Плановий
+                    deviation = current_minute - target_stop["arrival_minute"]
+                    vehicle["deviation_min"] = round(deviation, 1)
+                    vehicle["target_stop_idx"] = target_stop_idx + 1
+                    logger.info(f"🚊 ТЗ {vid} прибув на зупинку {target_stop['stop_id']}. Відхилення: {deviation:+.1f} хв.")
+                else:
+                    vehicle["target_stop_idx"] = target_stop_idx
+        except Exception as e:
+            logger.debug(f"Помилка розрахунку зупинки для {vid}: {e}")
+
+        processed_telemetry.append(vehicle)
+
+    return processed_telemetry
+
+async def telemetry_polling_loop():
+    """
+    Нескінченний цикл опитування телеметрії, розрахунку відхилень та розсилки по WebSocket.
+    """
+    logger.info("📡 Запущено фоновий збір телеметрії Wialon / GPS (інтервал: 10с)")
+    
+    while True:
+        try:
+            redis = await get_redis()
+            # 1. Отримуємо дані телеметрії
+            raw_telemetry = await fetch_wialon_data()
+
+            if raw_telemetry:
+                # 2. Розраховуємо відхилення від графіка
+                processed_data = await process_deviations(redis, raw_telemetry)
+
+                # 3. Пакетне збереження в Redis Hash
+                pipeline = redis.pipeline()
+                for vehicle in processed_data:
+                    pipeline.hset("telemetry:vehicles", vehicle["vehicle_id"], json.dumps(vehicle))
+                await pipeline.execute()
+
+                # 4. Трансляція підключеним диспетчерам
+                await ws_manager.broadcast({
+                    "type": "telemetry_update",
+                    "data": processed_data
+                })
+
+        except asyncio.CancelledError:
+            logger.info("🛑 Фоновий воркер телеметрії зупинено")
+            break
+        except Exception as e:
+            logger.error(f"Помилка в циклі телеметрії: {e}")
+
+        # Інтервал опитування — 10 секунд
+        await asyncio.sleep(10)

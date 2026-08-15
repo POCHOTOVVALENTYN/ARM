@@ -2,7 +2,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Union, Optional
 import jwt
 import bcrypt
+from sqlalchemy import select
 from app.core.config import settings
+from app.core.database import async_session_maker
+from app.models.models import Dispatcher
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Перевіряє, чи збігається введений пароль із хешем у БД."""
@@ -34,3 +37,21 @@ def create_access_token(subject: Union[str, Any], expires_delta: Optional[timede
     }
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
+
+async def verify_ws_token(token: str) -> Optional[Dispatcher]:
+    """Перевіряє JWT токен для WebSocket підключень диспетчерів."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+        
+        async with async_session_maker() as db:
+            result = await db.execute(select(Dispatcher).where(Dispatcher.id == int(user_id)))
+            user = result.scalar_one_or_none()
+            if user and user.is_active:
+                return user
+    except Exception as e:
+        print(f"WS token verification error: {e}")
+        return None
+    return None

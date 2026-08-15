@@ -26,6 +26,7 @@ import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
 import { useAuthStore } from './store/useAuthStore';
 import { authApi } from './services/authApi';
+import { SuperuserRoute } from './components/SuperuserRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { GlobalLoader } from './components/GlobalLoader';
 import { Toaster } from 'sonner';
@@ -154,11 +155,19 @@ export default function App() {
           <ExecutiveDashboardView />
         )}
 
-        {/* /admin - Admin Panel */}
-        {currentPath === '/admin' && <AdminView initialTab="config" />}
+        {/* /admin - Admin Panel (Superuser Only) */}
+        {currentPath === '/admin' && (
+          <SuperuserRoute>
+            <AdminView initialTab="config" />
+          </SuperuserRoute>
+        )}
 
-        {/* /export/gtfs - GTFS Open Data Tab inside Admin */}
-        {currentPath === '/export/gtfs' && <AdminView initialTab="gtfs" />}
+        {/* /export/gtfs - GTFS Open Data Tab inside Admin (Superuser Only) */}
+        {currentPath === '/export/gtfs' && (
+          <SuperuserRoute>
+            <AdminView initialTab="gtfs" />
+          </SuperuserRoute>
+        )}
 
         {/* /login */}
         {currentPath === '/login' && <AuthLoginView />}
@@ -198,9 +207,11 @@ export default function App() {
         )}
         {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
 
-        {/* Network Settings Views */}
+        {/* Network Settings Views (Superuser Only) */}
         {(currentPath.startsWith('/settings/') || currentPath === '/settings') && (
-          <NetworkSettingsTab />
+          <SuperuserRoute>
+            <NetworkSettingsTab />
+          </SuperuserRoute>
         )}
 
         {/* Crew Views */}

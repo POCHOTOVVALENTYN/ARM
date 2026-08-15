@@ -11,7 +11,8 @@ AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
 
+async_session_maker = AsyncSessionLocal
+
 async def init_db():
     async with engine.begin() as conn:
-        # For simplicity, we create all tables
         await conn.run_sync(Base.metadata.create_all)

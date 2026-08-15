@@ -171,7 +171,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const NAV_GROUPS: { label: string; icon: any; items?: { label: string; path: string; icon: any }[]; path?: string }[] = [
+  const NAV_GROUPS: { label: string; icon: any; superuserOnly?: boolean; items?: { label: string; path: string; icon: any }[]; path?: string }[] = [
     {
       label: 'Аналітика',
       icon: LayoutDashboard,
@@ -206,6 +206,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
     {
       label: 'Довідники Мережі',
       icon: Settings,
+      superuserOnly: true,
       items: [
         { label: 'Реєстр Маршрутів (Route Master)', path: '/settings/routes', icon: Settings },
         { label: 'Вузли та Колії (Hubs)', path: '/settings/intersections', icon: MapPin },
@@ -221,16 +222,18 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
         { label: 'Призначення Екіпажів', path: '/crew/assignment', icon: UserCheck },
       ],
     },
-
     {
       label: 'Адміністрування',
       icon: Lock,
+      superuserOnly: true,
       items: [
         { label: 'Панель Керування & Резервування', path: '/admin', icon: Lock },
         { label: 'Експорт/Імпорт Open Data & GTFS', path: '/export/gtfs', icon: Download },
       ],
     },
   ];
+
+  const visibleNavGroups = NAV_GROUPS.filter((g) => !g.superuserOnly || authUser?.is_superuser);
 
   return (
     <header ref={headerRef} className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 sticky top-0 z-50 shadow-xs font-sans">
@@ -413,7 +416,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       {/* Navigation Bar (White Background with Soft Light-Blue Shadow and Blue Bordered Buttons) */}
       <div className="bg-white dark:bg-slate-900 border-t border-blue-100 dark:border-slate-800 shadow-[0_8px_30px_rgba(37,99,235,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] px-4 sm:px-6 lg:px-8 relative z-30">
         <nav className="max-w-7xl mx-auto flex items-center space-x-2 py-2 text-xs font-bold flex-wrap">
-          {NAV_GROUPS.map((group, idx) => {
+          {visibleNavGroups.map((group, idx) => {
             const GroupIcon = group.icon;
 
             if (group.path) {

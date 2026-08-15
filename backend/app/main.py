@@ -3,9 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 import asyncio
+import logging
 
 from app.api.routes import router as solver_router
-from app.api.websocket import router as ws_router 
+from app.api.websocket import router as ws_router, ws_manager
 from app.api.incidents import router as incidents_router
 from app.api.blocks import router as blocks_router 
 from app.api.schedule_init import router as schedule_router
@@ -16,36 +17,40 @@ from app.api.settings import router as settings_router
 from app.api.emergencies import router as emergencies_router
 from app.api.schedules import router as new_schedules_router
 from app.api.auth import router as auth_router
-from app.services.telemetry_worker import telemetry_service
-from app.api.websocket import manager as ws_manager
+from app.services.telemetry_worker import telemetry_polling_loop
 from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
 from app.core.config import settings
 from app.db.init_admin import seed_initial_admin
 
+logger = logging.getLogger("app.main")
+
 # Lifespan контекст для запуску фонових процесів
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ініціалізуємо Redis
+    # 1. Ініціалізуємо Redis
     await init_redis()
     
-    # Створюємо таблиці БД та початкового адміна
+    # 2. Створюємо таблиці БД та початкового адміна
     await init_db()
     await seed_initial_admin()
 
-    # Запускаємо воркер Wialon у фоновому режимі при старті сервера
-    polling_task = asyncio.create_task(telemetry_service.polling_loop(ws_manager))
-    # Запускаємо слухача Redis для WebSocket
-    redis_task = asyncio.create_task(ws_manager.listen_to_redis())
-    yield
-    # При вимкненні сервера скасовуємо завдання
-    polling_task.cancel()
-    redis_task.cancel()
+    # 3. Запускаємо фоновий збір та розрахунок телеметрії (10с інтервал)
+    telemetry_task = asyncio.create_task(telemetry_polling_loop())
     
-    # Закриваємо з'єднання з Redis
+    yield
+    
+    # 4. При вимкненні сервера коректно скасовуємо фонову задачу
+    telemetry_task.cancel()
+    try:
+        await telemetry_task
+    except asyncio.CancelledError:
+        pass
+    
+    # 5. Закриваємо з'єднання з Redis
     await close_redis()
 
-app = FastAPI(title="OMET Dispatch API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="OMET Dispatch API", version="2.4.0", lifespan=lifespan)
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -73,10 +78,6 @@ app.include_router(control_points_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(emergencies_router, prefix="/api/v1")
 app.include_router(new_schedules_router, prefix="/api/v1")
+app.include_router(new_schedules_router, prefix="/api")
 app.include_router(new_schedules_router, prefix="")
 app.include_router(ws_router)
-
-# Ендпоінт для перевірки поточного стану телеметрії (для тестування)
-@app.get("/api/v1/telemetry", tags=["Telemetry"])
-async def get_current_telemetry():
-    return telemetry_service.active_vehicles

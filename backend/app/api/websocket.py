@@ -1,79 +1,90 @@
 # backend/app/api/websocket.py
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from typing import List
 import json
-import redis.asyncio as redis
-import os
+import logging
+from typing import List, Optional
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from app.core.redis import get_redis
+from app.core.security import verify_ws_token
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-
 class ConnectionManager:
     def __init__(self):
-        # Зберігаємо всі активні WebSocket підключення (локальні для цього воркера)
         self.active_connections: List[WebSocket] = []
-        self.redis = redis.from_url(REDIS_URL, decode_responses=True)
-        self.pubsub = self.redis.pubsub()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        print(f"Нове підключення. Всього локальних клієнтів: {len(self.active_connections)}")
+        logger.info(f"⚡ [WS] Нове підключення. Активних клієнтів: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        print(f"Клієнт відключився. Всього локальних клієнтів: {len(self.active_connections)}")
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info(f"🔌 [WS] Клієнт відключився. Залишилося клієнтів: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
-        """Відправляє повідомлення в Redis канал (щоб усі воркери його отримали)."""
-        json_message = json.dumps(message)
-        # Публікуємо в Redis замість прямої відправки клієнтам
-        await self.redis.publish("ws_events", json_message)
-
-    async def _send_to_local_clients(self, message_str: str):
-        """Внутрішній метод для відправки повідомлення локальним підключенням цього воркера."""
+        """Пряма та масштабована розсилка JSON усім активним диспетчерам."""
+        payload = json.dumps(message)
         dead_connections = []
         for connection in self.active_connections:
             try:
-                await connection.send_text(message_str)
-            except Exception as e:
-                print(f"Помилка відправки (м'яке відключення): {e}")
+                await connection.send_text(payload)
+            except Exception:
                 dead_connections.append(connection)
-        
-        # Очищення мертвих з'єднань
+
         for dead in dead_connections:
-            if dead in self.active_connections:
-                self.active_connections.remove(dead)
-                print(f"Очищено мертве з'єднання. Залишилося: {len(self.active_connections)}")
+            self.disconnect(dead)
 
-    async def listen_to_redis(self):
-        """Фонове завдання, яке слухає канал Redis і ретранслює події локальним клієнтам."""
-        await self.pubsub.subscribe("ws_events")
-        print("Підписано на Redis канал: ws_events")
+        # Також публікуємо в Redis канал ws_events для мульти-воркерів
         try:
-            async for message in self.pubsub.listen():
-                if message["type"] == "message":
-                    data = message["data"]
-                    # Отримали подію від Redis, розсилаємо її локальним клієнтам
-                    await self._send_to_local_clients(data)
-        except asyncio.CancelledError:
-            print("Слухач Redis зупинений.")
-        finally:
-            await self.pubsub.unsubscribe("ws_events")
+            redis = await get_redis()
+            await redis.publish("ws_events", payload)
+        except Exception as e:
+            logger.debug(f"Redis publish notice: {e}")
 
-# Глобальний менеджер підключень
-manager = ConnectionManager()
+ws_manager = ConnectionManager()
+manager = ws_manager  # Аліас для сумісності з іншими модулями
+
+async def handle_websocket_session(websocket: WebSocket, token: Optional[str] = None):
+    # 1. Авторизація якщо передано токен
+    if token:
+        user = await verify_ws_token(token)
+        if not user:
+            logger.warning("❌ [WS] Невалідний токен диспетчера. Закриття з'єднання.")
+            await websocket.close(code=1008)
+            return
+        logger.info(f"👤 [WS] Авторизовано диспетчера: {user.username} ({user.full_name})")
+
+    await ws_manager.connect(websocket)
+
+    try:
+        # 2. При підключенні одразу віддаємо останній відомий стан з Redis (щоб не чекати 10 сек)
+        redis = await get_redis()
+        raw_data = await redis.hgetall("telemetry:vehicles")
+        if raw_data:
+            initial_state = [json.loads(v) for v in raw_data.values()]
+            await websocket.send_text(json.dumps({
+                "type": "telemetry_update",
+                "data": initial_state
+            }))
+
+        # 3. Тримаємо з'єднання відкритим (підтримка ping-pong від фронтенду)
+        while True:
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as e:
+        logger.warning(f"WS session exception: {e}")
+        ws_manager.disconnect(websocket)
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            # Очікуємо повідомлення від клієнта (наприклад, ping/pong для підтримки з'єднання)
-            data = await websocket.receive_text()
-            # Поки що ігноруємо вхідні повідомлення від клієнта через WS
-            pass
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+async def websocket_endpoint_default(websocket: WebSocket, token: Optional[str] = Query(None)):
+    await handle_websocket_session(websocket, token)
+
+@router.websocket("/ws_events")
+async def websocket_endpoint_events(websocket: WebSocket, token: Optional[str] = Query(None)):
+    await handle_websocket_session(websocket, token)

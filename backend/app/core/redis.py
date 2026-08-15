@@ -5,20 +5,28 @@ from typing import Any, Optional
 
 redis_client: Optional[redis.Redis] = None
 
-async def init_redis():
+async def init_redis() -> redis.Redis:
     global redis_client
-    redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    if redis_client is None:
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    return redis_client
+
+async def get_redis() -> redis.Redis:
+    global redis_client
+    if redis_client is None:
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    return redis_client
 
 async def close_redis():
     global redis_client
     if redis_client:
         await redis_client.close()
+        redis_client = None
 
 async def get_cache(key: str) -> Optional[Any]:
-    if not redis_client:
-        return None
+    client = await get_redis()
     try:
-        val = await redis_client.get(key)
+        val = await client.get(key)
         if val:
             return json.loads(val)
     except Exception as e:
@@ -26,17 +34,15 @@ async def get_cache(key: str) -> Optional[Any]:
     return None
 
 async def set_cache(key: str, value: Any, expire_seconds: int = 3600):
-    if not redis_client:
-        return
+    client = await get_redis()
     try:
-        await redis_client.set(key, json.dumps(value), ex=expire_seconds)
+        await client.set(key, json.dumps(value), ex=expire_seconds)
     except Exception as e:
         print(f"Redis set error: {e}")
 
 async def invalidate_cache(key: str):
-    if not redis_client:
-        return
+    client = await get_redis()
     try:
-        await redis_client.delete(key)
+        await client.delete(key)
     except Exception as e:
         print(f"Redis delete error: {e}")

@@ -1,83 +1,46 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
+import { MapContainer, TileLayer, ZoomControl, Polyline, CircleMarker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { useScheduleStore } from '../../store/useScheduleStore';
-import { MapPin, Play, Pause, RotateCcw, Bus, Zap, Info, Clock, AlertCircle, Clock3, Filter, CheckCircle2, Layers } from 'lucide-react';
 import { useStationStore } from '../../store/useStationStore';
 import { useRouteStore } from '../../store/useRouteStore';
+import { TelemetryMarkers } from '../dispatcher/TelemetryMarkers';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
-import { LiveVehicleCanvas } from './LiveVehicleCanvas';
-import { calculateElectrobusBattery } from '../../utils/scheduleEngine';
-// Removed GTFS_ROUTES import
+import { MapPin, Bus, Zap, Clock, AlertCircle, Clock3, Filter, CheckCircle2, RefreshCw } from 'lucide-react';
 
+// Fix for default Leaflet marker assets in React/Vite builds
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
-export const LiveMapView: React.FC = () => {
-  const stationsFromStore = useStationStore(state => state.stations);
-  const { liveSchedule, validationWarnings, updateTripDeparture, stops } = useScheduleStore();
-  
-  const liveBlocks = liveSchedule?.current_blocks || [];
-  const [simTimeMin, setSimTimeMin] = useState<number>(450); // 07:30 default
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
+interface LiveMapViewProps {
+  activeRouteId?: string;
+}
+
+export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propActiveRouteId }) => {
+  const { mapTileUrl, mapAttribution, enterpriseLogoUrl } = useSettingsStore();
+  const { stops, liveSchedule, updateTripDeparture } = useScheduleStore();
+  const routes = useRouteStore((state) => state.routes);
+
+  const [routeFilter, setRouteFilter] = useState<string>(propActiveRouteId || 'ALL');
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 
-  // Фільтр маршруту: 'ALL' або ID конкретного маршруту ('T3', 'T7', 'Tr3', 'Tr9' тощо)
-  const [routeFilter, setRouteFilter] = useState<string>('ALL');
+  // Центр Одеси (вузлова розв'язка Старосінна / Вокзал)
+  const ODESSA_CENTER: [number, number] = [46.4750, 30.7350];
 
-  // Quick Slack Modal State
-  const [slackModal, setSlackModal] = useState<{
-    isOpen: boolean;
-    blockId: string;
-    tripId: string;
-    vehicleNum: string;
-    routeName: string;
-    slackMinutes: number;
-  }>({
-    isOpen: false,
-    blockId: '',
-    tripId: '',
-    vehicleNum: '',
-    routeName: '',
-    slackMinutes: 5,
-  });
-
-  const [slackSuccessMsg, setSlackSuccessMsg] = useState<string | null>(null);
-
-  const selectedVehicleTelemetry = useScheduleStore(state => {
-    if (!selectedVehicle) return null;
-    const vNum = selectedVehicle.vehicleNumber?.split(' ')[0];
-    const telemetryObj = state.telemetry || {};
-    const key = Object.keys(telemetryObj).find(id => id.includes(vNum));
-    return key ? telemetryObj[key] : null;
-  });
-
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [mapDimensions, setMapDimensions] = useState({ width: 800, height: 380 });
-
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (mapContainerRef.current) {
-        setMapDimensions({
-          width: mapContainerRef.current.clientWidth || 800,
-          height: mapContainerRef.current.clientHeight || 380
-        });
-      }
-    };
-    
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
-  }, []);
-
-  // Отримання обраного об'єкта маршруту
   const activeRouteObj = useMemo(() => {
     if (routeFilter === 'ALL') return null;
-    const allRoutes = useRouteStore.getState().routes;
-    return allRoutes.find(r => r.id.toLowerCase() === routeFilter.toLowerCase() || r.number === routeFilter);
-  }, [routeFilter]);
+    return routes.find((r) => r.id.toLowerCase() === routeFilter.toLowerCase() || r.number === routeFilter);
+  }, [routeFilter, routes]);
 
-  // Динамічний фільтр зупинок для обраного маршруту
+  // Маршрутні зупинки
   const displayedStops = useMemo(() => {
     if (routeFilter === 'ALL' || !activeRouteObj) {
-      // Режим «Усі маршрути»: повертаємо ключові магістральні вузли
       return [
         { id: '708889', name: 'Старосінна площа', lat: 46.4668, lng: 30.7382, isHub: true },
         { id: '708884', name: 'пл. Тираспольська', lat: 46.4786, lng: 30.7318, isHub: true },
@@ -89,169 +52,60 @@ export const LiveMapView: React.FC = () => {
       ];
     }
 
-    // Режим конкретного маршруту: фільтруємо зупинки зі списка `activeRouteObj.stations`
     const stationIdSet = new Set(activeRouteObj.stations || []);
-    const stopsList = stops.filter(s => stationIdSet.has(s.id));
-
+    const stopsList = stops.filter((s) => stationIdSet.has(s.id));
     if (stopsList.length === 0) {
-      return stops.slice(0, 15); // Fallback if station array is empty
+      return stops.slice(0, 15);
     }
-
-    return stopsList.map(s => ({
+    return stopsList.map((s) => ({
       ...s,
       lng: s.lng || 30.73,
-      isHub: s.isTerminal || false
+      isHub: s.isTerminal || false,
     }));
-  }, [routeFilter, activeRouteObj]);
+  }, [routeFilter, activeRouteObj, stops]);
 
-  // Проекція координат GPS на розміри карти Canvas/SVG
-  const projectPoint = (lat: number, lon: number) => {
-    // Межі Одеси: Lat 46.34 - 46.60, Lng 30.65 - 30.82
-    const minLat = 46.34, maxLat = 46.60;
-    const minLon = 30.65, maxLon = 30.82;
-
-    const scaleX = mapDimensions.width / (maxLon - minLon);
-    const scaleY = mapDimensions.height / (maxLat - minLat);
-
-    const x = (lon - minLon) * scaleX;
-    const y = mapDimensions.height - (lat - minLat) * scaleY;
-
-    return { 
-      x: Math.max(30, Math.min(mapDimensions.width - 30, x)), 
-      y: Math.max(30, Math.min(mapDimensions.height - 30, y)) 
-    };
-  };
-
-  // Розрахунок точок треку для підключення полілінії
-  const routePolylinePoints = useMemo(() => {
-    if (!displayedStops || displayedStops.length < 2) return '';
-    return displayedStops.map(s => {
-      const pt = projectPoint(s.lat, s.lng);
-      return `${pt.x},${pt.y}`;
-    }).join(' L ');
-  }, [displayedStops, mapDimensions]);
-
-  // Симуляційний таймер
-  useEffect(() => {
-    let interval: any = null;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setSimTimeMin((prev) => (prev >= 1320 ? 300 : prev + 1 * speedMultiplier));
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, speedMultiplier]);
-
-  const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!mapContainerRef.current) return;
-    const rect = mapContainerRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-
-    let clickedBlock: any = null;
-    const currentTelemetry = useScheduleStore.getState().telemetry || {};
-
-    Object.entries(currentTelemetry).forEach(([id, vehicle]: [string, any]) => {
-      const { x, y } = projectPoint(vehicle.lat, vehicle.lon);
-      const dx = clickX - x;
-      const dy = clickY - y;
-      
-      if (Math.sqrt(dx * dx + dy * dy) <= 20) {
-        const block = liveBlocks.find((b: any) => {
-           const vNum = b.vehicleNumber?.split(' ')[0];
-           return id.includes(vNum);
-        });
-        if (block) {
-          clickedBlock = block;
-        }
-      }
-    });
-
-    setSelectedVehicle(clickedBlock);
-  };
-
-  const openSlackModal = (block: any) => {
-    const activeTrip = block.trips && block.trips.length > 0 ? block.trips[0] : null;
-    setSlackModal({
-      isOpen: true,
-      blockId: block.id,
-      tripId: activeTrip ? activeTrip.id : 'trip_1',
-      vehicleNum: block.vehicleNumber,
-      routeName: block.routeId,
-      slackMinutes: 5,
-    });
-  };
-
-  const handleApplySlack = async () => {
-    if (!slackModal.blockId) return;
-    try {
-      if (updateTripDeparture) {
-        await updateTripDeparture(slackModal.blockId, slackModal.tripId, simTimeMin, slackModal.slackMinutes);
-      }
-      setSlackSuccessMsg(`Відтяжку +${slackModal.slackMinutes} хв успішно застосовано до ТЗ ${slackModal.vehicleNum}!`);
-      setTimeout(() => setSlackSuccessMsg(null), 4000);
-      setSlackModal(prev => ({ ...prev, isOpen: false }));
-    } catch (err) {
-      console.error("Error applying slack on map:", err);
-    }
-  };
-
-  const formatMins = (mins: number) => {
-    const h = Math.floor(mins / 60) % 24;
-    const m = mins % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  };
-
-  // Фільтрований випуск вагонів
-  const filteredBlocksCount = useMemo(() => {
-    if (routeFilter === 'ALL') return liveBlocks.length;
-    return liveBlocks.filter((b: any) => 
-      b.routeId?.toLowerCase() === routeFilter.toLowerCase() ||
-      b.vehicleNumber?.toLowerCase().includes(routeFilter.toLowerCase())
-    ).length;
-  }, [liveBlocks, routeFilter]);
+  // Координати для відображення лінії маршруту Polyline
+  const polylinePositions: [number, number][] = useMemo(() => {
+    return displayedStops.map((st) => [st.lat, st.lng]);
+  }, [displayedStops]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="brutalist-card bg-gray-900 text-white p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="bg-emerald-500 text-gray-900 font-bold px-2 py-0.5 rounded text-xs">
-              Диспетчерська Карта v4.0
-            </span>
-            <h2 className="text-base font-bold text-white">
-              Інтерактивна Карта з Динамічним Фільтром Маршрутів та Зупинок
-            </h2>
+    <div className="space-y-6 font-sans">
+      {/* Header Banner */}
+      <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 border-2 border-slate-800 shadow-xl">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-md">
+            <MapPin className="w-5 h-5" />
           </div>
-          <p className="text-xs text-gray-400 mt-1">
-            Оберіть маршрут для коридорного фокусування, перегляду лише його зупинок та управління відтяжками
-          </p>
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="bg-emerald-500 text-slate-950 font-black px-2 py-0.5 rounded text-[10px] uppercase">
+                Live GIS • Leaflet
+              </span>
+              <h2 className="text-base font-extrabold text-white">
+                Оперативна ГІС-Карта Руху КП «ОМЕТ»
+              </h2>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Моніторинг Wialon GPS телеметрії в реальному часі (60 FPS, нативний Leaflet шар)
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center space-x-2 font-mono text-xs font-bold">
-          <span className="bg-emerald-900/60 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-700/60 flex items-center space-x-1.5">
+          <span className="bg-emerald-950/80 text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-800 flex items-center space-x-1.5">
             <Zap className="w-4 h-4 text-emerald-400 animate-pulse" />
-            <span>Активних ТЗ на лінії: {filteredBlocksCount}</span>
+            <span>Wialon Online</span>
           </span>
         </div>
       </div>
 
-      {/* Notification Banner */}
-      {slackSuccessMsg && (
-        <div className="bg-emerald-50 border-2 border-emerald-600 text-emerald-900 p-3.5 rounded-xl font-bold text-xs flex items-center space-x-2 animate-in fade-in">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-          <span>{slackSuccessMsg}</span>
-        </div>
-      )}
-
-      {/* Control Bar: Route Selector & Time Slider */}
-      <div className="brutalist-card bg-white p-4 rounded-xl space-y-4">
-        {/* Route Filter Selector */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b pb-3">
+      {/* Filter Selector Bar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
-            <Filter className="w-4 h-4 text-indigo-600" />
-            <span className="text-xs font-extrabold text-gray-900">Фільтр відображення маршруту:</span>
+            <Filter className="w-4 h-4 text-blue-600" />
+            <span className="text-xs font-extrabold text-slate-900">Коридорний фільтр маршруту:</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
@@ -259,420 +113,158 @@ export const LiveMapView: React.FC = () => {
               onClick={() => setRouteFilter('ALL')}
               className={`px-3 py-1.5 rounded-xl border font-bold cursor-pointer transition-all ${
                 routeFilter === 'ALL'
-                  ? 'bg-gray-900 text-white border-gray-900 shadow-xs'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
               }`}
             >
-              Всі маршрути (Вузли)
+              Всі маршрути (Мережа)
             </button>
 
-            {/* Tram Route Badges */}
-            {['T3', 'T7', 'T10', 'T12', 'T28'].map(r => (
+            {['7', '18', '28', '5', '3'].map((r) => (
               <button
                 key={r}
                 onClick={() => setRouteFilter(r)}
-                className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer transition-all ${
+                className={`px-3 py-1.5 rounded-xl border font-bold cursor-pointer transition-all ${
                   routeFilter === r
-                    ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
-                    : 'bg-sky-50 text-sky-800 hover:bg-sky-100 border-sky-200'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-blue-50 text-blue-800 hover:bg-blue-100 border-blue-200'
                 }`}
               >
-                Трамвай {r}
+                Трамвай №{r}
               </button>
             ))}
-
-            {/* Trolleybus Route Badges */}
-            {['Tr3', 'Tr7', 'Tr9', 'Tr12'].map(r => (
-              <button
-                key={r}
-                onClick={() => setRouteFilter(r)}
-                className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer transition-all ${
-                  routeFilter === r
-                    ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
-                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200'
-                }`}
-              >
-                Тролейбус {r}
-              </button>
-            ))}
-
-            {/* Electrobus Badge */}
-            <button
-              onClick={() => setRouteFilter('Tr12')}
-              className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer flex items-center space-x-1 ${
-                routeFilter === 'Tr12'
-                  ? 'bg-emerald-600 text-white border-emerald-700'
-                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-              }`}
-            >
-              <Zap className="w-3 h-3 text-amber-300" />
-              <span>Електробус</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Time Slider & Simulation Controls */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              className={`p-2.5 rounded-xl font-bold text-white border-2 border-gray-900 shadow-xs flex items-center space-x-1.5 cursor-pointer text-xs ${
-                isPlaying ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
-              }`}
-            >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              <span>{isPlaying ? 'Пауза' : 'Запустити симуляцію'}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setIsPlaying(false);
-                setSimTimeMin(450);
-              }}
-              className="p-2.5 bg-gray-100 hover:bg-gray-200 border-2 border-gray-900 rounded-xl text-xs font-bold text-gray-800 cursor-pointer"
-              title="Скинути до 07:30"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-xl border border-gray-300 text-xs font-bold font-mono">
-              {[1, 5, 10, 30].map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSpeedMultiplier(s)}
-                  className={`px-2.5 py-1 rounded-lg cursor-pointer ${
-                    speedMultiplier === s ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:text-gray-900'
-                  }`}
-                >
-                  {s}x
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2 font-mono">
-            <Clock className="w-5 h-5 text-indigo-600" />
-            <span className="text-xl font-extrabold text-gray-900 bg-gray-100 px-3 py-1 rounded-xl border-2 border-gray-900">
-              {formatMins(simTimeMin)}
-            </span>
-          </div>
-        </div>
-
-        {/* Time Slider */}
-        <div className="space-y-1">
-          <input
-            type="range"
-            min={300}
-            max={1320}
-            value={simTimeMin}
-            onChange={(e) => setSimTimeMin(Number(e.target.value))}
-            className="w-full accent-indigo-600 cursor-pointer"
-          />
-          <div className="flex justify-between text-[10px] font-mono text-gray-500">
-            <span>05:00 (Виїзд)</span>
-            <span>08:00 (Ранковий пік)</span>
-            <span>12:00 (Обід)</span>
-            <span>17:00 (Вечірній пік)</span>
-            <span>22:00 (Заходження)</span>
           </div>
         </div>
       </div>
 
-      {/* Validation Warnings */}
-      {validationWarnings && validationWarnings.length > 0 && (
-        <div className="bg-red-50 border-2 border-red-900 p-4 rounded-2xl shadow-[4px_4px_0px_0px_rgba(127,29,29,1)] space-y-2 brutalist-card">
-          <div className="flex items-center space-x-2 text-red-800 font-bold text-sm">
-            <AlertCircle className="w-5 h-5" />
-            <span>Системні попередження (Transit Solver)</span>
-          </div>
-          <ul className="list-disc pl-5 text-xs text-red-700 space-y-1 font-mono">
-            {validationWarnings.map((warning: string, idx: number) => (
-              <li key={idx}>{warning}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Map Area */}
+      {/* Main Grid: Leaflet Map & Info / Incident Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Map Container */}
-        <div className="brutalist-card bg-slate-950 p-4 rounded-2xl lg:col-span-3 space-y-3 relative overflow-hidden min-h-[450px]">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs">
-            <div className="flex items-center space-x-2">
-              <MapPin className="w-4 h-4 text-emerald-400" />
-              <span className="font-bold text-white">
-                {routeFilter === 'ALL' 
-                  ? 'Геопросторова схема вузлів КП «ОМЕТ» (Загальний огляд)' 
-                  : `Фокусна карта: ${activeRouteObj?.name || routeFilter} (${displayedStops.length} зупинок)`}
-              </span>
-            </div>
-            <span className="text-slate-400 font-mono text-[11px]">
-              Клікніть на маркер ТЗ для деталізації
+        {/* Leaflet Map Canvas */}
+        <div className="lg:col-span-3 bg-white rounded-2xl border-2 border-slate-200 shadow-xl overflow-hidden relative min-h-[600px] flex flex-col">
+          {/* Top Map Status Overlay */}
+          <div className="absolute top-4 left-4 z-[400] bg-white/95 backdrop-blur-sm px-3.5 py-2 rounded-2xl shadow-lg border border-slate-200 flex items-center space-x-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></div>
+            <span className="text-xs font-bold text-slate-900">
+              {routeFilter === 'ALL' ? 'Загальна схема ліній' : `Маршрут №${routeFilter}`}
             </span>
           </div>
 
-          <div 
-            ref={mapContainerRef} 
-            onClick={handleMapClick}
-            className="relative w-full h-[380px] bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer"
-          >
-            <svg viewBox={`0 0 ${mapDimensions.width} ${mapDimensions.height}`} className="w-full h-full select-none">
-              <defs>
-                <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                  <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" strokeWidth="1" />
-                </pattern>
-              </defs>
-              <rect width={mapDimensions.width} height={mapDimensions.height} fill="url(#grid)" />
+          {/* Enterprise Logo Overlay if configured */}
+          {enterpriseLogoUrl && (
+            <div className="absolute bottom-6 left-4 z-[400] bg-white/90 p-2 rounded-xl shadow border border-slate-200">
+              <img src={enterpriseLogoUrl} alt="Логотип КП ОМЕТ" className="h-10 object-contain" />
+            </div>
+          )}
 
-              {/* Connected Route Polyline for Selected Route */}
-              {routePolylinePoints && (
-                <path
-                  d={`M ${routePolylinePoints}`}
-                  fill="none"
-                  stroke={routeFilter.startsWith('T') ? '#38bdf8' : '#f59e0b'}
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="animate-in fade-in"
+          {/* Telemetry Status Legend */}
+          <div className="absolute top-4 right-4 z-[400] bg-white/95 backdrop-blur-sm p-3 rounded-2xl shadow-xl border border-slate-200 text-xs pointer-events-none">
+            <h4 className="font-extrabold text-slate-900 mb-2 uppercase tracking-wider text-[10px]">
+              Статус відхилення від графіка
+            </h4>
+            <div className="space-y-1.5 text-[11px] font-bold">
+              <div className="flex items-center space-x-2 text-emerald-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200"></span>
+                <span>У графіку (±2 хв)</span>
+              </div>
+              <div className="flex items-center space-x-2 text-rose-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-200"></span>
+                <span>Запізнення (&gt; 2 хв)</span>
+              </div>
+              <div className="flex items-center space-x-2 text-blue-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-200"></span>
+                <span>Нагін (&lt; -2 хв)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Leaflet MapContainer */}
+          <div className="flex-1 w-full h-[600px] z-0">
+            <MapContainer
+              center={ODESSA_CENTER}
+              zoom={13}
+              className="w-full h-full"
+              zoomControl={false}
+            >
+              <ZoomControl position="bottomright" />
+              
+              <TileLayer
+                attribution={mapAttribution}
+                url={mapTileUrl}
+              />
+
+              {/* Маршрутна полілінія */}
+              {polylinePositions.length > 1 && (
+                <Polyline
+                  positions={polylinePositions}
+                  pathOptions={{
+                    color: routeFilter === 'ALL' ? '#3b82f6' : '#2563eb',
+                    weight: 4,
+                    opacity: 0.8,
+                    dashArray: routeFilter === 'ALL' ? '4, 8' : undefined,
+                  }}
                 />
               )}
 
-              {/* Render Filtered Stops / Hub Markers */}
-              {displayedStops.map((st, idx) => {
-                const pt = projectPoint(st.lat, st.lng);
-                return (
-                  <g key={st.id || idx} className="hover:opacity-100 transition-all">
-                    <circle
-                      cx={pt.x}
-                      cy={pt.y}
-                      r={st.isHub ? "7" : "4.5"}
-                      fill={st.isHub ? "#f59e0b" : "#0f172a"}
-                      stroke={st.isHub ? "#ffffff" : "#38bdf8"}
-                      strokeWidth="2"
-                    />
-                    {/* Stop Label */}
-                    <text
-                      x={pt.x}
-                      y={pt.y + 16}
-                      fill="#cbd5e1"
-                      fontSize={routeFilter === 'ALL' ? "10" : "9"}
-                      textAnchor="middle"
-                      fontWeight="bold"
-                    >
-                      {st.name} {st.isHub ? '(Вузол)' : ''}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+              {/* Зупинки та вузли */}
+              {displayedStops.map((st, idx) => (
+                <CircleMarker
+                  key={st.id || idx}
+                  center={[st.lat, st.lng]}
+                  radius={st.isHub ? 6 : 4}
+                  pathOptions={{
+                    fillColor: st.isHub ? '#f59e0b' : '#3b82f6',
+                    fillOpacity: 0.9,
+                    color: '#ffffff',
+                    weight: 2,
+                  }}
+                >
+                  <Popup>
+                    <div className="p-1 font-sans text-xs">
+                      <strong className="block text-slate-900 font-extrabold">{st.name}</strong>
+                      <span className="text-slate-500 font-mono text-[10px]">
+                        {st.isHub ? 'Вузлова пересадочна станція' : 'Проміжна зупинка'}
+                      </span>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              ))}
 
-            {/* Canvas for Live Vehicle Movement */}
-            <LiveVehicleCanvas
-              width={mapDimensions.width}
-              height={mapDimensions.height}
-              projectPoint={projectPoint}
-              selectedVehicleId={selectedVehicle?.vehicleNumber?.split(' ')[0]}
-              selectedRouteFilter={routeFilter}
-            />
+              {/* Шар високошвидкісних маркерів телеметрії (O(1) Leaflet imperative updates) */}
+              <TelemetryMarkers activeRouteId={routeFilter === 'ALL' ? null : routeFilter} />
+            </MapContainer>
           </div>
         </div>
 
-        {/* Selected Vehicle Info & Incident Panel */}
+        {/* Sidebar: Incident Directory & Vehicle Dispatch Status */}
         <div className="flex flex-col space-y-6 lg:col-span-1">
-          {/* Selected Vehicle Info Card */}
-          <div className="brutalist-card bg-white p-5 rounded-2xl space-y-4">
-            <h3 className="font-bold text-sm text-gray-900 border-b pb-2 flex items-center justify-between">
-              <span className="flex items-center space-x-2">
-                <Bus className="w-4 h-4 text-indigo-600" />
-                <span>Інформація про ТЗ</span>
-              </span>
-              {selectedVehicle && (
-                <button
-                  onClick={() => openSlackModal(selectedVehicle)}
-                  className="bg-amber-500 hover:bg-amber-600 text-gray-900 px-2 py-1 rounded text-[11px] font-extrabold flex items-center space-x-1 cursor-pointer"
-                  title="Застосувати оперативну відтяжку"
-                >
-                  <Clock3 className="w-3.5 h-3.5" />
-                  <span>Відтяжка</span>
-                </button>
-              )}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+            <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 border-b pb-2 flex items-center space-x-2">
+              <Bus className="w-4 h-4 text-blue-600" />
+              <span>Параметри лінії КП «ОМЕТ»</span>
             </h3>
 
-            {selectedVehicle ? (
-              <div className="space-y-3 font-mono text-xs">
-                {(() => {
-                  const status = selectedVehicleTelemetry ? selectedVehicleTelemetry.status : null;
-                  const isReserve = status === 'MODIFIED_RESERVE' || status === 'HOT_RESERVE';
-                  const isElectrobus = selectedVehicle.type === 'electrobus';
-
-                  return (
-                    <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-1">
-                      <span className="text-indigo-600 font-bold block text-[10px]">Бортовий номер:</span>
-                      <div className="flex items-center justify-between">
-                        <strong className="text-indigo-950 text-sm">{selectedVehicle.vehicleNumber}</strong>
-                        {isElectrobus && (
-                          <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded flex items-center space-x-1">
-                            <Zap className="w-3 h-3 text-amber-300" />
-                            <span>Електробус</span>
-                          </span>
-                        )}
-                        {isReserve && (
-                          <span className="bg-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded flex items-center space-x-1">
-                            <Zap className="w-3 h-3" />
-                            <span>РЕЗЕРВ</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <div className="p-3 bg-gray-50 border border-gray-300 rounded-xl space-y-1">
-                  <span className="text-gray-500 block text-[10px]">Прикріплений маршрут:</span>
-                  <strong className="text-gray-900 text-sm">Маршрут №{selectedVehicle.routeId}</strong>
-                </div>
-
-                {/* Electrobus Battery Status Panel */}
-                {selectedVehicle.type === 'electrobus' && (() => {
-                  const battRes = calculateElectrobusBattery(selectedVehicle, 12.4, 15, 20);
-                  return (
-                    <div className={`p-3 rounded-xl border space-y-1.5 ${
-                      battRes.isBatteryLow ? 'bg-rose-50 border-rose-300' : 'bg-emerald-50 border-emerald-200'
-                    }`}>
-                      <div className="flex justify-between items-center text-[10px] font-bold">
-                        <span className={battRes.isBatteryLow ? 'text-rose-700' : 'text-emerald-800'}>
-                          Заряд акумулятора (SoC):
-                        </span>
-                        <span className={battRes.isBatteryLow ? 'text-rose-900 font-extrabold' : 'text-emerald-900'}>
-                          {battRes.endSoC}%
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                        <div 
-                          className={`h-2 rounded-full transition-all ${
-                            battRes.isBatteryLow ? 'bg-rose-600' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${battRes.endSoC}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between text-[10px] text-gray-600 pt-1 border-t border-gray-200/60">
-                        <span>Витрата: {battRes.consumedkWh} кВт·год</span>
-                        <span>Необхідна зарядка: {battRes.requiredChargingMin} хв</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {(() => {
-                  const speed = selectedVehicleTelemetry ? selectedVehicleTelemetry.speed : null;
-                  return (
-                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 flex justify-between items-center">
-                      <div>
-                        <span className="text-blue-600 block text-[10px]">Поточна швидкість:</span>
-                        <strong className="text-blue-900 text-sm">
-                          {speed !== null ? `${speed} км/год` : 'Очікування даних...'}
-                        </strong>
-                      </div>
-                      {speed !== null && speed > 0 && (
-                        <Zap className="w-5 h-5 text-amber-500 animate-pulse" />
-                      )}
-                    </div>
-                  );
-                })()}
-
-                <div className="p-3 bg-gray-50 border border-gray-300 rounded-xl space-y-1">
-                  <span className="text-gray-500 block text-[10px]">Вихід / Повернення депо:</span>
-                  <strong className="text-amber-800 text-sm">
-                    {selectedVehicle.depotExitTime} - {selectedVehicle.depotReturnTime}
-                  </strong>
-                </div>
+            <div className="space-y-2 text-xs font-medium text-slate-700">
+              <div className="flex justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                <span>Вибраний коридор:</span>
+                <strong className="text-slate-900 font-bold">{routeFilter === 'ALL' ? 'Вся мережа' : `Маршрут ${routeFilter}`}</strong>
               </div>
-            ) : (
-              <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-center text-xs text-gray-500 font-sans space-y-1">
-                <Info className="w-5 h-5 mx-auto text-gray-400" />
-                <p>Натисніть на маркер ТЗ на карті, щоб отримати телеметрію та дані відтяжки.</p>
+              <div className="flex justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                <span>Контрольних точок:</span>
+                <strong className="text-slate-900 font-bold">{displayedStops.length}</strong>
               </div>
-            )}
+              <div className="flex justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                <span>Частота оновлення:</span>
+                <strong className="text-emerald-700 font-bold">кожні 10 сек</strong>
+              </div>
+            </div>
           </div>
 
+          {/* Directory of Active Incidents */}
           <IncidentDirectory />
         </div>
       </div>
-
-      {/* Quick Slack Modal for Map */}
-      {slackModal.isOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border-2 border-gray-900 shadow-2xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b pb-3">
-              <div className="flex items-center space-x-2">
-                <Clock3 className="w-5 h-5 text-amber-600" />
-                <h3 className="font-extrabold text-gray-900 text-base">
-                  Оперативна відтяжка ТЗ ({slackModal.vehicleNum})
-                </h3>
-              </div>
-              <button
-                onClick={() => setSlackModal(prev => ({ ...prev, isOpen: false }))}
-                className="text-gray-400 hover:text-gray-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-600">
-              Вкажіть величину затримки/відтяжки у хвилинах. Система автоматично перерахує каскад наступних рейсів ТЗ.
-            </p>
-
-            <div className="space-y-3 font-mono">
-              <div>
-                <label className="text-xs font-bold text-gray-700 block mb-1">
-                  Величина відтяжки (хвилини):
-                </label>
-                <div className="flex items-center space-x-2">
-                  {[2, 5, 10, 15].map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setSlackModal(prev => ({ ...prev, slackMinutes: m }))}
-                      className={`px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer ${
-                        slackModal.slackMinutes === m 
-                          ? 'bg-amber-500 text-gray-900 border-amber-600' 
-                          : 'bg-gray-100 text-gray-700 border-gray-300'
-                      }`}
-                    >
-                      +{m} хв
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={slackModal.slackMinutes}
-                  onChange={(e) => setSlackModal(prev => ({ ...prev, slackMinutes: Number(e.target.value) || 0 }))}
-                  className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold text-gray-900 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-3 pt-3 border-t">
-              <button
-                onClick={() => setSlackModal(prev => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded-xl text-xs"
-              >
-                Скасувати
-              </button>
-              <button
-                onClick={handleApplySlack}
-                className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-gray-900 font-extrabold rounded-xl shadow-xs text-xs"
-              >
-                Застосувати відтяжку
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
+
+export default LiveMapView;
