@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, update, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional, Union
 from datetime import date
@@ -8,9 +8,11 @@ from datetime import date
 from app.api.dependencies import get_db
 from app.schemas.schedule import GenerateGridRequest, StaticDutyResponse, ScheduleResponse
 from app.models.schedule import Schedule, ScheduleStatus
+from app.models.models import EtaLog
 from app.services.schedule_engine import ScheduleEnginePipeline
 from app.repositories.schedule_repo import ScheduleRepository
 from app.services.telemetry_worker import cache_active_schedule_in_redis
+from app.api.websocket import ws_manager
 
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
 
@@ -69,6 +71,13 @@ async def activate_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)
     if full_schedule:
         await cache_active_schedule_in_redis(full_schedule)
 
+    # 5. Real-time WebSocket інвалідація кешу TanStack Query для всіх підключених диспетчерів
+    await ws_manager.broadcast({
+        "type": "invalidate_schedules",
+        "schedule_id": draft.id,
+        "route_id": draft.route_id
+    })
+
     return {"message": "Розклад успішно активовано", "schedule_id": draft.id, "status": "ACTIVE"}
 
 @router.get("/active", response_model=List[ScheduleResponse])
@@ -94,3 +103,39 @@ async def get_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
     if not schedule:
         raise HTTPException(status_code=404, detail="Розклад не знайдено")
     return schedule
+
+@router.get("/analytics/route/{route_id}/deviations")
+async def get_route_deviations(
+    route_id: str, 
+    target_date: Optional[date] = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Повертає середнє та максимальне відхилення по зупинках маршруту за конкретну дату.
+    """
+    actual_date = target_date or date.today()
+    query = (
+        select(
+            EtaLog.stop_id,
+            func.avg(EtaLog.deviation_min).label("avg_deviation"),
+            func.max(EtaLog.deviation_min).label("max_deviation"),
+            func.count(EtaLog.id).label("total_passages")
+        )
+        .where(EtaLog.route_id == route_id)
+        .where(func.date(EtaLog.recorded_at) == actual_date)
+        .group_by(EtaLog.stop_id)
+    )
+    
+    result = await db.execute(query)
+    stats = result.all()
+    
+    return [
+        {
+            "stop_id": row.stop_id, 
+            "avg_deviation": round(float(row.avg_deviation or 0.0), 1),
+            "max_deviation": round(float(row.max_deviation or 0.0), 1),
+            "total_passages": int(row.total_passages or 0)
+        } 
+        for row in stats
+    ]
+

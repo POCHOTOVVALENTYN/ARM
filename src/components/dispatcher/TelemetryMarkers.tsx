@@ -35,11 +35,16 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({ activeRouteI
       vehicles.forEach((vehicle) => {
         const latLng: [number, number] = [vehicle.lat, vehicle.lng];
         
-        // Визначаємо колір за величиною відхилення від розкладу
+        // Визначаємо колір за величиною відхилення від розкладу або статусу DETOUR
         let colorClass = 'bg-emerald-500 ring-emerald-300'; // У графіку (±2 хв)
         let textColorClass = 'text-emerald-600';
+        let devText = vehicle.deviation_min > 0 ? `+${vehicle.deviation_min}хв` : `${vehicle.deviation_min}хв`;
         
-        if (vehicle.deviation_min > 2.0) {
+        if (vehicle.status === 'DETOUR') {
+          colorClass = 'bg-amber-500 ring-amber-300 animate-pulse';
+          textColorClass = 'text-amber-700';
+          devText = "ОБ'ЇЗД";
+        } else if (vehicle.deviation_min > 2.0) {
           colorClass = 'bg-rose-500 ring-rose-300'; // Запізнення
           textColorClass = 'text-rose-600';
         } else if (vehicle.deviation_min < -2.0) {
@@ -47,8 +52,7 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({ activeRouteI
           textColorClass = 'text-blue-600';
         }
 
-        const devText = vehicle.deviation_min > 0 ? `+${vehicle.deviation_min}хв` : `${vehicle.deviation_min}хв`;
-        const devHtml = vehicle.deviation_min !== 0 
+        const devHtml = (vehicle.deviation_min !== 0 || vehicle.status === 'DETOUR')
           ? `<div class="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] font-mono font-extrabold ${textColorClass} bg-white/95 px-1 rounded shadow-sm border border-slate-200 whitespace-nowrap">${devText}</div>`
           : '';
 

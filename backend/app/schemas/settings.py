@@ -35,3 +35,19 @@ class BreakLocationConfigCreate(BaseModel):
     locationType: str
     maxCapacityVehicles: int
     durationMin: int
+
+class SystemConfigBase(BaseModel):
+    map_tile_url: Optional[str] = None
+    map_attribution: Optional[str] = None
+    enterprise_logo_url: Optional[str] = None
+    theme: Optional[str] = None
+
+class SystemConfigUpdate(SystemConfigBase):
+    pass
+
+class SystemConfigResponse(SystemConfigBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+

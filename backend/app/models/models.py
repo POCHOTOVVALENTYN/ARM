@@ -7,7 +7,10 @@ Base = declarative_base()
 class Vehicle(Base):
     __tablename__ = "vehicles"
     id = Column(String, primary_key=True, index=True)
-    status = Column(String)
+    type = Column(String, default="tram", nullable=True)
+    model = Column(String, default="Tatra T3", nullable=True)
+    status = Column(String, default="AVAILABLE")
+    is_active = Column(Boolean, default=True)
     current_trip_id = Column(String, nullable=True)
 
 class Trip(Base):
@@ -16,16 +19,25 @@ class Trip(Base):
     vehicle_id = Column(String)
     status = Column(String)
 
+from datetime import datetime
+
 class IncidentLog(Base):
     __tablename__ = "incident_logs"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     incident_id = Column(String, nullable=True)
-    trip_id = Column(String)
-    old_vehicle_id = Column(String)
-    new_vehicle_id = Column(String)
-    action = Column(String)
-    reason = Column(String)
-    timestamp = Column(DateTime)
+    vehicle_id = Column(String, nullable=True)
+    route_id = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    status = Column(String, default="NEW", nullable=True)
+    source = Column(String, default="SYSTEM", nullable=True)
+    trip_id = Column(String, nullable=True)
+    old_vehicle_id = Column(String, nullable=True)
+    new_vehicle_id = Column(String, nullable=True)
+    action = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
+    resolution_notes = Column(String, nullable=True)
+    recorded_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=True)
 
 class RouteModel(Base):
     __tablename__ = "routes"
@@ -56,22 +68,35 @@ class VehicleBlockModel(Base):
     end_time = Column(Integer)
     is_completed = Column(Boolean, default=False)
     
-class DriverDutyModel(Base):
+from sqlalchemy import Date
+
+class DriverDuty(Base):
     __tablename__ = "driver_duties"
     id = Column(String, primary_key=True, index=True)
-    driver_id = Column(String)
-    block_id = Column(String)
-    start_time = Column(Integer)
-    end_time = Column(Integer)
-    status = Column(String)
-    breaks = Column(JSON)
+    duty_id = Column(Integer, nullable=True)
+    block_id = Column(String, nullable=True)
+    driver_id = Column(String, nullable=True)
+    vehicle_id = Column(String, nullable=True)
+    target_date = Column(Date, nullable=True)
+    dispatcher_id = Column(Integer, nullable=True)
+    start_time = Column(Integer, nullable=True)
+    end_time = Column(Integer, nullable=True)
+    status = Column(String, default="ASSIGNED")
+    breaks = Column(JSON, nullable=True)
 
-class DriverModel(Base):
+DriverDutyModel = DriverDuty
+
+class Driver(Base):
     __tablename__ = "drivers"
     id = Column(String, primary_key=True, index=True)
-    name = Column(String)
-    status = Column(String)  # 'WORK', 'BREAK', 'OFF'
+    name = Column(String, nullable=True)
+    full_name = Column(String, nullable=True, default="Водій ОМЕТ")
+    class_rank = Column(Integer, default=1)
+    status = Column(String, default="AVAILABLE")  # 'AVAILABLE', 'WORK', 'BREAK', 'OFF'
+    is_active = Column(Boolean, default=True)
     current_vehicle_id = Column(String, nullable=True)
+
+DriverModel = Driver
 
 class StationModel(Base):
     __tablename__ = "stations"
@@ -84,14 +109,24 @@ class StationModel(Base):
     is_dispatch_station = Column(Boolean, default=False)
     break_capacity = Column(Integer, default=0)
 
-class ControlPointEtaModel(Base):
+class EtaLog(Base):
     __tablename__ = "eta_logs"
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    trip_id = Column(String, index=True)
-    station_id = Column(String)
-    estimated_arrival_time = Column(DateTime)
+    vehicle_id = Column(String, index=True, nullable=True)
+    route_id = Column(String, index=True, nullable=True)
+    stop_id = Column(String, index=True, nullable=True)
+    deviation_min = Column(Float, nullable=True, default=0.0)
+    recorded_at = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    
+    # Сумісність із ControlPointEtaModel
+    trip_id = Column(String, index=True, nullable=True)
+    station_id = Column(String, nullable=True)
+    estimated_arrival_time = Column(DateTime, nullable=True)
     actual_arrival_time = Column(DateTime, nullable=True)
-    timestamp = Column(DateTime)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=True)
+
+ControlPointEtaModel = EtaLog
 
 class EmergencyTemplateModel(Base):
     __tablename__ = "emergency_templates"
@@ -151,4 +186,29 @@ class Dispatcher(Base):
     full_name = Column(String, nullable=True)  # ПІБ для аудит-логів
     is_active = Column(Boolean, default=True, nullable=False)
     is_superuser = Column(Boolean, default=False, nullable=False) # Для керування доступами
+
+class SystemConfig(Base):
+    __tablename__ = "system_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    map_tile_url = Column(String, default="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
+    map_attribution = Column(String, default="&copy; OpenStreetMap contributors")
+    enterprise_logo_url = Column(String, nullable=True)
+    theme = Column(String, default="light")
+
+class ActiveDetour(Base):
+    """Журнал оперативних перемикань (об'їздів)"""
+    __tablename__ = "active_detours"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    vehicle_id = Column(String, index=True, nullable=False)
+    route_id = Column(String, nullable=False)
+    reason = Column(String, nullable=False)  # Причина (ДТП, обрив мережі тощо)
+    new_path_description = Column(String, nullable=False)  # Куди направлено
+    
+    started_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    ended_at = Column(DateTime(timezone=True), nullable=True)  # Якщо null - об'їзд ще триває
+    
+    dispatcher_id = Column(Integer, nullable=True)
+
 

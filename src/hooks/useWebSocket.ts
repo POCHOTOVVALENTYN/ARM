@@ -1,5 +1,6 @@
 // src/hooks/useWebSocket.ts
 import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useScheduleStore } from '../store/useScheduleStore';
 import { useIncidentStore } from '../store/useIncidentStore';
 import { useDriverStore } from '../store/useDriverStore';
@@ -8,6 +9,7 @@ import { useAuthStore } from '../store/useAuthStore';
 
 export const useWebSocket = (baseUrl: string) => {
   const wsRef = useRef<WebSocket | null>(null);
+  const queryClient = useQueryClient();
   const isInitialized = useScheduleStore((state) => state.isInitialized);
   const token = useAuthStore((state) => state.token);
   const { updateVehicles, setConnectionStatus: setTelemetryConnected } = useTelemetryStore();
@@ -62,8 +64,35 @@ export const useWebSocket = (baseUrl: string) => {
                 break;
 
               case 'INCIDENT_UPDATE':
-                useIncidentStore.getState().setIncidents(data.payload);
+                useIncidentStore.getState().setIncidents(data.payload || data.data);
                 break;
+
+              case 'NEW_INCIDENT':
+              case 'new_incident': {
+                const incData = data.payload || data.data;
+                if (incData) {
+                  useIncidentStore.getState().addLiveIncident(incData);
+                  console.log(`🚨 [WebSocket] Новий інцидент: ТЗ ${incData.vehicle_id} - ${incData.description}`);
+                  queryClient.invalidateQueries({ queryKey: ['active-incidents'] });
+                  queryClient.invalidateQueries({ queryKey: ['incidents'] });
+                }
+                break;
+              }
+
+              case 'INCIDENT_RESOLVED':
+              case 'incident_resolved': {
+                console.log('⚡ [WebSocket] Отримано сигнал incident_resolved');
+                queryClient.invalidateQueries({ queryKey: ['active-incidents'] });
+                queryClient.invalidateQueries({ queryKey: ['incidents'] });
+                break;
+              }
+
+              case 'DETOUR_UPDATED':
+              case 'detour_updated': {
+                console.log('⚡ [WebSocket] Отримано сигнал detour_updated. Оновлення перемикань...');
+                queryClient.invalidateQueries({ queryKey: ['active-detours'] });
+                break;
+              }
 
               case 'VALIDATION_WARNING':
                 if (setValidationWarnings) {
@@ -88,6 +117,16 @@ export const useWebSocket = (baseUrl: string) => {
                 if (updatedVehicleId && currentBlock && currentBlock.block_id.includes(updatedVehicleId)) {
                   useDriverStore.getState().fetchBlock(updatedVehicleId);
                 }
+                break;
+              }
+
+              case 'INVALIDATE_SCHEDULES':
+              case 'invalidate_schedules': {
+                console.log('⚡ [WebSocket] Отримано сигнал invalidate_schedules. Оновлення серверного кешу...');
+                queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
+                queryClient.invalidateQueries({ queryKey: ['active-schedule'] });
+                queryClient.invalidateQueries({ queryKey: ['schedule'] });
+                queryClient.invalidateQueries({ queryKey: ['schedules'] });
                 break;
               }
 
@@ -129,7 +168,7 @@ export const useWebSocket = (baseUrl: string) => {
         ws.close();
       }
     };
-  }, [baseUrl, isInitialized, token, updateVehicles, setTelemetryConnected, updateTelemetry, setLiveSchedule, setValidationWarnings]);
+  }, [baseUrl, isInitialized, token, updateVehicles, setTelemetryConnected, updateTelemetry, setLiveSchedule, setValidationWarnings, queryClient]);
 
   return wsRef.current;
 };

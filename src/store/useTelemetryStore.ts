@@ -11,7 +11,7 @@ export interface VehicleTelemetry {
   heading?: number;        // Напрямок руху (0-360)
   last_updated: number;    // Unix timestamp (ms)
   deviation_min: number;   // Відхилення від графіка в хвилинах (+ спізнення, - нагін)
-  status?: 'active' | 'break' | 'depot' | 'detour' | 'stopped';
+  status?: string;         // 'ON_ROUTE' | 'DETOUR' | 'IN_DEPOT' | 'active' | 'break' | 'depot'
   driver_name?: string;
 }
 

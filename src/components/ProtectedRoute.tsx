@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useScheduleStore } from '../store/useScheduleStore';
 import { authApi } from '../services/authApi';
+import { useSettingsStore } from '../store/useSettingsStore';
 
 interface ProtectedRouteProps {
   children?: React.ReactNode;
@@ -10,6 +11,7 @@ interface ProtectedRouteProps {
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { token, isAuthenticated, setUser, logout } = useAuthStore();
   const { setPath } = useScheduleStore();
+  const fetchSettings = useSettingsStore((state) => state.fetchSettings);
   const [isVerifying, setIsVerifying] = useState<boolean>(true);
 
   useEffect(() => {
@@ -23,6 +25,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         // При кожному оновленні сторінки підтягуємо свіжі дані користувача
         const user = await authApi.getMe();
         setUser(user);
+        
+        // Підтягуємо глобальні налаштування системи (OSM, логотип, тема)
+        await fetchSettings();
       } catch (error) {
         console.error("Session verification failed:", error);
         logout();
@@ -33,7 +38,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     };
 
     verifySession();
-  }, [token, setUser, logout, setPath]);
+  }, [token, setUser, logout, setPath, fetchSettings]);
 
   if (isVerifying) {
     return (

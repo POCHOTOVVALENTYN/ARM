@@ -64,12 +64,18 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({
                 ctx.stroke();
             }
 
-            // Визначення кольору за відхиленням (Schedule Adherence)
-            // > 2 хв - Червоний (запізнення), < -2 хв - Синій (нагін), інакше Зелений (норма)
+            // Визначення кольору за відхиленням або статусом DETOUR
             let coreColor = '#10b981'; // Emerald 500
             let shadowColor = 'rgba(16, 185, 129, 0.3)';
+            let statusText = vehicle.deviation_min > 0 
+                ? `+${vehicle.deviation_min}хв` 
+                : `${vehicle.deviation_min}хв`;
 
-            if (vehicle.deviation_min > 2.0) {
+            if (vehicle.status === 'DETOUR') {
+                coreColor = '#f59e0b'; // Amber 500 для оперативного об'їзду
+                shadowColor = 'rgba(245, 158, 11, 0.45)';
+                statusText = "ОБ'ЇЗД";
+            } else if (vehicle.deviation_min > 2.0) {
                 coreColor = '#ef4444'; // Red 500
                 shadowColor = 'rgba(239, 68, 68, 0.35)';
             } else if (vehicle.deviation_min < -2.0) {
@@ -101,15 +107,11 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({
             ctx.textAlign = 'center';
             ctx.fillText(`№${vehicle.id}`, x, y - 12);
 
-            // Індикатор відхилення від розкладу (якщо відхилення присутнє)
-            if (vehicle.deviation_min !== 0 && isRouteMatched) {
-                const devText = vehicle.deviation_min > 0 
-                    ? `+${vehicle.deviation_min}хв` 
-                    : `${vehicle.deviation_min}хв`;
-
-                ctx.font = 'bold 9px monospace';
+            // Індикатор відхилення від розкладу або статус "ОБ'ЇЗД"
+            if ((vehicle.deviation_min !== 0 || vehicle.status === 'DETOUR') && isRouteMatched) {
+                ctx.font = vehicle.status === 'DETOUR' ? 'bold 9px Inter, sans-serif' : 'bold 9px monospace';
                 ctx.fillStyle = coreColor;
-                ctx.fillText(devText, x, y + 16);
+                ctx.fillText(statusText, x, y + 16);
             }
 
             ctx.globalAlpha = 1.0; // Скидаємо прозорість
@@ -149,6 +151,10 @@ export const LiveVehicleCanvas: React.FC<LiveVehicleCanvasProps> = ({
                     <div className="flex items-center space-x-2 text-blue-700 dark:text-blue-400">
                         <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-200"></span>
                         <span>Нагін (&lt; -2 хв)</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-amber-700 dark:text-amber-400 pt-1 border-t border-slate-200 dark:border-slate-800">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-200 animate-pulse"></span>
+                        <span>Об'їзд (НС / DETOUR)</span>
                     </div>
                 </div>
             </div>

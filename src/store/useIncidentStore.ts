@@ -2,11 +2,13 @@ import { create } from 'zustand';
 import apiClient from '../utils/apiClient';
 
 export interface Incident {
-  id: string;
+  id: string | number;
   vehicle_id: string;
+  route_id?: string;
   description: string;
-  status: 'ANALYZING' | 'ACTIVE' | 'MANUAL_REVIEW' | 'RESOLVED';
-  timestamp: number;
+  status: 'ANALYZING' | 'ACTIVE' | 'MANUAL_REVIEW' | 'RESOLVED' | 'NEW' | string;
+  source?: string;
+  timestamp: number | string;
   category?: string;
   severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   estimated_delay?: number;
@@ -16,7 +18,13 @@ export interface Incident {
 
 interface IncidentState {
   incidents: Record<string, Incident>;
-  setIncidents: (data: Record<string, Incident>) => void;
+  activeIncidents: Incident[];
+  
+  // Додавання нового інциденту з WebSocket на початок списку
+  addLiveIncident: (incident: Incident | any) => void;
+  // Оновлення повного списку інцидентів
+  setIncidents: (data: Record<string, Incident> | Incident[]) => void;
+  
   reportIncident: (vehicle_id: string, description: string) => Promise<boolean>;
   activateHotReserve: (reserveId: string, tripId: string) => Promise<boolean>;
 }
@@ -35,21 +43,61 @@ export const useIncidentStore = create<IncidentState>((set) => ({
       action: 'Застосувати відтяжку +5 хв на наступній контрольній точці'
     }
   },
+  activeIncidents: [],
 
-  setIncidents: (data) => set({ incidents: data }),
+  addLiveIncident: (incident) => set((state) => {
+    const rawId = String(incident.id || `inc_${Date.now()}`);
+    const normalizedIncident: Incident = {
+      id: rawId,
+      vehicle_id: incident.vehicle_id,
+      route_id: incident.route_id,
+      description: incident.description,
+      status: incident.status || 'NEW',
+      source: incident.source || 'SYSTEM',
+      timestamp: typeof incident.timestamp === 'number' ? incident.timestamp : Date.now(),
+      category: incident.category || 'Критичне запізнення',
+      severity: incident.severity || 'HIGH',
+      estimated_delay: incident.estimated_delay || 5,
+      action: incident.action || 'Оперативний контроль / відтяжка'
+    };
+
+    const existsInArray = state.activeIncidents.some((i) => String(i.id) === rawId);
+    const updatedArray = existsInArray ? state.activeIncidents : [normalizedIncident, ...state.activeIncidents];
+
+    return {
+      incidents: {
+        [rawId]: normalizedIncident,
+        ...state.incidents
+      },
+      activeIncidents: updatedArray
+    };
+  }),
+
+  setIncidents: (data) => set(() => {
+    if (Array.isArray(data)) {
+      const incMap: Record<string, Incident> = {};
+      data.forEach((inc) => {
+        incMap[String(inc.id)] = inc;
+      });
+      return { incidents: incMap, activeIncidents: data };
+    }
+    return {
+      incidents: data,
+      activeIncidents: Object.values(data)
+    };
+  }),
 
   reportIncident: async (vehicle_id, description) => {
     try {
-      // API call first
       const response = await apiClient.post('/api/incidents/report', { 
         vehicle_id, 
         description 
       });
       
       const newInc = response.data;
-      // Fallback object in case backend doesn't return the full incident
-      const incidentToAdd: Incident = newInc?.id ? newInc : {
-        id: `inc_${Date.now()}`,
+      const id = String(newInc?.id || `inc_${Date.now()}`);
+      const incidentToAdd: Incident = {
+        id,
         vehicle_id,
         description,
         status: 'ACTIVE',
@@ -61,12 +109,12 @@ export const useIncidentStore = create<IncidentState>((set) => ({
       };
 
       set((state) => ({
-        incidents: { ...state.incidents, [incidentToAdd.id]: incidentToAdd }
+        incidents: { [id]: incidentToAdd, ...state.incidents },
+        activeIncidents: [incidentToAdd, ...state.activeIncidents]
       }));
       
       return true;
     } catch (error) {
-      // Error is caught by axios interceptor and toast is shown
       return false;
     }
   },
@@ -78,15 +126,7 @@ export const useIncidentStore = create<IncidentState>((set) => ({
         target_trip_id: tripId,
         reason: "Оперативна заміна"
       });
-      
-      // Update local state ONLY after successful confirmation (200 OK)
-      // Since this is just an example for incidents, you can clear/resolve 
-      // related incidents or update state as necessary
-      set((state) => ({
-         // ... local state logic for reserves
-      }));
       return true;
-      
     } catch (error) {
       return false; 
     }

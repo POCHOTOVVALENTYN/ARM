@@ -174,6 +174,10 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-200"></span>
                 <span>Нагін (&lt; -2 хв)</span>
               </div>
+              <div className="flex items-center space-x-2 text-amber-700 pt-1.5 border-t border-slate-200">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-200 animate-pulse"></span>
+                <span className="font-bold">Об'їзд (НС / DETOUR)</span>
+              </div>
             </div>
           </div>
 

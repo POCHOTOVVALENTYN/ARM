@@ -5,15 +5,69 @@ from typing import List, Dict, Any
 import json
 
 from app.core.database import AsyncSessionLocal
-from app.models.models import DepotModel, HubNodeModel, RouteDepotConfigModel, BreakLocationConfigModel
+from app.api.dependencies import get_db, get_current_dispatcher, get_current_active_superuser
+from app.models.models import DepotModel, HubNodeModel, RouteDepotConfigModel, BreakLocationConfigModel, SystemConfig
 from app.core.redis import get_cache, set_cache, invalidate_cache
-from app.schemas.settings import DepotCreate, HubNodeCreate, RouteDepotConfigCreate, BreakLocationConfigCreate
+from app.schemas.settings import (
+    DepotCreate, HubNodeCreate, RouteDepotConfigCreate, BreakLocationConfigCreate,
+    SystemConfigResponse, SystemConfigUpdate
+)
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
+# --- SYSTEM CONFIG (SINGLE-ROW TABLE PATTERN + RBAC) ---
+@router.get("", response_model=SystemConfigResponse)
+@router.get("/", response_model=SystemConfigResponse)
+@router.get("/config", response_model=SystemConfigResponse)
+async def get_settings(
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_dispatcher)
+):
+    """
+    Отримання глобальних налаштувань підприємства (OSM тайли, логотип КП, тема).
+    Доступно всім авторизованим диспетчерам.
+    """
+    result = await db.execute(select(SystemConfig).where(SystemConfig.id == 1))
+    config = result.scalar_one_or_none()
+    
+    # Lazy initialization якщо запису ще немає
+    if not config:
+        config = SystemConfig(id=1)
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+        
+    return config
+
+@router.put("", response_model=SystemConfigResponse)
+@router.put("/", response_model=SystemConfigResponse)
+@router.put("/config", response_model=SystemConfigResponse)
+async def update_settings(
+    settings_in: SystemConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_admin = Depends(get_current_active_superuser)
+):
+    """
+    Оновлення глобальних налаштувань підприємства.
+    RBAC: Доступно виключно суперкористувачам (адміністраторам).
+    """
+    result = await db.execute(select(SystemConfig).where(SystemConfig.id == 1))
+    config = result.scalar_one_or_none()
+    
+    if not config:
+        config = SystemConfig(id=1)
+        db.add(config)
+    
+    update_data = settings_in.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        if value is not None:
+            setattr(config, key, value)
+        
+    await db.commit()
+    await db.refresh(config)
+    
+    return config
+
 
 # --- DEPOTS ---
 @router.get("/depots", response_model=List[Dict[str, Any]])
