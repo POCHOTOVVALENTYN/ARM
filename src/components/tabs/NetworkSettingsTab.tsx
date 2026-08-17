@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Route, RouteStatus, TransportType, ControlPointNode } from '../../types';
 import { useRouteStore } from '../../store/useRouteStore';
-import { RouteTable } from '../routes/RouteTable';
+import { RoutesDirectoryTable } from '../routes/RoutesDirectoryTable';
 import { RoutePassport } from '../routes/RoutePassport';
 import { RouteFormModal } from '../routes/RouteFormModal';
 import { RouteControlPointsView } from '../routes/RouteControlPointsView';
@@ -14,6 +14,7 @@ import { useRouteDepotStore } from '../../store/useRouteDepotStore';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useStationStore } from '../../store/useStationStore';
 import { useControlPointStore } from '../../store/useControlPointStore';
+import { AdminDepotsManager } from '../admin/AdminDepotsManager';
 import { 
   Settings, 
   Navigation, 
@@ -330,7 +331,7 @@ export const NetworkSettingsTab: React.FC = () => {
 
           {/* VIEW 1: Overview Route Master Table */}
           {activeViewMode === 'overview' && (
-            <RouteTable
+            <RoutesDirectoryTable
               selectedRouteId={selectedRouteId}
               onSelectRoute={handleSelectRoute}
               onEditRoute={handleOpenEditModal}
@@ -597,8 +598,12 @@ export const NetworkSettingsTab: React.FC = () => {
 
       {/* 3. Depots & Zero Runs Master */}
       {activeSubTab === 'depots' && (
-        <div className="space-y-4">
-          <h3 className="text-gray-900 font-bold text-base">Довідник депо та нульових пробігів (Depot & Zero-Run Master)</h3>
+        <div className="space-y-6">
+          <AdminDepotsManager />
+
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h3 className="text-gray-900 font-bold text-base">Довідник нульових пробігів та матриця виїздів (Pull-outs & Pull-ins)</h3>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {mockDepots.map((dep) => (

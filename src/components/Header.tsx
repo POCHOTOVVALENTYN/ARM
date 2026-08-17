@@ -36,7 +36,8 @@ import {
   History,
   CheckCircle2,
   Archive,
-  RefreshCw
+  RefreshCw,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -177,6 +178,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: LayoutDashboard,
       items: [
         { label: 'Головний Дашборд', path: '/', icon: LayoutDashboard },
+        { label: 'Звітність та OTP (On-Time)', path: '/analytics', icon: FileSpreadsheet },
       ],
     },
     {
@@ -220,6 +222,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       items: [
         { label: 'Табель та Книжки Водіїв', path: '/crew/roster', icon: Users },
         { label: 'Призначення Екіпажів', path: '/crew/assignment', icon: UserCheck },
+        { label: 'Електронний Шляховий Лист', path: '/crew/waybill', icon: FileText },
       ],
     },
     {
@@ -362,6 +365,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
             >
               <History className="w-3.5 h-3.5 text-blue-700" />
               <span>Історія</span>
+            </button>
+
+            {/* Analytics OTP Report Modal Trigger */}
+            <button
+              onClick={onOpenReport}
+              title="Швидкий аналітичний звіт та OTP"
+              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 shadow-2xs cursor-pointer transition-all"
+            >
+              <Activity className="w-3.5 h-3.5 text-blue-700" />
+              <span>Звіт OTP</span>
             </button>
 
             {/* Commit & Discard Draft */}

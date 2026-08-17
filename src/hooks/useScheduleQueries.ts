@@ -140,3 +140,27 @@ export const useGenerateSchedule = () => {
     },
   });
 };
+
+// 7. МУТАЦІЯ: Оновлення часу відправлення та прибуття для конкретного рейсу
+export const useUpdateTrip = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ tripId, startTime, endTime }: { tripId: number; startTime: string; endTime: string }) => {
+      const { data } = await api.put(`/schedules/trips/${tripId}`, {
+        start_time: startTime,
+        end_time: endTime
+      });
+      return data;
+    },
+    onSuccess: () => {
+      // Інвалідуємо поточний перегляд розкладу (як драфтів, так і активних), 
+      // щоб таблиця і графіки Марея миттєво оновились
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['active-schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['schedules'] });
+    },
+  });
+};
+

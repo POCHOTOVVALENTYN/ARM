@@ -17,6 +17,8 @@ from app.api.settings import router as settings_router
 from app.api.emergencies import router as emergencies_router
 from app.api.schedules import router as new_schedules_router
 from app.api.auth import router as auth_router
+from app.api.analytics import router as analytics_router
+from app.api.depots import router as depots_router
 from app.services.telemetry_worker import telemetry_polling_loop
 from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
@@ -88,4 +90,10 @@ app.include_router(emergencies_router, prefix="")
 app.include_router(new_schedules_router, prefix="/api/v1")
 app.include_router(new_schedules_router, prefix="/api")
 app.include_router(new_schedules_router, prefix="")
+app.include_router(analytics_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api")
+app.include_router(analytics_router, prefix="")
+app.include_router(depots_router, prefix="/api/v1")
+app.include_router(depots_router, prefix="/api")
+app.include_router(depots_router, prefix="")
 app.include_router(ws_router)

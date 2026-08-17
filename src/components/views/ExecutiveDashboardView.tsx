@@ -29,16 +29,21 @@ import {
 } from 'lucide-react';
 
 export const ExecutiveDashboardView: React.FC = () => {
-  const { setPath, conflicts, isDraftModified, liveBlocks, liveDuties } = useScheduleStore();
-  const { routes } = useRouteStore();
+  const { setPath, conflicts = [], isDraftModified, liveBlocks = [], liveDuties = [] } = useScheduleStore();
+  const { routes = [] } = useRouteStore();
 
   const [notificationCategory, setNotificationCategory] = useState<'all' | 'node_conflict' | 'kzpp_violation' | 'delays_slack' | 'system_info'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const totalTrips = liveBlocks.reduce((acc, b) => acc + b.trips.length, 0);
-  const totalDrivers = liveDuties.length;
-  const violatingDuties = liveDuties.filter((d) => d.isViolating10hLimit);
-  const activeRoutesCount = routes.filter((r) => r.status === 'active').length;
+  const safeBlocks = Array.isArray(liveBlocks) ? liveBlocks : [];
+  const safeDuties = Array.isArray(liveDuties) ? liveDuties : [];
+  const safeRoutes = Array.isArray(routes) ? routes : [];
+  const safeConflicts = Array.isArray(conflicts) ? conflicts : [];
+
+  const totalTrips = safeBlocks.reduce((acc, b) => acc + (b?.trips?.length || 0), 0);
+  const totalDrivers = safeDuties.length;
+  const violatingDuties = safeDuties.filter((d) => d?.isViolating10hLimit);
+  const activeRoutesCount = safeRoutes.filter((r) => r?.status === 'active').length;
 
   // Construct structured notifications feed from real state & system events
   const generateNotifications = () => {
@@ -55,30 +60,31 @@ export const ExecutiveDashboardView: React.FC = () => {
     }> = [];
 
     // 1. Node Headway Conflicts
-    conflicts.forEach((conf) => {
+    safeConflicts.forEach((conf: any) => {
       list.push({
         id: `conf-${conf.id}`,
         category: 'node_conflict',
         severity: 'critical',
         time: '07:45',
-        title: `Критичний конфлікт паровозності на вузлі "${conf.nodeName}"`,
-        description: `Мінімальний інтервал між вагонами ${conf.vehicle1Id} (${conf.vehicle1Route}) та ${conf.vehicle2Id} (${conf.vehicle2Route}) становить Δt = ${conf.actualHeadwayMin} хв (норма h ≥ ${conf.requiredHeadwayMin} хв).`,
-        nodeOrRoute: conf.nodeName,
+        title: `Критичний конфлікт паровозності на вузлі "${conf.nodeName || 'Вузол'}"`,
+        description: `Мінімальний інтервал між вагонами ${conf.vehicle1Id || ''} (${conf.vehicle1Route || ''}) та ${conf.vehicle2Id || ''} (${conf.vehicle2Route || ''}) становить Δt = ${conf.actualHeadwayMin || 0} хв (норма h ≥ ${conf.requiredHeadwayMin || 0} хв).`,
+        nodeOrRoute: conf.nodeName || 'Вузол',
         actionText: 'Усунути у Валідаторі',
         actionPath: '/planning/validate',
       });
     });
 
     // 2. Labor Code (КЗпП) Violations
-    violatingDuties.forEach((duty) => {
+    violatingDuties.forEach((duty: any) => {
+      const shiftMin = duty.totalShiftMin || 0;
       list.push({
         id: `duty-${duty.id}`,
         category: 'kzpp_violation',
         severity: 'warning',
         time: '08:10',
-        title: `Порушення 10-годинної зміни КЗпП водієм ${duty.driverName}`,
-        description: `Тривалість наряду ${duty.id} складає ${duty.totalShiftMin} хв (${(duty.totalShiftMin / 60).toFixed(1)} год) при дозволеному ліміті 600 хв (10 год). Потрібно призначити підмінний наряд.`,
-        nodeOrRoute: duty.id,
+        title: `Порушення 10-годинної зміни КЗпП водієм ${duty.driverName || duty.driver_id || 'Водій'}`,
+        description: `Тривалість наряду ${duty.id} складає ${shiftMin} хв (${(shiftMin / 60).toFixed(1)} год) при дозволеному ліміті 600 хв (10 год). Потрібно призначити підмінний наряд.`,
+        nodeOrRoute: String(duty.id),
         actionText: 'Відкрити Табель',
         actionPath: '/crew/roster',
       });

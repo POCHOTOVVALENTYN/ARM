@@ -121,8 +121,10 @@ export const useWebSocket = (baseUrl: string) => {
               }
 
               case 'INVALIDATE_SCHEDULES':
-              case 'invalidate_schedules': {
-                console.log('⚡ [WebSocket] Отримано сигнал invalidate_schedules. Оновлення серверного кешу...');
+              case 'invalidate_schedules':
+              case 'SCHEDULE_DRAFT_UPDATED':
+              case 'schedule_draft_updated': {
+                console.log('⚡ [WebSocket] Отримано сигнал invalidate_schedules / schedule_draft_updated. Оновлення серверного кешу...');
                 queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
                 queryClient.invalidateQueries({ queryKey: ['active-schedule'] });
                 queryClient.invalidateQueries({ queryKey: ['schedule'] });

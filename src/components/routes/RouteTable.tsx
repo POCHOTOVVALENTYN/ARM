@@ -1,233 +1,396 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Route, RouteStatus, TransportType } from '../../types';
-import { useScheduleStore } from '../../store/useScheduleStore';
+import React, { useState, useMemo } from 'react';
+import { useUpdateTrip } from '../../hooks/useScheduleQueries';
 import { 
-  Navigation, 
-  Bus, 
-  Edit3, 
-  Copy, 
-  Trash2, 
-  FileText, 
-  Table as TableIcon,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-  Shield,
-  MoreVertical
+  Edit2, 
+  Save, 
+  X, 
+  Clock, 
+  ArrowRight, 
+  Filter, 
+  Search, 
+  Download, 
+  CheckCircle2, 
+  AlertCircle,
+  FileSpreadsheet,
+  TramFront
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface RouteTableProps {
-  selectedRouteId: string | null;
-  onSelectRoute: (id: string, viewMode: 'passport' | 'matrix') => void;
-  onEditRoute: (route: Route) => void;
-  onDuplicateRoute: (id: string) => void;
-  onDeleteRoute: (id: string) => void;
+  schedule?: any;
+  blocks?: any[];
+  duties?: any[];
+  routeId?: string;
+  onTripUpdated?: (tripId: number | string, startTime: string, endTime: string) => void;
 }
 
-export const RouteTable: React.FC<RouteTableProps> = ({
-  selectedRouteId,
-  onSelectRoute,
-  onEditRoute,
-  onDuplicateRoute,
-  onDeleteRoute,
+export const RouteTable: React.FC<RouteTableProps> = ({ 
+  schedule, 
+  blocks, 
+  duties, 
+  routeId,
+  onTripUpdated 
 }) => {
-  const routes = useScheduleStore(state => state.routes);
-  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const updateTripMutation = useUpdateTrip();
+  
+  // Стан для inline-редагування: зберігає ID рейсу, який зараз редагується
+  const [editingTripId, setEditingTripId] = useState<number | string | null>(null);
+  const [editForm, setEditForm] = useState<{ start_time: string; end_time: string }>({ start_time: '', end_time: '' });
+  const [searchDuty, setSearchDuty] = useState<string>('');
+  const [directionFilter, setDirectionFilter] = useState<'all' | 'direct' | 'reverse'>('all');
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setOpenDropdownId(null);
+  // Трансформація будь-якої ієрархічної структури у плоский масив рейсів
+  const flatTrips = useMemo(() => {
+    // Варіант 1: якщо передано об'єкт з бекенду (ScheduleResponse з duties -> shifts -> trips)
+    if (schedule && schedule.duties && Array.isArray(schedule.duties)) {
+      const trips = schedule.duties.flatMap((duty: any) => 
+        (duty.shifts || []).flatMap((shift: any) => 
+          (shift.trips || []).map((trip: any) => {
+            // Визначаємо час з stop_times, якщо прямі поля відсутні
+            let startTime = trip.start_time;
+            let endTime = trip.end_time;
+            if (!startTime && trip.stop_times && trip.stop_times.length > 0) {
+              startTime = trip.stop_times[0].departure_time?.slice(0, 5);
+              endTime = trip.stop_times[trip.stop_times.length - 1].arrival_time?.slice(0, 5);
+            }
+
+            return { 
+              ...trip, 
+              id: trip.id,
+              duty_number: duty.duty_number,
+              shift_id: shift.id,
+              start_time: startTime || '06:00',
+              end_time: endTime || '06:45',
+              direction: trip.direction === 'FORWARD' || trip.direction === 'direct' ? 'direct' : 'reverse'
+            };
+          })
+        )
+      );
+      return trips.sort((a: any, b: any) => (a.start_time || '').localeCompare(b.start_time || ''));
+    }
+
+    // Варіант 2: якщо передано blocks з клієнтського стору (draftBlocks)
+    if (blocks && Array.isArray(blocks) && blocks.length > 0) {
+      const trips = blocks.flatMap((block: any) => 
+        (block.trips || []).map((trip: any, idx: number) => ({
+          ...trip,
+          id: trip.id || `${block.id}-tr-${idx}`,
+          duty_number: block.dutyNumber || block.id,
+          start_time: trip.startTime || trip.start_time || '06:00',
+          end_time: trip.endTime || trip.end_time || '06:45',
+          direction: trip.direction === 'FORWARD' || trip.direction === 'direct' ? 'direct' : 'reverse',
+          startStation: trip.startStation || 'Старосінна пл.',
+          endStation: trip.endStation || 'вул. Паустовського'
+        }))
+      );
+      return trips.sort((a: any, b: any) => (a.start_time || '').localeCompare(b.start_time || ''));
+    }
+
+    return [];
+  }, [schedule, blocks]);
+
+  // Фільтрація рейсів
+  const filteredTrips = useMemo(() => {
+    return flatTrips.filter((t: any) => {
+      const matchDuty = !searchDuty || String(t.duty_number).toLowerCase().includes(searchDuty.toLowerCase());
+      const matchDir = directionFilter === 'all' || t.direction === directionFilter;
+      return matchDuty && matchDir;
+    });
+  }, [flatTrips, searchDuty, directionFilter]);
+
+  const handleEditClick = (trip: any) => {
+    setEditingTripId(trip.id);
+    setEditForm({ 
+      start_time: trip.start_time?.slice(0, 5) || '06:00', 
+      end_time: trip.end_time?.slice(0, 5) || '06:45' 
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTripId(null);
+  };
+
+  const handleSaveClick = async (tripId: number | string) => {
+    if (!editForm.start_time || !editForm.end_time) {
+      toast.error('Будь ласка, вкажіть коректний час відправлення та прибуття');
+      return;
+    }
+
+    // Якщо це числовий ID з БД (бекенд розклад)
+    const numId = typeof tripId === 'number' ? tripId : parseInt(String(tripId), 10);
+
+    if (!isNaN(numId) && numId > 0) {
+      updateTripMutation.mutate(
+        { tripId: numId, startTime: editForm.start_time, endTime: editForm.end_time },
+        {
+          onSuccess: () => {
+            toast.success(`Час рейсу #${tripId} успішно оновлено`);
+            setEditingTripId(null);
+            if (onTripUpdated) {
+              onTripUpdated(tripId, editForm.start_time, editForm.end_time);
+            }
+          },
+          onError: (err: any) => {
+            toast.error(`Помилка оновлення рейсу: ${err?.message || 'Не вдалося зберегти'}`);
+          }
+        }
+      );
+    } else {
+      // Клієнтське оновлення
+      if (onTripUpdated) {
+        onTripUpdated(tripId, editForm.start_time, editForm.end_time);
       }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
-  const getStatusBadge = (status: RouteStatus) => {
-    switch (status) {
-      case 'active':
-        return (
-          <span className="inline-flex items-center space-x-1 bg-emerald-50 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-md border border-emerald-300">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Активний</span>
-          </span>
-        );
-      case 'maintenance':
-        return (
-          <span className="inline-flex items-center space-x-1 bg-amber-50 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-md border border-amber-300">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-            <span>Ремонт / Скорочено</span>
-          </span>
-        );
-      case 'suspended':
-        return (
-          <span className="inline-flex items-center space-x-1 bg-rose-50 text-rose-700 text-xs font-bold px-2.5 py-1 rounded-md border border-rose-300">
-            <Clock className="w-3.5 h-3.5 text-rose-600" />
-            <span>Призупинено</span>
-          </span>
-        );
-      case 'reserve':
-        return (
-          <span className="inline-flex items-center space-x-1 bg-sky-50 text-sky-700 text-xs font-bold px-2.5 py-1 rounded-md border border-sky-300">
-            <Shield className="w-3.5 h-3.5 text-sky-600" />
-            <span>В резерві</span>
-          </span>
-        );
-      default:
-        return null;
+      toast.success(`Рейс ${tripId} відкориговано в чернетці`);
+      setEditingTripId(null);
     }
   };
 
-  if (routes.length === 0) {
-    return (
-      <div className="bg-white border-2 border-gray-900 rounded-xl p-8 text-center text-gray-600 space-y-3">
-        <Navigation className="w-10 h-10 mx-auto text-gray-400" />
-        <p className="font-bold text-gray-800">За вашим запитом маршрутів не знайдено.</p>
-        <p className="text-xs text-gray-500">Спробуйте змінити параметри пошуку або додати новий маршрут.</p>
-      </div>
-    );
-  }
+  const handleExportCSV = () => {
+    if (filteredTrips.length === 0) return;
+    const headers = ['Наряд', 'Напрямок', 'Час відправлення', 'Час прибуття'];
+    const rows = filteredTrips.map((t: any) => [
+      `№ ${t.duty_number}`,
+      t.direction === 'direct' ? 'Прямий' : 'Зворотний',
+      t.start_time,
+      t.end_time
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' 
+      + [headers.join(','), ...rows.map((e: any) => e.join(','))].join('\n');
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `OMET_Route_Trips_Table_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const displayRouteId = routeId || schedule?.route_id || '7';
 
   return (
-    <div className="bg-white border-2 border-gray-900 rounded-xl overflow-hidden shadow-sm">
-      <div className="overflow-x-auto min-w-[1000px]">
-        <table className="w-full text-xs text-left border-collapse">
-          <thead className="bg-gray-900 text-white font-mono uppercase tracking-wider text-[11px] border-b-2 border-gray-900">
+    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-full font-sans">
+      
+      {/* Шапка таблиці рейсів */}
+      <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <Clock size={20} />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-slate-800 dark:text-white flex items-center gap-2 text-sm">
+              <span>Таблиця рейсів</span>
+              <span className="px-2.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded font-mono text-xs">
+                Маршрут №{displayRouteId}
+              </span>
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Inline-редагування часу відправлення та прибуття для інженерів-технологів
+            </p>
+          </div>
+        </div>
+
+        {/* Фільтри та експорт */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              type="text"
+              placeholder="Пошук наряду..."
+              value={searchDuty}
+              onChange={(e) => setSearchDuty(e.target.value)}
+              className="pl-8 pr-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 w-36 font-mono"
+            />
+          </div>
+
+          <div className="flex items-center space-x-1 bg-white dark:bg-slate-900 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => setDirectionFilter('all')}
+              className={`px-2.5 py-1 rounded-lg transition-all ${
+                directionFilter === 'all'
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-extrabold'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Всі
+            </button>
+            <button
+              type="button"
+              onClick={() => setDirectionFilter('direct')}
+              className={`px-2.5 py-1 rounded-lg transition-all ${
+                directionFilter === 'direct'
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-extrabold'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Прямий
+            </button>
+            <button
+              type="button"
+              onClick={() => setDirectionFilter('reverse')}
+              className={`px-2.5 py-1 rounded-lg transition-all ${
+                directionFilter === 'reverse'
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-extrabold'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Зворотний
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            disabled={filteredTrips.length === 0}
+            className="p-2 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl transition-all disabled:opacity-40 cursor-pointer"
+            title="Експорт таблиці в CSV"
+          >
+            <Download size={14} />
+          </button>
+
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 font-mono">
+            Рейсів: {filteredTrips.length}
+          </span>
+        </div>
+      </div>
+
+      {/* Тіло таблиці з inline-редагуванням */}
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-left border-collapse text-xs">
+          <thead className="bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-300 font-bold uppercase sticky top-0 shadow-xs z-10">
             <tr>
-              <th className="p-3.5">Номер & Тип</th>
-              <th className="p-3.5">Назва маршруту & Кінцеві</th>
-              <th className="p-3.5 text-center">Довжина (L1 / L2)</th>
-              <th className="p-3.5 text-center">Статус</th>
-              <th className="p-3.5 text-right">Операції та Перегляд</th>
+              <th className="py-3 px-4 border-b border-slate-200 dark:border-slate-700">Наряд</th>
+              <th className="py-3 px-4 border-b border-slate-200 dark:border-slate-700">Напрямок</th>
+              <th className="py-3 px-4 border-b border-slate-200 dark:border-slate-700 text-center">Час відправлення</th>
+              <th className="py-3 px-4 border-b border-slate-200 dark:border-slate-700 text-center">Час прибуття</th>
+              <th className="py-3 px-4 border-b border-slate-200 dark:border-slate-700 text-center">Тривалість</th>
+              <th className="py-3 px-4 border-b border-slate-200 dark:border-slate-700 text-center w-28">Дії</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
-            {routes.map((route) => {
-              const isSelected = selectedRouteId === route.id;
-              const isTram = route.type === 'tram';
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {filteredTrips.map((trip: any, idx: number) => {
+              const isEditing = editingTripId === trip.id;
+
+              // Розрахунок тривалості рейсу
+              let durationMin = 0;
+              if (trip.start_time && trip.end_time) {
+                const [sh, sm] = trip.start_time.split(':').map(Number);
+                const [eh, em] = trip.end_time.split(':').map(Number);
+                const startMins = sh * 60 + sm;
+                let endMins = eh * 60 + em;
+                if (endMins < startMins) endMins += 1440;
+                durationMin = endMins - startMins;
+              }
 
               return (
-                <tr
-                  key={route.id}
-                  className={`transition-colors ${
-                    isSelected ? 'bg-indigo-50/80 font-medium' : 'hover:bg-gray-50'
+                <tr 
+                  key={trip.id || idx} 
+                  className={`hover:bg-blue-50/40 dark:hover:bg-slate-800/50 transition-colors ${
+                    isEditing ? 'bg-blue-50/70 dark:bg-blue-950/40 font-semibold' : ''
                   }`}
                 >
-                  {/* Number & Type */}
-                  <td className="p-3.5 font-mono">
-                    <div className="flex items-center space-x-3">
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
-                          route.type === 'tram'
-                            ? 'bg-rose-100 text-rose-600 border-rose-200'
-                            : 'bg-indigo-100 text-indigo-600 border-indigo-200'
-                        }`}
+                  <td className="py-3 px-4 font-bold text-slate-800 dark:text-slate-100 font-mono">
+                    <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-bold">
+                      № {trip.duty_number}
+                    </span>
+                  </td>
+                  
+                  <td className="py-3 px-4">
+                    <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md font-bold text-[11px] ${
+                      trip.direction === 'direct' 
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                        : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                    }`}>
+                      <span>{trip.direction === 'direct' ? 'Прямий' : 'Зворотний'}</span>
+                    </span>
+                  </td>
+                  
+                  {/* Час відправлення */}
+                  <td className="py-3 px-4 text-center">
+                    {isEditing ? (
+                      <input 
+                        type="time" 
+                        value={editForm.start_time}
+                        onChange={(e) => setEditForm({ ...editForm, start_time: e.target.value })}
+                        className="border-2 border-blue-500 rounded-lg px-2 py-1 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono font-bold text-xs text-slate-900 dark:text-white"
+                      />
+                    ) : (
+                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 px-2 py-1 rounded">
+                        {trip.start_time?.slice(0, 5)}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Час прибуття */}
+                  <td className="py-3 px-4 text-center">
+                    {isEditing ? (
+                      <input 
+                        type="time" 
+                        value={editForm.end_time}
+                        onChange={(e) => setEditForm({ ...editForm, end_time: e.target.value })}
+                        className="border-2 border-blue-500 rounded-lg px-2 py-1 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono font-bold text-xs text-slate-900 dark:text-white"
+                      />
+                    ) : (
+                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 px-2 py-1 rounded">
+                        {trip.end_time?.slice(0, 5)}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Тривалість */}
+                  <td className="py-3 px-4 text-center font-mono text-slate-500 dark:text-slate-400">
+                    {durationMin} хв
+                  </td>
+
+                  {/* Кнопки дій */}
+                  <td className="py-3 px-4 text-center">
+                    {isEditing ? (
+                      <div className="flex justify-center space-x-1.5">
+                        <button 
+                          onClick={() => handleSaveClick(trip.id)}
+                          disabled={updateTripMutation.isPending}
+                          className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+                          title="Зберегти зміни"
+                        >
+                          <Save size={15} />
+                        </button>
+                        <button 
+                          onClick={handleCancelEdit}
+                          className="p-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 rounded-lg transition-colors cursor-pointer"
+                          title="Скасувати"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => handleEditClick(trip)}
+                        className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors inline-flex justify-center cursor-pointer border border-transparent hover:border-blue-200"
+                        title="Редагувати рейс"
                       >
-                        <Bus className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <button
-                          onClick={() => onSelectRoute(route.id, 'passport')}
-                          className="font-extrabold text-indigo-600 hover:text-indigo-800 text-sm hover:underline cursor-pointer"
-                        >
-                          {route.type === 'tram' ? 'Тр' : 'Т'} {route.number}
-                        </button>
-                        <div className="text-xs text-gray-500 font-medium">
-                          {route.name}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Name & Terminals */}
-                  <td className="p-3.5">
-                    <div className="space-y-0.5">
-                      <div className="font-bold text-gray-900 text-sm">{route.name}</div>
-                      {route.description && (
-                        <div className="text-[11px] text-gray-500 line-clamp-1">
-                          {route.description}
-                        </div>
-                      )}
-                      <div className="text-[11px] text-gray-500 font-mono">
-                        Зупинок: <strong className="text-gray-800">{route.stations.length}</strong> | 
-                        Перегонів: <strong className="text-gray-800">{route.segments.length}</strong>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Length */}
-                  <td className="p-3.5 text-center font-mono font-semibold text-gray-800">
-                    <div>{route.lengthDir1Km} км / {route.lengthDir2Km} км</div>
-                    <div className="text-[10px] text-gray-500 font-normal">Прямий / Зворотний</div>
-                  </td>
-
-                  {/* Status */}
-                  <td className="p-3.5 text-center">
-                    {getStatusBadge(route.status || 'active')}
-                  </td>
-
-                  {/* Actions */}
-                  <td className="p-3.5 text-right relative">
-                    <div className="flex items-center justify-end space-x-1.5">
-                      {/* Dropdown Menu for More Actions */}
-                      <div className="relative" ref={openDropdownId === route.id ? dropdownRef : null}>
-                        <button
-                          onClick={() => setOpenDropdownId(openDropdownId === route.id ? null : route.id)}
-                          className={`p-1.5 rounded-md cursor-pointer transition-colors ${
-                            openDropdownId === route.id ? 'bg-gray-200 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                          }`}
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                        
-                        {openDropdownId === route.id && (
-                          <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 text-xs">
-                            <button
-                              onClick={() => {
-                                onEditRoute(route);
-                                setOpenDropdownId(null);
-                              }}
-                              className="w-full text-left px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center space-x-2"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>Редагувати</span>
-                            </button>
-                            <button
-                              onClick={() => {
-                                onDuplicateRoute(route.id);
-                                setOpenDropdownId(null);
-                              }}
-                              className="w-full text-left px-3 py-2 text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center space-x-2"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                              <span>Дублювати</span>
-                            </button>
-                            <div className="border-t border-gray-100 my-1"></div>
-                            <button
-                              onClick={() => {
-                                onDeleteRoute(route.id);
-                                setOpenDropdownId(null);
-                              }}
-                              className="w-full text-left px-3 py-2 text-rose-600 hover:bg-rose-50 flex items-center space-x-2"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Видалити</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                        <Edit2 size={15} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
             })}
+
+            {filteredTrips.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-10 text-center text-slate-400">
+                  <Clock size={28} className="mx-auto mb-2 opacity-50" />
+                  Рейсів за вибраними фільтрами не знайдено
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
     </div>
   );
 };
+
+export default RouteTable;

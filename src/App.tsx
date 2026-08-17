@@ -21,6 +21,7 @@ import { GtfsIntegrationTab } from './components/tabs/GtfsIntegrationTab';
 import { AlgorithmSimulatorTab } from './components/tabs/AlgorithmSimulatorTab';
 import { StaticDutiesArchiveView } from './components/views/StaticDutiesArchiveView';
 import { SmartWaybillView } from './components/views/SmartWaybillView';
+import { AnalyticsReportView } from './components/views/AnalyticsReportView';
 import { useScheduleStore } from './store/useScheduleStore';
 import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
@@ -29,6 +30,7 @@ import { authApi } from './services/authApi';
 import { SuperuserRoute } from './components/SuperuserRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { GlobalLoader } from './components/GlobalLoader';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
 
 export default function App() {
@@ -141,82 +143,91 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased selection:bg-indigo-200 selection:text-indigo-900 transition-colors duration-200">
-      <GlobalLoader />
-      <Toaster position="top-right" richColors />
-      
-      {/* Primary Navigation & Header */}
-      <Header onOpenReport={() => setIsReportOpen(true)} />
+    <ErrorBoundary>
+      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased selection:bg-indigo-200 selection:text-indigo-900 transition-colors duration-200">
+        <GlobalLoader />
+        <Toaster position="top-right" richColors />
+        
+        {/* Primary Navigation & Header */}
+        <Header onOpenReport={() => setIsReportOpen(true)} />
 
       {/* Main Content Workspace mapping 17 URLs/Views */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* / or /analytics/dashboard */}
-        {(currentPath === '/' || currentPath === '/analytics/dashboard') && (
-          <ExecutiveDashboardView />
-        )}
+        <ErrorBoundary>
+          {/* / or /analytics/dashboard */}
+          {(currentPath === '/' || currentPath === '/analytics/dashboard') && (
+            <ExecutiveDashboardView />
+          )}
 
-        {/* /admin - Admin Panel (Superuser Only) */}
-        {currentPath === '/admin' && (
-          <SuperuserRoute>
-            <AdminView initialTab="config" />
-          </SuperuserRoute>
-        )}
+          {/* /analytics or /analytics/reports */}
+          {(currentPath === '/analytics' || currentPath === '/analytics/reports') && (
+            <AnalyticsReportView />
+          )}
 
-        {/* /export/gtfs - GTFS Open Data Tab inside Admin (Superuser Only) */}
-        {currentPath === '/export/gtfs' && (
-          <SuperuserRoute>
-            <AdminView initialTab="gtfs" />
-          </SuperuserRoute>
-        )}
+          {/* /admin - Admin Panel (Superuser Only) */}
+          {currentPath === '/admin' && (
+            <SuperuserRoute>
+              <AdminView initialTab="config" />
+            </SuperuserRoute>
+          )}
 
-        {/* /login */}
-        {currentPath === '/login' && <AuthLoginView />}
+          {/* /export/gtfs - GTFS Open Data Tab inside Admin (Superuser Only) */}
+          {currentPath === '/export/gtfs' && (
+            <SuperuserRoute>
+              <AdminView initialTab="gtfs" />
+            </SuperuserRoute>
+          )}
 
-        {/* Dispatcher Views */}
-        {currentPath === '/dispatch/marey' && <MareyDiagramTab />}
+          {/* /login */}
+          {currentPath === '/login' && <AuthLoginView />}
 
-        {(currentPath === '/dispatch/gantt' ||
-          currentPath === '/dispatch/slack') && (
-          <DispatcherTab
-            routes={routes}
-            blocks={draftBlocks}
-            duties={draftDuties}
-            conflicts={conflicts}
-            onApplySlack={handleApplySlack}
-            onTruncateTrip={handleTruncateTrip}
-            onReserveVehicle={handleReserveVehicle}
-          />
-        )}
+          {/* Dispatcher Views */}
+          {currentPath === '/dispatch/marey' && <MareyDiagramTab />}
 
-        {/* Live Map View */}
-        {currentPath === '/dispatch/map' && <LiveMapView />}
+          {(currentPath === '/dispatch/gantt' ||
+            currentPath === '/dispatch/slack') && (
+            <DispatcherTab
+              routes={routes}
+              blocks={draftBlocks}
+              duties={draftDuties}
+              conflicts={conflicts}
+              onApplySlack={handleApplySlack}
+              onTruncateTrip={handleTruncateTrip}
+              onReserveVehicle={handleReserveVehicle}
+            />
+          )}
 
-        {/* Operational Schedule Generator */}
-        {currentPath === '/dispatch/generator' && <OperationalScheduleGenerator />}
+          {/* Live Map View */}
+          {currentPath === '/dispatch/map' && <LiveMapView />}
 
-        {/* Dispatcher Extras */}
-        {currentPath === '/dispatch/hot-reserve' && <HotReserveView />}
-        {currentPath === '/dispatch/detours' && <EmergencyDetoursTab />}
+          {/* Operational Schedule Generator */}
+          {currentPath === '/dispatch/generator' && <OperationalScheduleGenerator />}
 
-        {/* Planning Views */}
-        {currentPath === '/planning/duties' && <DutyBuilderView />}
-        {currentPath === '/planning/trips' && <TripGridView />}
-        {currentPath === '/planning/validate' && <ValidatorView />}
-        {(currentPath === '/planning/simulation' || currentPath === '/dispatch/simulation') && (
-          <SimulationMapView />
-        )}
-        {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
+          {/* Dispatcher Extras */}
+          {currentPath === '/dispatch/hot-reserve' && <HotReserveView />}
+          {currentPath === '/dispatch/detours' && <EmergencyDetoursTab />}
 
-        {/* Network Settings Views (Superuser Only) */}
-        {(currentPath.startsWith('/settings/') || currentPath === '/settings') && (
-          <SuperuserRoute>
-            <NetworkSettingsTab />
-          </SuperuserRoute>
-        )}
+          {/* Planning Views */}
+          {currentPath === '/planning/duties' && <DutyBuilderView />}
+          {currentPath === '/planning/trips' && <TripGridView />}
+          {currentPath === '/planning/validate' && <ValidatorView />}
+          {(currentPath === '/planning/simulation' || currentPath === '/dispatch/simulation') && (
+            <SimulationMapView />
+          )}
+          {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
 
-        {/* Crew Views */}
-        {currentPath === '/crew/roster' && <CrewRosterTab duties={draftDuties} />}
-        {currentPath === '/crew/assignment' && <CrewAssignmentView />}
+          {/* Network Settings Views (Superuser Only) */}
+          {(currentPath.startsWith('/settings/') || currentPath === '/settings') && (
+            <SuperuserRoute>
+              <NetworkSettingsTab />
+            </SuperuserRoute>
+          )}
+
+          {/* Crew Views */}
+          {currentPath === '/crew/roster' && <CrewRosterTab duties={draftDuties} />}
+          {currentPath === '/crew/assignment' && <CrewAssignmentView />}
+          {currentPath === '/crew/waybill' && <SmartWaybillView />}
+        </ErrorBoundary>
       </main>
 
       {/* Analytical Report Modal */}
@@ -239,5 +250,6 @@ export default function App() {
         </div>
       </footer>
     </div>
-  );
+  </ErrorBoundary>
+);
 }

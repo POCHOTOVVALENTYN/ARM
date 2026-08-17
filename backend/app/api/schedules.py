@@ -139,3 +139,84 @@ async def get_route_deviations(
         for row in stats
     ]
 
+# --- Модель та ендпоінт редагування рейсу ---
+from pydantic import BaseModel
+from datetime import time as dt_time
+from app.models.schedule import StaticTrip, StaticStopTime
+from app.api.dependencies import get_current_dispatcher
+
+class TripUpdate(BaseModel):
+    start_time: str
+    end_time: str
+
+def parse_time_str(t_str: str) -> dt_time:
+    parts = t_str.strip().split(":")
+    h = int(parts[0])
+    m = int(parts[1])
+    s = int(parts[2]) if len(parts) > 2 else 0
+    return dt_time(hour=h, minute=m, second=s)
+
+@router.put("/trips/{trip_id}", summary="Оновлення планового часу відправлення та прибуття для конкретного рейсу")
+async def update_trip_time(
+    trip_id: int,
+    trip_data: TripUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_dispatcher)
+):
+    """Оновлення планового часу відправлення та прибуття для конкретного рейсу."""
+    try:
+        start_t = parse_time_str(trip_data.start_time)
+        end_t = parse_time_str(trip_data.end_time)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Некоректний формат часу (очікується ГГ:ХХ): {str(e)}")
+
+    query = (
+        select(StaticTrip)
+        .where(StaticTrip.id == trip_id)
+        .options(selectinload(StaticTrip.stop_times))
+    )
+    result = await db.execute(query)
+    trip = result.scalar_one_or_none()
+
+    if not trip:
+        raise HTTPException(status_code=404, detail="Рейс не знайдено")
+
+    if trip.stop_times:
+        sorted_stops = sorted(trip.stop_times, key=lambda s: s.stop_sequence)
+        if len(sorted_stops) == 1:
+            sorted_stops[0].departure_time = start_t
+            sorted_stops[0].arrival_time = end_t
+        elif len(sorted_stops) > 1:
+            sorted_stops[0].departure_time = start_t
+            sorted_stops[0].arrival_time = start_t
+            sorted_stops[-1].arrival_time = end_t
+            sorted_stops[-1].departure_time = end_t
+            
+            # Пропорційна інтерполяція для проміжних зупинок
+            start_mins = start_t.hour * 60 + start_t.minute + start_t.second / 60.0
+            end_mins = end_t.hour * 60 + end_t.minute + end_t.second / 60.0
+            if end_mins < start_mins: # перехід через північ
+                end_mins += 1440
+            total_span = max(1.0, end_mins - start_mins)
+            n_segments = len(sorted_stops) - 1
+
+            for idx, stop in enumerate(sorted_stops[1:-1], start=1):
+                fraction = idx / n_segments
+                inter_mins = (start_mins + fraction * total_span) % 1440
+                ih = int(inter_mins // 60)
+                im = int(inter_mins % 60)
+                isec = int((inter_mins * 60) % 60)
+                stop.arrival_time = dt_time(hour=ih, minute=im, second=isec)
+                stop.departure_time = dt_time(hour=ih, minute=im, second=isec)
+
+    await db.commit()
+
+    # Оскільки ми редагуємо розклад, інвалідуємо пов'язані кеші для інших диспетчерів
+    await ws_manager.broadcast({
+        "type": "schedule_draft_updated",
+        "trip_id": trip_id
+    })
+
+    return {"message": "Час рейсу успішно оновлено", "trip_id": trip_id}
+
+

@@ -1,17 +1,20 @@
 # backend/app/models/models.py
-from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON
+from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey
 
 Base = declarative_base()
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
     id = Column(String, primary_key=True, index=True)
-    type = Column(String, default="tram", nullable=True)
+    type = Column(String, default="TRAM", nullable=True)
     model = Column(String, default="Tatra T3", nullable=True)
     status = Column(String, default="AVAILABLE")
     is_active = Column(Boolean, default=True)
     current_trip_id = Column(String, nullable=True)
+    depot_id = Column(String, ForeignKey("depots.id", ondelete="SET NULL"), nullable=True)
+
+    depot = relationship("DepotModel", back_populates="vehicles")
 
 class Trip(Base):
     __tablename__ = "trips"
@@ -152,11 +155,15 @@ class DepotModel(Base):
     __tablename__ = "depots"
     id = Column(String, primary_key=True, index=True)
     name = Column(String)
-    type = Column(String)
-    address = Column(String)
-    lat = Column(Float)
-    lng = Column(Float)
-    prepTimeMin = Column(Integer)
+    type = Column(String, default="TRAM", nullable=True)
+    address = Column(String, nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    prepTimeMin = Column(Integer, default=15, nullable=True)
+
+    vehicles = relationship("Vehicle", back_populates="depot", cascade="all, delete-orphan", lazy="selectin")
+
+Depot = DepotModel
 
 class RouteDepotConfigModel(Base):
     __tablename__ = "route_depot_configs"

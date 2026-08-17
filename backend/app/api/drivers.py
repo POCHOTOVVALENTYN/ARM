@@ -133,3 +133,66 @@ async def assign_crew_to_duty(
     })
     
     return new_assignment
+
+@router.get("/waybill", summary="Генерація електронного шляхового листа")
+async def get_smart_waybill(
+    driver_id: Union[int, str] = Query(...),
+    target_date: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_dispatcher)
+):
+    """Генерує електронний шляховий лист (путівку) для водія на вказану дату."""
+    
+    # 1. Шукаємо призначення (путівку)
+    driver_id_str = str(driver_id)
+    duty_query = select(DriverDuty).where(
+        and_(
+            (DriverDuty.driver_id == driver_id_str) | (DriverDuty.driver_id == driver_id),
+            DriverDuty.target_date == target_date
+        )
+    ).order_by(DriverDuty.id.desc())
+    assignment = (await db.execute(duty_query)).scalars().first()
+    
+    if not assignment:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"На дату {target_date} для водія #{driver_id} немає відкритих путівок"
+        )
+
+    # 2. Отримуємо дані про водія та вагон
+    driver_query = select(Driver).where((Driver.id == driver_id_str) | (Driver.id == driver_id))
+    driver = (await db.execute(driver_query)).scalars().first()
+    
+    vehicle_query = select(Vehicle).where(Vehicle.id == str(assignment.vehicle_id))
+    vehicle = (await db.execute(vehicle_query)).scalars().first()
+    
+    driver_info = {
+        "id": driver.id if driver else driver_id,
+        "full_name": (driver.full_name or driver.name) if driver else f"Водій #{driver_id}",
+        "class_rank": (driver.class_rank or 1) if driver else 1
+    }
+    vehicle_info = {
+        "id": vehicle.id if vehicle else str(assignment.vehicle_id),
+        "model": vehicle.model if vehicle else "Tatra T3"
+    }
+
+    mock_trips = [
+        {"trip_number": 1, "route": "18", "plan_start": "06:00", "plan_end": "06:45", "fact_start": "06:01", "fact_end": "06:47", "status": "COMPLETED"},
+        {"trip_number": 2, "route": "18", "plan_start": "07:00", "plan_end": "07:45", "fact_start": "07:02", "fact_end": "07:46", "status": "COMPLETED"},
+        {"trip_number": 3, "route": "18", "plan_start": "08:00", "plan_end": "08:45", "fact_start": "08:05", "fact_end": None, "status": "IN_PROGRESS"},
+        {"trip_number": 4, "route": "18", "plan_start": "09:00", "plan_end": "09:45", "fact_start": None, "fact_end": None, "status": "PENDING"},
+    ]
+
+    return {
+        "waybill_id": assignment.id,
+        "target_date": target_date.isoformat(),
+        "driver": driver_info,
+        "vehicle": vehicle_info,
+        "duty_id": assignment.duty_id,
+        "trips": mock_trips,
+        "summary": {
+            "total_planned_trips": 4,
+            "completed_trips": 2,
+            "total_work_hours": "8 год 15 хв"
+        }
+    }
