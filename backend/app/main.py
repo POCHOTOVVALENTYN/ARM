@@ -19,7 +19,7 @@ from app.api.schedules import router as new_schedules_router
 from app.api.auth import router as auth_router
 from app.api.analytics import router as analytics_router
 from app.api.depots import router as depots_router
-from app.services.telemetry_worker import telemetry_polling_loop
+from app.services.realtime_fetcher import fetch_and_process_realtime_data
 from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
 from app.core.config import settings
@@ -37,8 +37,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     await seed_initial_admin()
 
-    # 3. Запускаємо фоновий збір та розрахунок телеметрії (10с інтервал)
-    telemetry_task = asyncio.create_task(telemetry_polling_loop())
+    # 3. Запускаємо бойовий збір телеметрії GTFS-RT (10с інтервал)
+    telemetry_task = asyncio.create_task(fetch_and_process_realtime_data())
     
     yield
     
@@ -70,6 +70,9 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(auth_router, prefix="")
 
 # Підключення бізнес-роутерів
+app.include_router(solver_router, prefix="/api/v1/routes", tags=["Routes"])
+app.include_router(solver_router, prefix="/api/routes", tags=["Routes"])
+app.include_router(solver_router, prefix="/routes", tags=["Routes"])
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
 app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(incidents_router, prefix="/api")

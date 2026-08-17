@@ -7,13 +7,13 @@ import { GtfsIntegrationTab } from '../tabs/GtfsIntegrationTab';
 import { ConfirmActionModal, ConfirmModalConfig } from '../ConfirmActionModal';
 
 interface AdminViewProps {
-  initialTab?: 'config' | 'gtfs';
+  initialTab?: 'config' | 'gtfs' | 'database';
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'config' }) => {
   const { liveBlocks, draftBlocks, discardDraft } = useScheduleStore();
   const { routes } = useRouteStore();
-  const [activeTab, setActiveTab] = useState<'config' | 'gtfs'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'config' | 'gtfs' | 'database'>(initialTab);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [modalConfig, setModalConfig] = useState<ConfirmModalConfig | null>(null);
 

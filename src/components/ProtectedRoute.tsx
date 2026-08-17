@@ -26,8 +26,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         const user = await authApi.getMe();
         setUser(user);
         
-        // Підтягуємо глобальні налаштування системи (OSM, логотип, тема)
-        await fetchSettings();
+        // Підтягуємо глобальні налаштування системи у фоновому режимі (silent = true)
+        fetchSettings(true);
       } catch (error) {
         console.error("Session verification failed:", error);
         logout();

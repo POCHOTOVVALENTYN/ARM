@@ -6,6 +6,7 @@ import { DeviationDashboard } from './DeviationDashboard';
 import { GanttChart } from './GanttChart';
 import { Clock, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { Trip } from '../../types';
 
 interface SchedulePreviewPanelProps {
   stopsCount?: number;
@@ -32,16 +33,29 @@ export const SchedulePreviewPanel: React.FC<SchedulePreviewPanelProps> = ({ stop
   const stopsCount = propStopsCount || 20;
 
   // Трансформація ієрархії (якщо є серверний розклад, або використовуємо локальні generatedTrips)
-  const displayTrips = useMemo(() => {
+  const displayTrips: Trip[] = useMemo(() => {
     if (serverSchedule && serverSchedule.duties && serverSchedule.duties.length > 0) {
       return serverSchedule.duties.flatMap((duty) =>
         duty.shifts.flatMap((shift) =>
           shift.trips.map((trip) => ({
-            ...trip,
+            id: trip.id ? trip.id.toString() : `${duty.duty_number}_${trip.trip_number}`,
+            blockId: `B_${duty.duty_number}`,
+            dutyId: duty.duty_number.toString(),
             duty_id: duty.duty_number.toString(),
-            trip_id: trip.id ? trip.id.toString() : `${duty.duty_number}_${trip.trip_number}`,
-            start_stop_id: trip.stop_times[0]?.stop_id || 'ST_1',
-            end_stop_id: trip.stop_times[trip.stop_times.length - 1]?.stop_id || 'ST_20',
+            routeId: 'DEFAULT',
+            direction: (trip.direction === 'reverse' ? 2 : 1) as 1 | 2,
+            departureTime: trip.start_time || '06:00',
+            arrivalTime: trip.end_time || '07:00',
+            startStationId: trip.stop_times[0]?.stop_id || 'ST_1',
+            endStationId: trip.stop_times[trip.stop_times.length - 1]?.stop_id || 'ST_20',
+            status: 'normal' as const,
+            isZeroRun: trip.is_zero_trip || false,
+            stop_times: trip.stop_times?.map((st) => ({
+              stop_id: st.stop_id,
+              stop_sequence: st.stop_sequence,
+              arrival_time: st.arrival_time,
+              departure_time: st.departure_time,
+            })),
           }))
         )
       );

@@ -270,7 +270,7 @@ export const IncidentDirectory: React.FC = () => {
 
             {/* Список останніх AI регламентів */}
             <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 text-xs">
-              {Object.values(aiIncidents).sort((a, b) => b.timestamp - a.timestamp).map((inc) => (
+              {Object.values(aiIncidents).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map((inc) => (
                 <div key={inc.id} className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-1">
                   <div className="flex items-center justify-between font-bold text-slate-900">
                     <span>Борт #{inc.vehicle_id}</span>

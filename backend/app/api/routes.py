@@ -82,3 +82,28 @@ async def validate_electrobus(request: ElectrobusBatteryRequest):
         ambient_temp_c=request.ambient_temp_c
     )
     return result
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
+from app.core.database import get_db
+from app.models.models import RouteShape
+
+@router.get("/{route_id}/shape")
+async def get_route_shape(
+    route_id: str,
+    direction_id: int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    """Повертає геометрію маршруту (масив координат) для вказаного напрямку."""
+    query = select(RouteShape).where(
+        (RouteShape.route_id == route_id) & 
+        (RouteShape.direction_id == direction_id)
+    )
+    result = await db.execute(query)
+    shape = result.scalar_one_or_none()
+    
+    if not shape:
+        raise HTTPException(status_code=404, detail="Геометрію маршруту не знайдено")
+        
+    return shape.geometry

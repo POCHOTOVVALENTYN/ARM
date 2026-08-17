@@ -16,10 +16,11 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({ activeRouteI
   useEffect(() => {
     // Підписуємося на високошвидкісний Zustand стор поза життєвим циклом рендеру React
     const unsubscribe = useTelemetryStore.subscribe((state) => {
-      const allVehicles = Object.values(state.vehicles);
-      const vehicles = activeRouteId && activeRouteId !== 'ALL'
-        ? allVehicles.filter((v) => v.route_id === activeRouteId)
-        : allVehicles;
+      // Перевірка на 'ALL', 'all' або порожній рядок (показуємо весь парк)
+      const vehicles = Object.values(state.vehicles).filter((v) => {
+        if (!activeRouteId || activeRouteId.toUpperCase() === 'ALL' || activeRouteId === '') return true;
+        return v.route_id === activeRouteId;
+      });
 
       const currentVehicleIds = new Set(vehicles.map((v) => v.vehicle_id));
 
@@ -88,7 +89,9 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({ activeRouteI
     return () => {
       unsubscribe();
       // Очищення маркерів при розмонтуванні
-      Object.values(markersRef.current).forEach((marker) => map.removeLayer(marker));
+      Object.values(markersRef.current).forEach((marker) => {
+        if (marker) map.removeLayer(marker as L.Layer);
+      });
       markersRef.current = {};
     };
   }, [activeRouteId, map]);

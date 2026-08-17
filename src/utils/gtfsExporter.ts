@@ -13,7 +13,8 @@ export function generateGtfsStaticFiles(routes: Route[], blocks: VehicleBlock[])
   let tripsTxt = 'route_id,service_id,trip_id,trip_headsign,direction_id,block_id\n';
   blocks.forEach((b) => {
     b.trips.forEach((t) => {
-      tripsTxt += `${t.routeId},WORKDAY,${t.id},"${t.endStationId}",${t.direction - 1},${b.id}\n`;
+      const dirVal = (typeof t.direction === 'number' ? t.direction : parseInt(String(t.direction), 10) || 1) - 1;
+      tripsTxt += `${t.routeId},WORKDAY,${t.id},"${t.endStationId}",${dirVal},${b.id}\n`;
     });
   });
 

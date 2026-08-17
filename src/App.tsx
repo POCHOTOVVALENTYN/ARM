@@ -26,6 +26,7 @@ import { useScheduleStore } from './store/useScheduleStore';
 import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
 import { useAuthStore } from './store/useAuthStore';
+import { useSettingsStore } from './store/useSettingsStore';
 import { authApi } from './services/authApi';
 import { SuperuserRoute } from './components/SuperuserRoute';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -42,17 +43,31 @@ export default function App() {
   const [isVerifyingSession, setIsVerifyingSession] = useState<boolean>(true);
 
   const { 
-    currentPath, setPath, theme, draftBlocks, draftDuties, conflicts, 
+    currentPath, setPath, draftBlocks, draftDuties, conflicts, 
     applySlackToNode, isInitialized, fetchInitialData 
   } = useScheduleStore();
   const { isLoaded: isConfigLoaded, fetchConfigs } = useConfigStore();
   const { routes } = useRouteStore();
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
 
+  const settingsTheme = useSettingsStore((state) => state.theme);
+
+  // Глобально застосовуємо клас теми до тегу <html> та <body>
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    document.body.setAttribute('data-theme', theme);
-  }, [theme]);
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    
+    if (settingsTheme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.classList.add(systemTheme);
+      document.body.setAttribute('data-theme', systemTheme);
+      root.setAttribute('data-theme', systemTheme);
+    } else {
+      root.classList.add(settingsTheme);
+      document.body.setAttribute('data-theme', settingsTheme);
+      root.setAttribute('data-theme', settingsTheme);
+    }
+  }, [settingsTheme]);
 
   // Session verification on mount
   useEffect(() => {

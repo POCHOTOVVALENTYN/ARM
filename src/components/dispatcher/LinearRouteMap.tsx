@@ -15,6 +15,12 @@ export const LinearRouteMap: React.FC<LinearRouteMapProps> = ({ trips, stopsCoun
     catchup: 'text-blue-600 bg-blue-100 border-blue-600',
   };
 
+  const timeToMinutes = (timeStr?: string): number => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
   const activeVehicles = useMemo(() => {
     return trips.map(trip => {
       if (!trip.stop_times || trip.stop_times.length === 0) return null;
@@ -22,10 +28,13 @@ export const LinearRouteMap: React.FC<LinearRouteMapProps> = ({ trips, stopsCoun
       const firstStop = trip.stop_times[0];
       const lastStop = trip.stop_times[trip.stop_times.length - 1];
 
-      if (currentTime < firstStop.departure_minute || currentTime > lastStop.arrival_minute) return null;
+      const firstDepMin = timeToMinutes(firstStop.departure_time);
+      const lastArrMin = timeToMinutes(lastStop.arrival_time);
 
-      const tripDuration = lastStop.arrival_minute - firstStop.departure_minute;
-      const elapsed = currentTime - firstStop.departure_minute;
+      if (currentTime < firstDepMin || currentTime > lastArrMin) return null;
+
+      const tripDuration = lastArrMin - firstDepMin;
+      const elapsed = currentTime - firstDepMin;
       const progressPercent = tripDuration > 0 ? (elapsed / tripDuration) * 100 : 0;
 
       return { ...trip, progress: progressPercent };

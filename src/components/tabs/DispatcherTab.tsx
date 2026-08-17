@@ -60,7 +60,7 @@ export const DispatcherTab: React.FC<DispatcherTabProps> = ({
               >
                 {routes.map((r) => (
                   <option key={r.id} value={r.id} className="bg-white text-slate-900 font-bold py-1">
-                    Маршрут №{r.number} ({r.type === 'TRAM' ? 'Трамвай' : r.type === 'TROLLEY' ? 'Тролейбус' : 'Електробус'}) — {r.name}
+                    Маршрут №{r.number} ({r.type === 'tram' || String(r.type).toLowerCase() === 'tram' ? 'Трамвай' : r.type === 'trolleybus' || String(r.type).toLowerCase() === 'trolleybus' ? 'Тролейбус' : 'Електробус'}) — {r.name}
                   </option>
                 ))}
               </select>

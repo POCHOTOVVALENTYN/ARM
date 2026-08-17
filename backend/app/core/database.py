@@ -14,6 +14,10 @@ AsyncSessionLocal = async_sessionmaker(
 
 async_session_maker = AsyncSessionLocal
 
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -44,6 +48,9 @@ async def init_db():
             "ALTER TABLE driver_duties ADD COLUMN IF NOT EXISTS vehicle_id VARCHAR",
             "ALTER TABLE driver_duties ADD COLUMN IF NOT EXISTS target_date DATE",
             "ALTER TABLE driver_duties ADD COLUMN IF NOT EXISTS dispatcher_id INTEGER",
+            "ALTER TABLE stations ADD COLUMN IF NOT EXISTS lng FLOAT",
+            "ALTER TABLE stations ADD COLUMN IF NOT EXISTS lon FLOAT",
+            "ALTER TABLE routes ADD COLUMN IF NOT EXISTS color VARCHAR",
             "ALTER TABLE driver_duties ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'ASSIGNED'",
         ]
         for stmt in migration_statements:

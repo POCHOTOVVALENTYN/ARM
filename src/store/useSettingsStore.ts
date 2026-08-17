@@ -10,7 +10,7 @@ export interface SettingsState {
   isLoading: boolean;
 
   // Асинхронні екшени
-  fetchSettings: () => Promise<void>;
+  fetchSettings: (silent?: boolean) => Promise<void>;
   saveSettings: (settings: Partial<SettingsState>) => Promise<void>;
 
   // Синхронні локальні мутації
@@ -29,8 +29,8 @@ export const useSettingsStore = create<SettingsState>()(
       theme: 'light',
       isLoading: false,
 
-      fetchSettings: async () => {
-        set({ isLoading: true });
+      fetchSettings: async (silent = false) => {
+        if (!silent) set({ isLoading: true });
         try {
           const data = await settingsApi.getSettings();
           set({
@@ -42,7 +42,7 @@ export const useSettingsStore = create<SettingsState>()(
         } catch (error) {
           console.error("Помилка завантаження системних налаштувань:", error);
         } finally {
-          set({ isLoading: false });
+          if (!silent) set({ isLoading: false });
         }
       },
 

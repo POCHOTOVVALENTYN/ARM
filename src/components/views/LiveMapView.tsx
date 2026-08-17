@@ -10,6 +10,8 @@ import { TelemetryMarkers } from '../dispatcher/TelemetryMarkers';
 import { IncidentDirectory } from '../dispatcher/IncidentDirectory';
 import { MapPin, Bus, Zap, Clock, AlertCircle, Clock3, Filter, CheckCircle2, RefreshCw } from 'lucide-react';
 
+import { useRouteShape } from '../../hooks/useRouteQueries';
+
 // Fix for default Leaflet marker assets in React/Vite builds
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -30,17 +32,22 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
   const [routeFilter, setRouteFilter] = useState<string>(propActiveRouteId || 'ALL');
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 
+  const isSpecificRoute = routeFilter && routeFilter !== 'ALL' && routeFilter !== 'all';
+
+  // Завантажуємо реальну GTFS геометрію тільки для конкретно обраного маршруту
+  const { data: routeShape } = useRouteShape(isSpecificRoute ? routeFilter : null, 0);
+
   // Центр Одеси (вузлова розв'язка Старосінна / Вокзал)
   const ODESSA_CENTER: [number, number] = [46.4750, 30.7350];
 
   const activeRouteObj = useMemo(() => {
-    if (routeFilter === 'ALL') return null;
+    if (!isSpecificRoute) return null;
     return routes.find((r) => r.id.toLowerCase() === routeFilter.toLowerCase() || r.number === routeFilter);
-  }, [routeFilter, routes]);
+  }, [isSpecificRoute, routeFilter, routes]);
 
   // Маршрутні зупинки
   const displayedStops = useMemo(() => {
-    if (routeFilter === 'ALL' || !activeRouteObj) {
+    if (!isSpecificRoute || !activeRouteObj) {
       return [
         { id: '708889', name: 'Старосінна площа', lat: 46.4668, lng: 30.7382, isHub: true },
         { id: '708884', name: 'пл. Тираспольська', lat: 46.4786, lng: 30.7318, isHub: true },
@@ -62,12 +69,15 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
       lng: s.lng || 30.73,
       isHub: s.isTerminal || false,
     }));
-  }, [routeFilter, activeRouteObj, stops]);
+  }, [isSpecificRoute, activeRouteObj, stops]);
 
-  // Координати для відображення лінії маршруту Polyline
+  // Координати для відображення лінії маршруту GTFS
   const polylinePositions: [number, number][] = useMemo(() => {
-    return displayedStops.map((st) => [st.lat, st.lng]);
-  }, [displayedStops]);
+    if (isSpecificRoute && routeShape && routeShape.length > 0) {
+      return routeShape.map((pt) => [pt.lat, pt.lng] as [number, number]);
+    }
+    return [];
+  }, [isSpecificRoute, routeShape]);
 
   return (
     <div className="space-y-6 font-sans">
@@ -196,15 +206,14 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
                 url={mapTileUrl}
               />
 
-              {/* Маршрутна полілінія */}
-              {polylinePositions.length > 1 && (
+              {/* Маршрутна полілінія GTFS (малюємо тільки при виборі конкретного маршруту) */}
+              {isSpecificRoute && polylinePositions.length > 1 && (
                 <Polyline
                   positions={polylinePositions}
                   pathOptions={{
-                    color: routeFilter === 'ALL' ? '#3b82f6' : '#2563eb',
+                    color: '#2563eb',
                     weight: 4,
-                    opacity: 0.8,
-                    dashArray: routeFilter === 'ALL' ? '4, 8' : undefined,
+                    opacity: 0.85,
                   }}
                 />
               )}
@@ -234,7 +243,7 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
               ))}
 
               {/* Шар високошвидкісних маркерів телеметрії (O(1) Leaflet imperative updates) */}
-              <TelemetryMarkers activeRouteId={routeFilter === 'ALL' ? null : routeFilter} />
+              <TelemetryMarkers activeRouteId={routeFilter} />
             </MapContainer>
           </div>
         </div>

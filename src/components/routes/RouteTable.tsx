@@ -272,6 +272,7 @@ export const RouteTable: React.FC<RouteTableProps> = ({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {filteredTrips.map((trip: any, idx: number) => {
               const isEditing = editingTripId === trip.id;
+              const uniqueRowKey = `${trip.duty_number || 'duty'}-${trip.shift_id || 'shift'}-${trip.id || idx}`;
 
               // Розрахунок тривалості рейсу
               let durationMin = 0;
@@ -286,7 +287,7 @@ export const RouteTable: React.FC<RouteTableProps> = ({
 
               return (
                 <tr 
-                  key={trip.id || idx} 
+                  key={uniqueRowKey} 
                   className={`hover:bg-blue-50/40 dark:hover:bg-slate-800/50 transition-colors ${
                     isEditing ? 'bg-blue-50/70 dark:bg-blue-950/40 font-semibold' : ''
                   }`}
@@ -314,10 +315,16 @@ export const RouteTable: React.FC<RouteTableProps> = ({
                         type="time" 
                         value={editForm.start_time}
                         onChange={(e) => setEditForm({ ...editForm, start_time: e.target.value })}
+                        onBlur={() => !editForm.start_time && handleCancelEdit()}
+                        autoFocus
                         className="border-2 border-blue-500 rounded-lg px-2 py-1 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono font-bold text-xs text-slate-900 dark:text-white"
                       />
                     ) : (
-                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 px-2 py-1 rounded">
+                      <span 
+                        onClick={() => handleEditClick(trip)}
+                        className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 px-2 py-1 rounded cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:ring-1 hover:ring-blue-300 transition-all"
+                        title="Натисніть для швидкого редагування"
+                      >
                         {trip.start_time?.slice(0, 5)}
                       </span>
                     )}
@@ -330,10 +337,15 @@ export const RouteTable: React.FC<RouteTableProps> = ({
                         type="time" 
                         value={editForm.end_time}
                         onChange={(e) => setEditForm({ ...editForm, end_time: e.target.value })}
+                        onBlur={() => !editForm.end_time && handleCancelEdit()}
                         className="border-2 border-blue-500 rounded-lg px-2 py-1 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono font-bold text-xs text-slate-900 dark:text-white"
                       />
                     ) : (
-                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 px-2 py-1 rounded">
+                      <span 
+                        onClick={() => handleEditClick(trip)}
+                        className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 px-2 py-1 rounded cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:ring-1 hover:ring-blue-300 transition-all"
+                        title="Натисніть для швидкого редагування"
+                      >
                         {trip.end_time?.slice(0, 5)}
                       </span>
                     )}

@@ -49,14 +49,18 @@ ws_manager = ConnectionManager()
 manager = ws_manager  # Аліас для сумісності з іншими модулями
 
 async def handle_websocket_session(websocket: WebSocket, token: Optional[str] = None):
-    # 1. Авторизація якщо передано токен
-    if token:
-        user = await verify_ws_token(token)
-        if not user:
-            logger.warning("❌ [WS] Невалідний токен диспетчера. Закриття з'єднання.")
-            await websocket.close(code=1008)
-            return
-        logger.info(f"👤 [WS] Авторизовано диспетчера: {user.username} ({user.full_name})")
+    # 1. Перевірка токена авторизації
+    if not token:
+        logger.warning("❌ [WS] Відсутній токен авторизації. Закриття з'єднання.")
+        await websocket.close(code=1008)
+        return
+
+    user = await verify_ws_token(token)
+    if not user:
+        logger.warning("❌ [WS] Невалідний або прострочений токен диспетчера. Закриття з'єднання.")
+        await websocket.close(code=1008)
+        return
+    logger.info(f"👤 [WS] Авторизовано диспетчера: {user.username} ({user.full_name})")
 
     await ws_manager.connect(websocket)
 

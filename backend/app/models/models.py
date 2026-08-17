@@ -42,23 +42,46 @@ class IncidentLog(Base):
     recorded_at = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), index=True)
     timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), nullable=True)
 
+from sqlalchemy.dialects.postgresql import JSONB
+
 class RouteModel(Base):
     __tablename__ = "routes"
     id = Column(String, primary_key=True, index=True)
-    number = Column(String)
-    name = Column(String)
-    type = Column(String)
-    status = Column(String)
-    primaryTerminalId = Column(String)
-    secondaryTerminalId = Column(String)
-    lengthDir1Km = Column(Float)
-    lengthDir2Km = Column(Float)
-    stations = Column(JSON)
-    allStations = Column(JSON)
-    segments = Column(JSON)
-    activeVehiclesCount = Column(JSON)
-    description = Column(String)
+    number = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    type = Column(String, default="TRAM", nullable=True)
+    status = Column(String, default="ACTIVE", nullable=True)
+    primaryTerminalId = Column(String, nullable=True)
+    secondaryTerminalId = Column(String, nullable=True)
+    lengthDir1Km = Column(Float, nullable=True)
+    lengthDir2Km = Column(Float, nullable=True)
+    stations = Column(JSON, nullable=True)
+    allStations = Column(JSON, nullable=True)
+    segments = Column(JSON, nullable=True)
+    activeVehiclesCount = Column(JSON, nullable=True)
+    description = Column(String, nullable=True)
     color = Column(String, nullable=True)
+
+Route = RouteModel
+
+class RouteShape(Base):
+    __tablename__ = "route_shapes"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    route_id = Column(String, index=True, nullable=False)
+    direction_id = Column(Integer, nullable=False) # 0 - Прямий, 1 - Зворотній
+    
+    # Зберігаємо масив координат як JSON [{lat: ..., lng: ...}, ...] для швидкої віддачі на фронт
+    geometry = Column(JSONB, nullable=False) 
+
+class RouteStation(Base):
+    __tablename__ = "route_stations"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    route_id = Column(String, index=True, nullable=False)
+    direction_id = Column(Integer, nullable=False)
+    stop_id = Column(String, index=True, nullable=False)
+    stop_sequence = Column(Integer, nullable=False) # Порядковий номер зупинки на маршруті
 
 class VehicleBlockModel(Base):
     __tablename__ = "vehicle_blocks"
@@ -105,12 +128,15 @@ class StationModel(Base):
     __tablename__ = "stations"
     id = Column(String, primary_key=True, index=True)
     name = Column(String)
-    type = Column(String)  # 'HUB', 'DEPOT', 'STOP'
-    status = Column(String)  # 'ACTIVE', 'OFFLINE', 'MAINTENANCE'
+    type = Column(String, default="STOP", nullable=True)  # 'HUB', 'DEPOT', 'STOP'
+    status = Column(String, default="ACTIVE", nullable=True)  # 'ACTIVE', 'OFFLINE', 'MAINTENANCE'
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     is_dispatch_station = Column(Boolean, default=False)
     break_capacity = Column(Integer, default=0)
+
+Station = StationModel
 
 class EtaLog(Base):
     __tablename__ = "eta_logs"

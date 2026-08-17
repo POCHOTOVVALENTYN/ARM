@@ -62,7 +62,7 @@ export const BreakLocationFormModal: React.FC<BreakLocationFormModalProps> = ({
 
     // Determine location type and name
     let locName = '';
-    let locType: 'dispatch_point' | 'terminal' | 'stop' = 'stop';
+    let locType: 'dispatch_point' | 'opposite_terminal' | 'global_hub' = 'dispatch_point';
 
     const dp = dispatchPoints.find(dp => dp.id === locationId);
     if (dp) {
@@ -74,10 +74,10 @@ export const BreakLocationFormModal: React.FC<BreakLocationFormModalProps> = ({
       
       if (isTerminal) {
         locName = isTerminal.name;
-        locType = 'terminal';
+        locType = 'opposite_terminal';
       } else if (isIntermediate) {
         locName = isIntermediate.name;
-        locType = 'stop';
+        locType = 'global_hub';
       }
     }
 
