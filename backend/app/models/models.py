@@ -55,6 +55,8 @@ class RouteModel(Base):
     secondaryTerminalId = Column(String, nullable=True)
     lengthDir1Km = Column(Float, nullable=True)
     lengthDir2Km = Column(Float, nullable=True)
+    length_km = Column(Float, default=10.5, nullable=True) # Довжина в один бік
+    default_speed_kmh = Column(Float, default=14.5, nullable=True) # Сер. експлуатаційна швидкість
     stations = Column(JSON, nullable=True)
     allStations = Column(JSON, nullable=True)
     segments = Column(JSON, nullable=True)
@@ -63,6 +65,16 @@ class RouteModel(Base):
     color = Column(String, nullable=True)
 
 Route = RouteModel
+
+class ControlPoint(Base):
+    """Диспетчерські пункти та кінцеві (Hubs)"""
+    __tablename__ = "control_points"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False) # Напр. "Старосінна площа", "11 ст. Люстдорфської дороги"
+    is_dispatcher_hub = Column(Boolean, default=True)
+    lat = Column(Float, nullable=False)
+    lng = Column(Float, nullable=False)
 
 class RouteShape(Base):
     __tablename__ = "route_shapes"
@@ -111,6 +123,23 @@ class DriverDuty(Base):
     breaks = Column(JSON, nullable=True)
 
 DriverDutyModel = DriverDuty
+
+class Waybill(Base):
+    """Електронна Путівка (Smart Waybill) на добу"""
+    __tablename__ = "waybills"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, default=func.current_date, index=True, nullable=False)
+    
+    duty_id = Column(Integer, ForeignKey("static_duties.id", ondelete="CASCADE"), nullable=False)
+    vehicle_id = Column(String, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False)
+    driver_id = Column(String, nullable=False) # ID або ПІБ водія
+    
+    status = Column(String, default="ACTIVE") # PENDING, ACTIVE, COMPLETED
+    
+    # Зв'язки
+    duty = relationship("StaticDuty")
+    vehicle = relationship("Vehicle")
 
 class Driver(Base):
     __tablename__ = "drivers"
@@ -240,8 +269,9 @@ class ActiveDetour(Base):
     new_path_description = Column(String, nullable=False)  # Куди направлено
     
     started_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    ended_at = Column(DateTime(timezone=True), nullable=True)  # Якщо null - об'їзд ще триває
-    
     dispatcher_id = Column(Integer, nullable=True)
+
+from app.models.schedule import Schedule, StaticSchedule, StaticDuty, StaticShift, StaticTrip, StaticStopTime
+
 
 

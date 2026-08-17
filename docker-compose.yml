@@ -44,6 +44,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://omet_admin:secure_password_123@postgres:5432/omet_db
       REDIS_URL: redis://redis:6379/0
       TZ: Europe/Kyiv
+    volumes:
+      - ./backend:/app
     depends_on:
       - postgres
       - redis

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/apiClient';
 
 export interface WaybillTrip {
@@ -33,8 +33,48 @@ export const useSmartWaybill = (driverId: number | string | null, targetDate: st
       const { data } = await api.get<SmartWaybill>(`/crew/waybill?driver_id=${driverId}&target_date=${targetDate}`);
       return data;
     },
-    enabled: !!driverId && !!targetDate, // Запит не виконується, якщо не обрано водія
-    retry: false, // Не повторювати при 404
+    enabled: !!driverId && !!targetDate,
+    retry: false,
     staleTime: 30000,
+  });
+};
+
+export const useAssignWaybill = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { duty_id: number; vehicle_id: string; driver_id: string; target_date: string }) => {
+      const { data } = await api.post('/waybills/assign', payload);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['waybills'] });
+      queryClient.invalidateQueries({ queryKey: ['vehicles-status'] });
+      queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
+    }
+  });
+};
+
+export const useWaybillsByDate = (date: string) => {
+  return useQuery({
+    queryKey: ['waybills', date],
+    queryFn: async () => {
+      const { data } = await api.get(`/waybills/today?target_date=${date}`);
+      return data;
+    },
+    enabled: !!date,
+  });
+};
+
+export const useAvailableDuties = (targetDate?: string, routeId?: string) => {
+  return useQuery({
+    queryKey: ['available-duties', targetDate, routeId],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (targetDate) params.append('target_date', targetDate);
+      if (routeId) params.append('route_id', routeId);
+      const { data } = await api.get(`/waybills/duties-available?${params.toString()}`);
+      return data;
+    },
   });
 };

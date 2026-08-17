@@ -220,3 +220,196 @@ async def update_trip_time(
     return {"message": "Час рейсу успішно оновлено", "trip_id": trip_id}
 
 
+from app.services.transit_solver import generate_optimized_schedule
+
+class GenerateScheduleRequest(BaseModel):
+    route_id: str
+    vehicles_count: int
+    start_time: str
+    end_time: str
+    route_length_km: float
+    avg_speed_kmh: float
+    zero_trip_min: int = 15
+    use_elastic_smoother: bool = True
+
+@router.post("/generate-draft")
+async def api_generate_draft(
+    req: GenerateScheduleRequest
+):
+    draft_data = generate_optimized_schedule(
+        route_id=req.route_id,
+        vehicles_count=req.vehicles_count,
+        start_time=req.start_time,
+        end_time=req.end_time,
+        route_length_km=req.route_length_km,
+        avg_speed_kmh=req.avg_speed_kmh,
+        zero_trip_min=req.zero_trip_min,
+        use_elastic_smoother=req.use_elastic_smoother
+    )
+    return draft_data
+
+
+# --- Pydantic Схеми для валідації збереження розкладу ---
+from app.models.schedule import (
+    StaticDuty, 
+    StaticShift, 
+    StaticTrip, 
+    StaticStopTime,
+    ServiceDay, 
+    DutyType, 
+    TripDirection
+)
+from app.models.models import RouteStation, StationModel
+
+class TripCreate(BaseModel):
+    direction: str
+    start_time: str
+    end_time: str
+    is_zero: bool = False
+
+class ShiftCreate(BaseModel):
+    id: Optional[Union[int, str]] = None
+    shift_type: Optional[str] = "FULL"
+    trips: List[TripCreate] = []
+
+class DutyCreate(BaseModel):
+    duty_number: str
+    shifts: List[ShiftCreate] = []
+
+class ScheduleCommitRequest(BaseModel):
+    route_id: str
+    duties: List[DutyCreate]
+    version_name: Optional[str] = "Автоматична генерація"
+
+@router.post("/commit-draft")
+async def commit_schedule_draft(
+    req: ScheduleCommitRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Зберігає згенерований Transit Solver-ом розклад як активний (Еталонний).
+    """
+    today = date.today()
+
+    # 1. Створюємо шапку еталонного розкладу
+    new_schedule = Schedule(
+        route_id=req.route_id,
+        active_date=today,
+        status=ScheduleStatus.ACTIVE
+    )
+    db.add(new_schedule)
+    await db.flush() # Отримуємо new_schedule.id
+    
+    # 2. Архівуємо всі інші активні розклади для цього маршруту
+    archive_stmt = (
+        update(Schedule)
+        .where((Schedule.route_id == req.route_id) & (Schedule.id != new_schedule.id))
+        .values(status=ScheduleStatus.ARCHIVED)
+    )
+    await db.execute(archive_stmt)
+
+    # Отримуємо ID реальних зупинок маршруту
+    stops_result = await db.execute(
+        select(RouteStation.stop_id)
+        .where(RouteStation.route_id == req.route_id)
+        .order_by(RouteStation.stop_sequence)
+    )
+    route_stop_ids = stops_result.scalars().all()
+    if not route_stop_ids or len(route_stop_ids) < 2:
+        # Fallback до базових станцій
+        st_res = await db.execute(select(StationModel.id).limit(2))
+        route_stop_ids = st_res.scalars().all() or ["687083", "708888"]
+
+    terminal_start = route_stop_ids[0]
+    terminal_end = route_stop_ids[-1]
+
+    # 3. Запис Нарядів (Duties), Змін (Shifts) та Рейсів (Trips)
+    for duty in req.duties:
+        new_duty = StaticDuty(
+            schedule_id=new_schedule.id,
+            route_id=req.route_id,
+            duty_number=str(duty.duty_number),
+            service_id=ServiceDay.WORKDAY,
+            duty_type=DutyType.DOUBLE
+        )
+        db.add(new_duty)
+        await db.flush() # Отримуємо new_duty.id
+        
+        for idx_shift, shift in enumerate(duty.shifts, start=1):
+            new_shift = StaticShift(
+                duty_id=new_duty.id,
+                shift_sequence=idx_shift,
+                has_break=False
+            )
+            db.add(new_shift)
+            await db.flush()
+            
+            for idx_trip, trip in enumerate(shift.trips, start=1):
+                dir_str = str(trip.direction).lower()
+                if "нульовий" in dir_str or "виїзд" in dir_str:
+                    tdir = TripDirection.PULL_OUT
+                elif "заїзд" in dir_str:
+                    tdir = TripDirection.PULL_IN
+                elif "зворот" in dir_str or "reverse" in dir_str or "backward" in dir_str:
+                    tdir = TripDirection.BACKWARD
+                else:
+                    tdir = TripDirection.FORWARD
+
+                new_trip = StaticTrip(
+                    shift_id=new_shift.id,
+                    trip_sequence=idx_trip,
+                    direction=tdir,
+                    smoothing_state="normal",
+                    smoothing_delta=0.0
+                )
+                db.add(new_trip)
+                await db.flush()
+
+                try:
+                    st_time = parse_time_str(trip.start_time)
+                    en_time = parse_time_str(trip.end_time)
+                except Exception:
+                    st_time = parse_time_str("06:00")
+                    en_time = parse_time_str("06:45")
+
+                stop1 = StaticStopTime(
+                    trip_id=new_trip.id,
+                    stop_id=terminal_start,
+                    stop_sequence=1,
+                    arrival_time=st_time,
+                    departure_time=st_time
+                )
+                stop2 = StaticStopTime(
+                    trip_id=new_trip.id,
+                    stop_id=terminal_end,
+                    stop_sequence=2,
+                    arrival_time=en_time,
+                    departure_time=en_time
+                )
+                db.add(stop1)
+                db.add(stop2)
+
+    await db.commit()
+
+    # 4. Кешуємо в Redis для розрахунку відхилень у telemetry_worker
+    repo = ScheduleRepository(db)
+    full_schedule = await repo.get_schedule_with_full_hierarchy(new_schedule.id)
+    if full_schedule:
+        await cache_active_schedule_in_redis(full_schedule)
+
+    # 5. Сповіщаємо підключених диспетчерів через WebSocket
+    await ws_manager.broadcast({
+        "type": "invalidate_schedules",
+        "schedule_id": new_schedule.id,
+        "route_id": req.route_id
+    })
+    
+    return {
+        "message": "Еталонний розклад успішно збережено", 
+        "schedule_id": new_schedule.id,
+        "status": "ACTIVE"
+    }
+
+
+
+

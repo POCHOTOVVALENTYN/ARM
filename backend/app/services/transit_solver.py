@@ -1,7 +1,141 @@
 # backend/app/services/transit_solver.py
 import copy
 import math
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple, Optional
+
+def generate_optimized_schedule(
+    route_id: str, 
+    vehicles_count: int, 
+    start_time: str, 
+    end_time: str, 
+    route_length_km: float,
+    avg_speed_kmh: float,
+    zero_trip_min: int = 15,
+    use_elastic_smoother: bool = True
+):
+    """
+    Математичне ядро для генерації розкладів КП "ОМЕТ".
+    Враховує фізику (швидкість/відстань), нульові рейси (з пасажирами) та обіди на кільці.
+    """
+    start_dt = datetime.strptime(start_time, "%H:%M")
+    end_dt = datetime.strptime(end_time, "%H:%M")
+    
+    # 1. Фізичний розрахунок часу рейсу
+    # Час (год) = Відстань / Швидкість * 60 -> Хвилини
+    base_trip_min = math.ceil((route_length_km / max(1.0, avg_speed_kmh)) * 60)
+    
+    # 2. Розрахунок оборотного рейсу та інтервалу
+    # Мінімальний відстій - 3 хвилини
+    cycle_min = (base_trip_min * 2) + (3 * 2)
+    headway_min = math.ceil(cycle_min / max(1, vehicles_count)) if vehicles_count > 0 else 0
+    
+    # 3. Обмеження відтяжки (Макс 10 хвилин)
+    # Якщо розрахований інтервал дає занадто великий відстій, ми ШТУЧНО УПОВІЛЬНЮЄМО вагон (додаємо час у рейс)
+    layover_min = (headway_min * vehicles_count - (base_trip_min * 2)) / 2 if vehicles_count > 0 else 3
+    actual_trip_min = base_trip_min
+    actual_layover_min = int(layover_min)
+    
+    if layover_min > 10:
+        excess_time = layover_min - 10
+        actual_trip_min += int(excess_time)
+        actual_layover_min = 10
+    elif layover_min < 3:
+        actual_layover_min = 3
+        # Якщо інтервал не вміщається, вагони їздитимуть "хвіст у хвіст"
+        headway_min = math.ceil(((actual_trip_min * 2) + 6) / max(1, vehicles_count))
+        
+    duties = []
+    global_trip_counter = 1
+    total_generated_trips = 0
+    
+    for v_idx in range(vehicles_count):
+        # Зсув випуску з депо
+        v_start = start_dt + timedelta(minutes=v_idx * headway_min)
+        current_time = v_start
+        
+        trips = []
+        had_lunch = False
+        
+        # --- НУЛЬОВИЙ РЕЙС (Виїзд з депо з пасажирами) ---
+        zero_trip_end = current_time + timedelta(minutes=zero_trip_min)
+        trips.append({
+            "id": global_trip_counter,
+            "direction": "Нульовий (з пасажирами)",
+            "start_time": current_time.strftime("%H:%M"),
+            "end_time": zero_trip_end.strftime("%H:%M"),
+            "is_zero": True
+        })
+        global_trip_counter += 1
+        current_time = zero_trip_end
+        
+        # --- РОБОТА НА ЛІНІЇ ---
+        while current_time < end_dt:
+            # Пікове розтягування (Elastic Smoother)
+            trip_duration = actual_trip_min
+            if use_elastic_smoother and ((7 <= current_time.hour <= 9) or (16 <= current_time.hour <= 18)):
+                trip_duration = int(actual_trip_min * 1.25)
+                
+            trip_end = current_time + timedelta(minutes=trip_duration)
+            if trip_end > end_dt:
+                break
+                
+            direction = "Прямий" if len(trips) % 2 != 0 else "Зворотній"
+            
+            trips.append({
+                "id": global_trip_counter,
+                "direction": direction,
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": trip_end.strftime("%H:%M"),
+                "is_zero": False
+            })
+            
+            global_trip_counter += 1
+            total_generated_trips += 1
+            current_time = trip_end
+            
+            # --- ОБІД ВОДІЯ ТА ВАГОНА НА КІЛЬЦІ ---
+            worked_hours = (current_time - v_start).total_seconds() / 3600
+            if not had_lunch and worked_hours >= 4.0:
+                # Вагон стає на кільце на 20 хвилин (перевищує стандартну відтяжку)
+                current_time += timedelta(minutes=20)
+                had_lunch = True
+            else:
+                # Стандартна відтяжка (до 10 хв)
+                current_time += timedelta(minutes=actual_layover_min)
+
+        # --- ЗАЇЗД В ДЕПО ---
+        trips.append({
+            "id": global_trip_counter,
+            "direction": "Заїзд у Депо",
+            "start_time": current_time.strftime("%H:%M"),
+            "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+            "is_zero": True
+        })
+        global_trip_counter += 1
+
+        duties.append({
+            "duty_number": f"{route_id}-{v_idx + 1:02d}",
+            "metrics": {"total_trips": len(trips), "had_lunch": had_lunch},
+            "shifts": [{"id": v_idx + 1, "shift_type": "FULL", "trips": trips}]
+        })
+    
+    # Розрахунок штучно заниженої швидкості, якщо застосовувалася відтяжка 10 хв
+    actual_speed = round(route_length_km / max(0.01, (actual_trip_min / 60)), 1)
+
+    return {
+        "route_id": route_id,
+        "duties": duties,
+        "metrics": {
+            "headway_min": headway_min,
+            "actual_trip_min": actual_trip_min,
+            "layover_min": actual_layover_min,
+            "actual_speed_kmh": actual_speed,
+            "total_trips": total_generated_trips,
+            "vehicles_used": vehicles_count
+        }
+    }
+
 
 class TransitSolver:
     """

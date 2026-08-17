@@ -154,13 +154,50 @@ export const useUpdateTrip = () => {
       return data;
     },
     onSuccess: () => {
-      // Інвалідуємо поточний перегляд розкладу (як драфтів, так і активних), 
-      // щоб таблиця і графіки Марея миттєво оновились
-      queryClient.invalidateQueries({ queryKey: ['schedule'] });
-      queryClient.invalidateQueries({ queryKey: ['active-schedule'] });
       queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
       queryClient.invalidateQueries({ queryKey: ['schedules'] });
     },
   });
 };
+
+// 8. МУТАЦІЯ: Генерація оптимізованої математичної моделі розкладу (Transit Solver)
+export const useGenerateDraftSchedule = () => {
+  return useMutation({
+    mutationFn: async (payload: {
+      route_id: string;
+      vehicles_count: number;
+      start_time: string;
+      end_time: string;
+      route_length_km: number;
+      avg_speed_kmh: number;
+      zero_trip_min: number;
+      use_elastic_smoother: boolean;
+    }) => {
+      const { data } = await api.post('/schedules/generate-draft', payload);
+      return data;
+    }
+  });
+};
+
+// 9. МУТАЦІЯ: Збереження еталонного розкладу в БД (Commit Draft)
+export const useCommitScheduleDraft = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      route_id: string;
+      duties: any[];
+      version_name?: string;
+    }) => {
+      const { data } = await api.post('/schedules/commit-draft', payload);
+      return data;
+    },
+    onSuccess: () => {
+      // Інвалідуємо кеш, щоб інші компоненти (напр. DailyDeploymentPanel, ActiveSchedules) одразу побачили новий розклад
+      queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['schedules'] });
+    }
+  });
+};
+
 

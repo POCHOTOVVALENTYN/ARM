@@ -51,6 +51,8 @@ async def init_db():
             "ALTER TABLE stations ADD COLUMN IF NOT EXISTS lng FLOAT",
             "ALTER TABLE stations ADD COLUMN IF NOT EXISTS lon FLOAT",
             "ALTER TABLE routes ADD COLUMN IF NOT EXISTS color VARCHAR",
+            "ALTER TABLE routes ADD COLUMN IF NOT EXISTS length_km FLOAT DEFAULT 10.5",
+            "ALTER TABLE routes ADD COLUMN IF NOT EXISTS default_speed_kmh FLOAT DEFAULT 14.5",
             "ALTER TABLE driver_duties ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'ASSIGNED'",
         ]
         for stmt in migration_statements:

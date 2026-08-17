@@ -1,446 +1,223 @@
-import React, { useState, useMemo } from 'react';
-import { useAvailableResources, useAssignCrew, useDailyDeployments } from '../../hooks/useCrewQueries';
-import { useActiveSchedules } from '../../hooks/useScheduleQueries';
-import { useScheduleStore } from '../../store/useScheduleStore';
-import { 
-  Users, 
-  TramFront, 
-  CalendarCheck, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle, 
-  ShieldCheck, 
-  ArrowRight,
-  Filter,
-  Layers,
-  Sparkles
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { Users, TramFront, Calendar, CheckCircle2, Link, AlertCircle, ShieldCheck, Sparkles } from 'lucide-react';
+import { useAssignWaybill, useWaybillsByDate, useAvailableDuties } from '../../hooks/useWaybillQueries';
 import { toast } from 'sonner';
-
-interface DutyItem {
-  id: number;
-  duty_number: string | number;
-  route_id?: string;
-  start_time: string;
-  end_time: string;
-  duty_type?: string;
-  is_assigned: boolean;
-  assigned_driver_id?: number | null;
-  assigned_vehicle_id?: string | null;
-}
 
 export const CrewAssignmentView: React.FC = () => {
   const [targetDate, setTargetDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
-  const [selectedDutyId, setSelectedDutyId] = useState<number | null>(null);
   
-  // Локальний стан форми призначення
-  const [driverId, setDriverId] = useState<number | "">("");
-  const [vehicleId, setVehicleId] = useState<string>("");
-  const [filterRoute, setFilterRoute] = useState<string>("ALL");
+  // Стейт форми
+  const [selectedDuty, setSelectedDuty] = useState<number | null>(null);
+  const [vehicleId, setVehicleId] = useState('');
+  const [driverName, setDriverName] = useState('');
 
-  // TanStack Query хуки
-  const { data: resources, isLoading: isResourcesLoading } = useAvailableResources(targetDate);
-  const { data: dailyDeployments, isLoading: isDeploymentsLoading } = useDailyDeployments(targetDate);
-  const { data: activeSchedules, isLoading: isSchedulesLoading } = useActiveSchedules();
-  const assignMutation = useAssignCrew();
+  const { data: dbDuties, isLoading: isDutiesLoading } = useAvailableDuties(targetDate);
+  const { data: assignedWaybills } = useWaybillsByDate(targetDate);
+  const assignMutation = useAssignWaybill();
 
-  // Локальний стан нарядів з чернеток у сторі
-  const { draftDuties } = useScheduleStore();
+  // Резервні наряди, якщо в БД ще не збережено активний розклад
+  const defaultDuties = [
+    { id: 1, number: '18-01', route: '18', start: '05:30', end: '14:20' },
+    { id: 2, number: '18-02', route: '18', start: '05:42', end: '14:32' },
+    { id: 3, number: '18-03', route: '18', start: '05:54', end: '14:44' },
+    { id: 4, number: '18-04', route: '18', start: '06:06', end: '14:56' },
+    { id: 5, number: '7-01', route: '7', start: '05:15', end: '13:45' },
+    { id: 6, number: '7-02', route: '7', start: '05:30', end: '14:00' },
+  ];
 
-  // Обчислення списку нарядів з активних розкладів або чернеток
-  const dutiesList: DutyItem[] = useMemo(() => {
-    const list: DutyItem[] = [];
+  const dutiesToDisplay = (dbDuties && dbDuties.length > 0) ? dbDuties : defaultDuties;
 
-    // 1. Якщо є активні розклади з бекенду
-    if (activeSchedules && activeSchedules.length > 0) {
-      activeSchedules.forEach((sch) => {
-        if (sch.duties && sch.duties.length > 0) {
-          sch.duties.forEach((d) => {
-            const firstShift = d.shifts?.[0];
-            const lastShift = d.shifts?.[d.shifts.length - 1] || firstShift;
-            
-            const deployment = dailyDeployments?.find((dep) => dep.duty_id === d.id);
-
-            list.push({
-              id: d.id,
-              duty_number: d.duty_number || `Наряд #${d.id}`,
-              route_id: sch.route_id,
-              start_time: firstShift?.start_time || '05:30',
-              end_time: lastShift?.end_time || '14:30',
-              duty_type: d.duty_type || 'SINGLE',
-              is_assigned: !!deployment,
-              assigned_driver_id: deployment?.driver_id,
-              assigned_vehicle_id: deployment?.vehicle_id,
-            });
-          });
-        }
-      });
-    }
-
-    // 2. Якщо розкладів з бекенду немає, використовуємо локальні наряди
-    if (list.length === 0) {
-      if (draftDuties && draftDuties.length > 0) {
-        draftDuties.forEach((dd, idx) => {
-          const numId = idx + 1;
-          const deployment = dailyDeployments?.find((dep) => dep.duty_id === numId);
-          list.push({
-            id: numId,
-            duty_number: dd.id || `Наряд ${numId}`,
-            route_id: 'Т-28',
-            start_time: dd.shiftStartTime || '06:00',
-            end_time: dd.shiftEndTime || '14:30',
-            duty_type: 'SINGLE',
-            is_assigned: !!deployment,
-            assigned_driver_id: deployment?.driver_id,
-            assigned_vehicle_id: deployment?.vehicle_id,
-          });
-        });
-      } else {
-        // Демо-наряди за замовчуванням
-        const defaultMocks = [
-          { id: 101, duty_number: '28-01', route_id: 'Т-28', start_time: '05:30', end_time: '14:15', duty_type: 'SINGLE' },
-          { id: 102, duty_number: '28-02', route_id: 'Т-28', start_time: '06:00', end_time: '14:45', duty_type: 'SINGLE' },
-          { id: 103, duty_number: '28-03', route_id: 'Т-28', start_time: '06:30', end_time: '15:15', duty_type: 'SINGLE' },
-          { id: 104, duty_number: '5-01', route_id: 'Т-5', start_time: '05:45', end_time: '14:30', duty_type: 'DOUBLE' },
-          { id: 105, duty_number: '5-02', route_id: 'Т-5', start_time: '06:15', end_time: '15:00', duty_type: 'DOUBLE' },
-          { id: 106, duty_number: '7-01', route_id: 'Т-7', start_time: '05:15', end_time: '13:45', duty_type: 'PEAK' },
-          { id: 107, duty_number: '7-02', route_id: 'Т-7', start_time: '06:45', end_time: '15:30', duty_type: 'PEAK' },
-        ];
-
-        defaultMocks.forEach((dm) => {
-          const deployment = dailyDeployments?.find((dep) => dep.duty_id === dm.id);
-          list.push({
-            ...dm,
-            is_assigned: !!deployment,
-            assigned_driver_id: deployment?.driver_id,
-            assigned_vehicle_id: deployment?.vehicle_id,
-          });
-        });
-      }
-    }
-
-    return list;
-  }, [activeSchedules, draftDuties, dailyDeployments]);
-
-  // Фільтрація за маршрутом
-  const filteredDuties = useMemo(() => {
-    if (filterRoute === 'ALL') return dutiesList;
-    return dutiesList.filter((d) => d.route_id === filterRoute);
-  }, [dutiesList, filterRoute]);
-
-  const uniqueRoutes = useMemo(() => {
-    const routes = new Set<string>();
-    dutiesList.forEach((d) => {
-      if (d.route_id) routes.add(d.route_id);
-    });
-    return Array.from(routes);
-  }, [dutiesList]);
-
-  // Поточний обраний наряд
-  const currentSelectedDuty = useMemo(() => {
-    return dutiesList.find((d) => d.id === selectedDutyId) || null;
-  }, [dutiesList, selectedDutyId]);
-
-  // Підрахунок статистики
-  const assignedCount = dutiesList.filter((d) => d.is_assigned).length;
-  const totalCount = dutiesList.length;
-
-  const handleAssign = async (e: React.FormEvent) => {
+  const handleAssign = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDutyId || !driverId || !vehicleId) {
-      toast.error('Оберіть водія та вагон для завершення рознарядки');
+    if (!selectedDuty || !vehicleId || !driverName) {
+      toast.error('Будь ласка, заповніть бортовий номер та табельний/ПІБ водія');
       return;
     }
 
-    try {
-      await assignMutation.mutateAsync({
-        duty_id: selectedDutyId,
-        driver_id: Number(driverId),
-        vehicle_id: vehicleId,
-        target_date: targetDate,
-      });
+    const currentDutyObj = dutiesToDisplay.find((d: any) => d.id === selectedDuty);
 
-      toast.success(`Електронну путівку для наряду №${currentSelectedDuty?.duty_number || selectedDutyId} успішно відкрито!`);
-      setDriverId('');
-      setVehicleId('');
-      setSelectedDutyId(null);
-    } catch (error) {
-      toast.error('Помилка формування електронної путівки. Перевірте журнал.');
-    }
+    assignMutation.mutate(
+      {
+        duty_id: selectedDuty,
+        vehicle_id: vehicleId.trim(),
+        driver_id: driverName.trim(),
+        target_date: targetDate
+      },
+      {
+        onSuccess: (data: any) => {
+          toast.success(`Е-Путівку для наряду №${currentDutyObj?.number || selectedDuty} (борт #${vehicleId}) створено та завантажено в Redis!`);
+          setSelectedDuty(null);
+          setVehicleId('');
+          setDriverName('');
+        },
+        onError: (err: any) => {
+          toast.error(`Помилка оформлення путівки: ${err?.message || 'Сервер не відповідає'}`);
+        }
+      }
+    );
+  };
+
+  // Перевіряємо, чи наряд уже виданий
+  const isAssigned = (dutyId: number) => {
+    return assignedWaybills?.some((w: any) => w.duty_id === dutyId);
+  };
+
+  const getAssignedInfo = (dutyId: number) => {
+    return assignedWaybills?.find((w: any) => w.duty_id === dutyId);
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-6 bg-slate-900 overflow-hidden font-sans text-slate-100">
+    <div className="p-8 max-w-6xl mx-auto h-full flex flex-col space-y-6 font-sans">
       
-      {/* Ліва панель: Список нарядів / Рознарядка */}
-      <div className="lg:w-5/12 bg-slate-800/80 border border-slate-700/80 rounded-2xl shadow-xl flex flex-col overflow-hidden backdrop-blur-md">
-        
-        {/* Заголовок панелі з вибором дати */}
-        <div className="p-4 border-b border-slate-700/80 bg-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="px-2 py-0.5 rounded-md bg-blue-600/30 text-blue-400 font-mono text-xs font-bold border border-blue-500/30">
-                ОМЕТ • РОЗНАРЯДКА
-              </span>
-              <h2 className="font-black text-sm text-white uppercase tracking-wider">
-                Наряди на дату
-              </h2>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Закрито: <strong className="text-emerald-400">{assignedCount}</strong> з <strong className="text-slate-200">{totalCount}</strong> нарядів
-            </p>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <input 
-              type="date" 
-              value={targetDate} 
-              onChange={(e) => setTargetDate(e.target.value)}
-              className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-500 font-mono font-bold"
-            />
-          </div>
+      {/* Шапка */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center">
+            <Users className="mr-3 text-blue-600 dark:text-blue-400" size={28} />
+            Щоденна Рознарядка (Видача Путівок)
+          </h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm">
+            Призначення рухомого складу та водіїв на статичні наряди з автоматичною синхронізацією телеметрії в Redis.
+          </p>
         </div>
-
-        {/* Фільтр маршрутів */}
-        <div className="px-4 py-2 bg-slate-850 border-b border-slate-700/60 flex items-center space-x-2 overflow-x-auto text-xs">
-          <Filter size={13} className="text-slate-400 shrink-0" />
-          <button
-            onClick={() => setFilterRoute('ALL')}
-            className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-              filterRoute === 'ALL'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-750'
-            }`}
-          >
-            Всі маршрути
-          </button>
-          {uniqueRoutes.map((r) => (
-            <button
-              key={r}
-              onClick={() => setFilterRoute(r)}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                filterRoute === r
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-750'
-              }`}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-
-        {/* Список нарядів */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
-          {isSchedulesLoading || isDeploymentsLoading ? (
-            <div className="flex flex-col items-center justify-center h-48 space-y-2">
-              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-xs text-slate-400 font-medium">Завантаження розкладів...</span>
-            </div>
-          ) : filteredDuties.length === 0 ? (
-            <div className="text-center text-slate-500 py-16 text-xs">
-              Нарядів для обраного фільтра не знайдено
-            </div>
-          ) : (
-            filteredDuties.map((duty) => {
-              const isSelected = selectedDutyId === duty.id;
-              
-              return (
-                <div 
-                  key={duty.id} 
-                  onClick={() => setSelectedDutyId(duty.id)}
-                  className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
-                    isSelected 
-                      ? 'border-blue-500 bg-blue-950/40 ring-1 ring-blue-500/50 shadow-md' 
-                      : 'border-slate-700/80 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2.5">
-                      <span className="px-2 py-0.5 bg-slate-900 text-blue-400 border border-slate-700 rounded font-mono font-black text-xs">
-                        {duty.route_id || 'Маршрут'}
-                      </span>
-                      <span className="font-extrabold text-sm text-white">
-                        {duty.duty_number}
-                      </span>
-                    </div>
-
-                    {duty.is_assigned ? (
-                      <span className="flex items-center space-x-1 text-[11px] px-2.5 py-0.5 bg-emerald-950/80 text-emerald-300 border border-emerald-800/70 rounded-full font-bold">
-                        <CheckCircle2 size={12} className="text-emerald-400" />
-                        <span>Закріплено</span>
-                      </span>
-                    ) : (
-                      <span className="text-[11px] px-2.5 py-0.5 bg-amber-950/80 text-amber-300 border border-amber-800/70 rounded-full font-bold">
-                        Вільний наряд
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-slate-400 mt-2.5 pt-2 border-t border-slate-700/50">
-                    <div className="flex items-center space-x-1.5 font-mono">
-                      <Clock size={13} className="text-slate-400" />
-                      <span>{duty.start_time} — {duty.end_time}</span>
-                    </div>
-
-                    {duty.is_assigned && duty.assigned_vehicle_id && (
-                      <div className="flex items-center space-x-1 text-slate-300 font-mono text-[11px]">
-                        <TramFront size={13} className="text-blue-400" />
-                        <span>Вагон <strong>#{duty.assigned_vehicle_id}</strong></span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
+        <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
+          <Calendar size={20} className="text-slate-500 dark:text-slate-400 mr-2" />
+          <input 
+            type="date" 
+            value={targetDate} 
+            onChange={(e) => setTargetDate(e.target.value)}
+            className="bg-transparent font-bold text-slate-700 dark:text-slate-200 outline-none text-sm cursor-pointer"
+          />
         </div>
       </div>
 
-      {/* Права панель: Призначення екіпажу та електронна путівка */}
-      <div className="lg:w-7/12 bg-slate-800/80 border border-slate-700/80 rounded-2xl shadow-xl p-6 flex flex-col justify-between backdrop-blur-md overflow-y-auto">
-        <div>
-          <div className="border-b border-slate-700/80 pb-4 mb-6 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <CalendarCheck size={22} />
-              </div>
-              <div>
-                <h2 className="text-lg font-black text-white">
-                  Формування електронної путівки
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Призначення водія та випуск рухомого складу на лінію
-                </p>
-              </div>
-            </div>
-
-            {currentSelectedDuty && (
-              <div className="text-right">
-                <span className="text-[11px] font-mono text-slate-400">Обраний наряд</span>
-                <div className="font-extrabold text-blue-400 text-sm">
-                  {currentSelectedDuty.duty_number} ({currentSelectedDuty.route_id})
-                </div>
-              </div>
-            )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
+        
+        {/* Ліва панель: Список нарядів на сьогодні */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col lg:col-span-2 overflow-hidden">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+            <h3 className="font-bold text-slate-800 dark:text-white text-sm">
+              Доступні наряди на {targetDate}
+            </h3>
+            <span className="text-xs font-mono font-bold bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 px-2.5 py-0.5 rounded">
+              Всього: {dutiesToDisplay.length}
+            </span>
           </div>
 
-          {!selectedDutyId ? (
-            <div className="flex flex-col items-center justify-center py-24 text-slate-400 text-center space-y-4">
-              <div className="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400">
-                <Layers size={32} />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-slate-200 text-sm">Оберіть наряд зі списку зліва</h3>
-                <p className="text-xs text-slate-400 max-w-sm mt-1">
-                  Виберіть потрібний вихід або рейс у лівій панелі, щоб призначити доступного водія та вагон на дату {targetDate}.
-                </p>
-              </div>
-            </div>
-          ) : isResourcesLoading ? (
-            <div className="flex flex-col items-center justify-center py-20 space-y-3">
-              <div className="w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-xs text-slate-400 font-medium">Отримання списку вільних водіїв та ТЗ...</span>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {isDutiesLoading ? (
+              <div className="text-center py-10 text-slate-400 text-sm">Завантаження нарядів...</div>
+            ) : dutiesToDisplay.map((duty: any) => {
+              const assigned = isAssigned(duty.id);
+              const assignedInfo = getAssignedInfo(duty.id);
+
+              return (
+                <div 
+                  key={duty.id} 
+                  className={`border rounded-xl p-4 flex justify-between items-center transition-all ${
+                    assigned 
+                      ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-75' 
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:shadow-sm cursor-pointer'
+                  } ${selectedDuty === duty.id ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50 dark:bg-blue-950/30' : ''}`}
+                  onClick={() => !assigned && setSelectedDuty(duty.id)}
+                >
+                  <div className="flex items-center">
+                    <div className={`p-2.5 rounded-xl mr-4 ${assigned ? 'bg-slate-200 dark:bg-slate-700 text-slate-500' : 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'}`}>
+                      <Link size={20} />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-800 dark:text-white text-base flex items-center gap-2">
+                        <span>Наряд №{duty.number}</span>
+                        <span className="text-xs px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded font-normal font-mono">
+                          Маршрут {duty.route}
+                        </span>
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+                        {duty.start} — {duty.end} {duty.trips_count ? `• ${duty.trips_count} рейсів` : ''}
+                      </p>
+                      {assigned && assignedInfo && (
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold mt-1">
+                          Борт: #{assignedInfo.vehicle_id} • Водій: {assignedInfo.driver_id}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {assigned ? (
+                    <span className="flex items-center text-emerald-700 dark:text-emerald-300 font-bold text-xs bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 px-3 py-1 rounded-full">
+                      <CheckCircle2 size={14} className="mr-1 text-emerald-600" /> В роботі
+                    </span>
+                  ) : (
+                    <span className="text-blue-600 dark:text-blue-400 font-bold text-xs bg-blue-50 dark:bg-blue-950/50 px-3 py-1 rounded-full border border-blue-200 dark:border-blue-800">
+                      Очікує призначення
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Права панель: Форма призначення */}
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-fit">
+          <h3 className="font-bold text-slate-800 dark:text-white mb-6 flex items-center border-b border-slate-100 dark:border-slate-800 pb-4 text-base">
+            <TramFront className="mr-2 text-emerald-600 dark:text-emerald-400" size={20} />
+            Оформлення Е-Путівки
+          </h3>
+
+          {!selectedDuty ? (
+            <div className="text-center py-10 text-slate-400">
+              <Users size={48} className="mx-auto mb-3 opacity-40 text-slate-400" />
+              <p className="text-sm">Оберіть вільний наряд зі списку ліворуч для оформлення путівки.</p>
             </div>
           ) : (
-            <form onSubmit={handleAssign} className="space-y-6 max-w-xl">
-              
-              {/* Попередження якщо наряд вже закріплений */}
-              {currentSelectedDuty?.is_assigned && (
-                <div className="p-3.5 bg-amber-950/40 border border-amber-800/60 rounded-xl flex items-center space-x-2.5 text-xs text-amber-300">
-                  <AlertCircle size={18} className="text-amber-400 shrink-0" />
-                  <span>
-                    Цей наряд уже закріплений. Повторне затвердження оновить електронну путівку.
-                  </span>
-                </div>
-              )}
-
-              {/* Вибір водія */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between">
-                  <span className="flex items-center">
-                    <Users className="mr-2 text-blue-400" size={16} /> 
-                    Водій з резервного списку депо
-                  </span>
-                  <span className="text-xs text-blue-400 font-mono">
-                    {resources?.drivers?.length || 0} вільних
-                  </span>
-                </label>
-                
-                <select 
-                  value={driverId} 
-                  onChange={(e) => setDriverId(Number(e.target.value))}
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  required
-                >
-                  <option value="" disabled>-- Оберіть доступного водія --</option>
-                  {resources?.drivers?.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.full_name} (Клас: {d.class_rank} • ID: {d.id})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400">
-                  Відображаються лише водії, які не мають призначених змін на {targetDate}.
-                </p>
+            <form onSubmit={handleAssign} className="space-y-5">
+              <div className="bg-blue-50 dark:bg-blue-950/40 p-3 rounded-xl border border-blue-200 dark:border-blue-800 mb-2">
+                <span className="text-xs text-blue-600 dark:text-blue-400 font-bold uppercase block mb-1">Вибрано наряд</span>
+                <span className="text-lg font-black text-blue-900 dark:text-blue-200 font-mono">
+                  № {dutiesToDisplay.find((d: any) => d.id === selectedDuty)?.number}
+                </span>
               </div>
 
-              {/* Вибір рухомого складу */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between">
-                  <span className="flex items-center">
-                    <TramFront className="mr-2 text-blue-400" size={16} /> 
-                    Рухомий склад (Бортовий номер вагона / тролейбуса)
-                  </span>
-                  <span className="text-xs text-blue-400 font-mono">
-                    {resources?.vehicles?.length || 0} доступних
-                  </span>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">
+                  Бортовий номер вагона
                 </label>
-                
-                <select 
+                <input 
+                  type="text" 
                   value={vehicleId} 
-                  onChange={(e) => setVehicleId(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  required
-                >
-                  <option value="" disabled>-- Оберіть бортовий номер --</option>
-                  {resources?.vehicles?.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      Борт № {v.id} — {v.model} ({v.type === 'tram' ? 'Трамвай' : v.type === 'trolleybus' ? 'Тролейбус' : 'Електробус'})
-                    </option>
-                  ))}
-                </select>
+                  onChange={e => setVehicleId(e.target.value)} 
+                  placeholder="Напр. 3014"
+                  className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold font-mono" 
+                  required 
+                />
               </div>
 
-              <div className="pt-4 border-t border-slate-700/80 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setSelectedDutyId(null)}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Скасувати
-                </button>
-
-                <button 
-                  type="submit" 
-                  disabled={assignMutation.isPending || !driverId || !vehicleId}
-                  className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black px-6 py-3 rounded-xl text-xs shadow-lg shadow-emerald-950/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <ShieldCheck size={16} />
-                  <span>{assignMutation.isPending ? 'Формування путівки...' : 'Затвердити та відкрити путівку'}</span>
-                </button>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">
+                  Табельний або ПІБ Водія
+                </label>
+                <input 
+                  type="text" 
+                  value={driverName} 
+                  onChange={e => setDriverName(e.target.value)} 
+                  placeholder="Напр. Сидоренко В.В."
+                  className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold" 
+                  required 
+                />
               </div>
+
+              <button 
+                type="submit" 
+                disabled={assignMutation.isPending}
+                className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center disabled:opacity-50 shadow-sm cursor-pointer text-sm"
+              >
+                {assignMutation.isPending ? 'Завантаження в Redis...' : 'Видати путівку на лінію'}
+              </button>
             </form>
           )}
         </div>
 
-        {/* Підвал з інструкцією */}
-        <div className="mt-8 pt-4 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center space-x-1.5">
-            <Sparkles size={14} className="text-blue-400" />
-            <span>Інтегровано з телеметрією та автоматичним формуванням змін КЗпП</span>
-          </div>
-          <span className="font-mono text-slate-400">КП «Одесміськелектротранс» • 2026</span>
-        </div>
       </div>
     </div>
   );

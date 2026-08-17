@@ -19,6 +19,7 @@ from app.api.schedules import router as new_schedules_router
 from app.api.auth import router as auth_router
 from app.api.analytics import router as analytics_router
 from app.api.depots import router as depots_router
+from app.api.waybills import router as waybills_router
 from app.services.realtime_fetcher import fetch_and_process_realtime_data
 from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
@@ -99,4 +100,7 @@ app.include_router(analytics_router, prefix="")
 app.include_router(depots_router, prefix="/api/v1")
 app.include_router(depots_router, prefix="/api")
 app.include_router(depots_router, prefix="")
+app.include_router(waybills_router, prefix="/api/v1")
+app.include_router(waybills_router, prefix="/api")
+app.include_router(waybills_router, prefix="")
 app.include_router(ws_router)

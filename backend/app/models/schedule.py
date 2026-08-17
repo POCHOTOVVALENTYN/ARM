@@ -87,3 +87,6 @@ class StaticStopTime(Base):
     is_break_location = Column(Boolean, default=False) # Флаг, якщо тут відбувається обід
 
     trip = relationship("StaticTrip", back_populates="stop_times")
+
+StaticSchedule = Schedule
+
