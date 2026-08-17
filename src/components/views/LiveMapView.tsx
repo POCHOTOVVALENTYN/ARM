@@ -142,7 +142,7 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
         {/* Leaflet Map Canvas */}
         <div className="lg:col-span-3 bg-white rounded-2xl border-2 border-slate-200 shadow-xl overflow-hidden relative min-h-[600px] flex flex-col">
           {/* Top Map Status Overlay */}
-          <div className="absolute top-4 left-4 z-[400] bg-white/95 backdrop-blur-sm px-3.5 py-2 rounded-2xl shadow-lg border border-slate-200 flex items-center space-x-2">
+          <div className="absolute top-4 left-4 z-[1000] bg-white/95 backdrop-blur-sm px-3.5 py-2 rounded-2xl shadow-lg border border-slate-200 flex items-center space-x-2">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></div>
             <span className="text-xs font-bold text-slate-900">
               {routeFilter === 'ALL' ? 'Загальна схема ліній' : `Маршрут №${routeFilter}`}
@@ -151,13 +151,13 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
 
           {/* Enterprise Logo Overlay if configured */}
           {enterpriseLogoUrl && (
-            <div className="absolute bottom-6 left-4 z-[400] bg-white/90 p-2 rounded-xl shadow border border-slate-200">
+            <div className="absolute bottom-6 left-4 z-[1000] bg-white/90 p-2 rounded-xl shadow border border-slate-200">
               <img src={enterpriseLogoUrl} alt="Логотип КП ОМЕТ" className="h-10 object-contain" />
             </div>
           )}
 
           {/* Telemetry Status Legend */}
-          <div className="absolute top-4 right-4 z-[400] bg-white/95 backdrop-blur-sm p-3 rounded-2xl shadow-xl border border-slate-200 text-xs pointer-events-none">
+          <div className="absolute top-4 right-4 z-[1000] bg-white/95 backdrop-blur-sm p-3 rounded-2xl shadow-xl border border-slate-200 text-xs pointer-events-none">
             <h4 className="font-extrabold text-slate-900 mb-2 uppercase tracking-wider text-[10px]">
               Статус відхилення від графіка
             </h4>

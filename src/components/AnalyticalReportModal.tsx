@@ -40,7 +40,7 @@ export const AnalyticalReportModal: React.FC<AnalyticalReportModalProps> = ({ is
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/70 z-[500] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity font-sans">
+    <div className="fixed inset-0 bg-slate-900/70 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity font-sans">
       <div className="bg-slate-50 dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200 dark:border-slate-800">
         
         {/* Шапка модального вікна */}

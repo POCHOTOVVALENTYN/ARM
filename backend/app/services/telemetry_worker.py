@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+import pytz
 
 from sqlalchemy import insert
 from app.core.redis import get_redis
@@ -14,20 +15,28 @@ from app.models.models import IncidentLog, EtaLog
 
 logger = logging.getLogger(__name__)
 
-STOP_RADIUS_METERS = 50.0  # Радіус захоплення зупинки (метри)
+# Збільшено до 75 метрів для страховки від "сліпих зон" 10-секундного пінгу
+STOP_RADIUS_METERS = 75.0 
 CRITICAL_DELAY_MINUTES = 5.0  # Поріг для автоматичного створення інциденту (хвилини)
+
+def get_kyiv_current_minute() -> float:
+    """Отримує час за Києвом для порівняння з розкладом КП ОМЕТ."""
+    tz = pytz.timezone("Europe/Kyiv")
+    now = datetime.now(tz)
+    return float(now.hour * 60 + now.minute + now.second / 60.0)
 
 async def check_and_trigger_incident(redis, vehicle: dict):
     """
-    Перевіряє відхилення та створює інцидент у PostgreSQL без спаму,
-    використовуючи Redis як тимчасовий Lock-менеджер.
-    Якщо ТЗ в оперативному об'їзді (DETOUR) — інциденти запізнення не генеруються.
+    Генерує інцидент при критичному запізненні. 
+    Ігнорує транспортні засоби, які знаходяться на оперативному перемиканні (DETOUR).
     """
+    # Захист від хибних спрацювань під час об'їзду
+    if vehicle.get("status") == "DETOUR":
+        return
+
     vid = vehicle["vehicle_id"]
-    
-    # 0. Якщо ТЗ на об'їзді (DETOUR) — пропускаємо
     is_detour = await redis.exists(f"active_detour:{vid}")
-    if is_detour or vehicle.get("status") == "DETOUR":
+    if is_detour:
         return
 
     dev = vehicle.get("deviation_min", 0.0)
@@ -42,7 +51,7 @@ async def check_and_trigger_incident(redis, vehicle: dict):
                 async with async_session_maker() as db:
                     new_incident = IncidentLog(
                         vehicle_id=vid,
-                        route_id=vehicle.get("route_id"),
+                        route_id=vehicle.get("route_id") or "UNKNOWN",
                         description=f"Автоматична фіксація: критичне запізнення на {dev} хв.",
                         status="NEW",
                         source="SYSTEM"
@@ -87,16 +96,10 @@ ODESSA_SAMPLE_VEHICLES = [
     {"vehicle_id": "9901", "route_id": "7", "lat": 46.4678, "lng": 30.7334, "speed": 0.0, "status": "depot", "heading": 0},
 ]
 
-def get_current_minute() -> float:
-    """Повертає поточний час у хвилинах від опівночі за київським часом."""
-    now = datetime.now()
-    return float(now.hour * 60 + now.minute + now.second / 60.0)
-
 async def fetch_wialon_data() -> List[Dict[str, Any]]:
     """
     Отримує телеметрію від сервісу Wialon або емулює переміщення активних вагонів КП «ОМЕТ».
     """
-    # Емуляція плавного руху по місту для демонстрації
     now_ms = int(datetime.now().timestamp() * 1000)
     current_time_sec = datetime.now().timestamp()
 
@@ -156,86 +159,107 @@ async def cache_active_schedule_in_redis(schedule: Schedule):
     except Exception as e:
         logger.error(f"Помилка кешування розкладу в Redis: {e}")
 
-async def process_deviations(redis, raw_telemetry: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def process_deviations(redis, raw_telemetry: list[dict]) -> list[dict]:
     """
     Аналізує координати за формулою Гаверсина, розраховує відхилення (Schedule Adherence)
-    та формує пакетний запис у eta_logs при проходженні контрольних зупинок.
+    з алгоритмом анти-дрифту (State Machine) та фіксує пакетний запис у eta_logs в UTC.
     """
     processed_telemetry = []
     eta_logs_buffer = []
-    current_minute = get_current_minute()
+    
+    current_minute = get_kyiv_current_minute()
+    utc_now = datetime.now(timezone.utc)  # Формуємо точну UTC мітку для БД
 
     for vehicle in raw_telemetry:
         vid = vehicle["vehicle_id"]
         v_lat, v_lng = vehicle["lat"], vehicle["lng"]
         route_id = vehicle.get("route_id")
-        vehicle["deviation_min"] = 0.0
 
-        # Перевірка чи ТЗ в оперативному перемиканні/об'їзді (DETOUR)
-        is_detour = await redis.exists(f"active_detour:{vid}")
-        if is_detour or vehicle.get("status") == "DETOUR":
-            vehicle["status"] = "DETOUR"
-            vehicle["deviation_min"] = 0.0
-            processed_telemetry.append(vehicle)
-            continue
-
-        # 1. Отримуємо попередній стан вагона з Redis
+        # 1. Завантаження попереднього стану з Redis
         prev_state_raw = await redis.hget("telemetry:vehicles", vid)
-        target_stop_idx = 0
         if prev_state_raw:
             try:
                 prev_state = json.loads(prev_state_raw)
                 vehicle["deviation_min"] = prev_state.get("deviation_min", 0.0)
                 target_stop_idx = prev_state.get("target_stop_idx", 0)
+                is_at_stop = prev_state.get("is_at_stop", False)
+                status = prev_state.get("status", "ON_ROUTE")
             except Exception:
-                pass
+                vehicle["deviation_min"] = 0.0
+                target_stop_idx = 0
+                is_at_stop = False
+                status = "ON_ROUTE"
+        else:
+            vehicle["deviation_min"] = 0.0
+            target_stop_idx = 0
+            is_at_stop = False
+            status = "ON_ROUTE"
 
-        # 2. Отримуємо закешований розклад для цього вагона
+        # Перевірка оперативного об'їзду (DETOUR)
+        is_detour = await redis.exists(f"active_detour:{vid}")
+        if is_detour or vehicle.get("status") == "DETOUR":
+            status = "DETOUR"
+
+        # Ініціалізація внутрішнього стану для поточного кроку
+        vehicle["target_stop_idx"] = target_stop_idx
+        vehicle["is_at_stop"] = is_at_stop
+        vehicle["status"] = status
+
+        # 2. Якщо ТЗ в об'їзді або в депо/на перерві - припиняємо математику розкладів
+        if status != "ON_ROUTE" and status != "active":
+            processed_telemetry.append(vehicle)
+            continue
+
+        # 3. Аналіз розкладу
         sched_cache_raw = await redis.get(f"schedule_cache:vehicle:{vid}")
         if not sched_cache_raw:
             processed_telemetry.append(vehicle)
             continue
-
+            
         try:
             sched_data = json.loads(sched_cache_raw)
             stops = sched_data.get("stops", [])
 
-            # 3. Перевірка прибуття на цільову зупинку
             if target_stop_idx < len(stops):
                 target_stop = stops[target_stop_idx]
                 dist = calculate_distance(v_lat, v_lng, target_stop["lat"], target_stop["lng"])
-
-                # Якщо вагон увійшов у радіус зупинки (<= 50 метрів)
-                if dist <= STOP_RADIUS_METERS:
-                    # Рахуємо відхилення: Фактичний час мінус Плановий
+                
+                # --- ЛОГІКА АНТИ-ДРИФТУ (State Machine) ---
+                
+                # А. Вагон щойно УВІЙШОВ у зону зупинки
+                if dist <= STOP_RADIUS_METERS and not is_at_stop:
                     deviation = current_minute - target_stop["arrival_minute"]
                     vehicle["deviation_min"] = round(deviation, 1)
-                    vehicle["target_stop_idx"] = target_stop_idx + 1
+                    vehicle["is_at_stop"] = True  # Блокуємо стан: "Ми на зупинці"
                     
-                    # Формуємо запис для збереження в PostgreSQL (eta_logs)
+                    # Додаємо запис у буфер для БД
                     eta_logs_buffer.append({
                         "vehicle_id": vid,
-                        "route_id": route_id or vehicle.get("route_id", "UNKNOWN"),
+                        "route_id": route_id or "UNKNOWN",
                         "stop_id": target_stop["stop_id"],
                         "trip_id": target_stop.get("trip_id"),
-                        "deviation_min": round(deviation, 1),
-                        "recorded_at": datetime.utcnow()
+                        "deviation_min": vehicle["deviation_min"],
+                        "recorded_at": utc_now
                     })
-                    logger.info(f"🚊 ТЗ {vid} прибув на зупинку {target_stop['stop_id']}. Відхилення: {deviation:+.1f} хв.")
-                else:
-                    vehicle["target_stop_idx"] = target_stop_idx
+                    logger.debug(f"ТЗ {vid} прибув на {target_stop['stop_id']}. Відхилення: {vehicle['deviation_min']} хв.")
+
+                # Б. Вагон ПОКИНУВ зону зупинки
+                elif dist > STOP_RADIUS_METERS and is_at_stop:
+                    vehicle["is_at_stop"] = False
+                    vehicle["target_stop_idx"] = target_stop_idx + 1  # Перемикаємо ціль на наступну
+                    logger.debug(f"ТЗ {vid} покинув зупинку {target_stop['stop_id']}.")
         except Exception as e:
-            logger.debug(f"Помилка розрахунку зупинки для {vid}: {e}")
+            logger.debug(f"Помилка аналізу розкладу для {vid}: {e}")
 
         processed_telemetry.append(vehicle)
 
-    # 4. Пакетний запис у PostgreSQL (Bulk Insert)
+    # 4. Батч-запис у PostgreSQL
     if eta_logs_buffer:
         try:
             async with async_session_maker() as db:
                 await db.execute(insert(EtaLog).values(eta_logs_buffer))
                 await db.commit()
-                logger.debug(f"💾 [ETA_LOGS] Пакетно збережено {len(eta_logs_buffer)} записів до PostgreSQL.")
+                logger.debug(f"💾 [ETA_LOGS] Збережено {len(eta_logs_buffer)} записів в UTC")
         except Exception as e:
             logger.error(f"Помилка запису в eta_logs: {e}")
 
@@ -245,7 +269,7 @@ async def telemetry_polling_loop():
     """
     Нескінченний цикл опитування телеметрії, розрахунку відхилень та розсилки по WebSocket.
     """
-    logger.info("📡 Запущено фоновий збір телеметрії Wialon / GPS (інтервал: 10с)")
+    logger.info("📡 Запущено фоновий збір телеметрії Wialon / GPS (інтервал: 10с, радіус: 75м)")
     
     while True:
         try:

@@ -1,6 +1,8 @@
 # backend/app/models/models.py
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy.sql import func
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -22,15 +24,13 @@ class Trip(Base):
     vehicle_id = Column(String)
     status = Column(String)
 
-from datetime import datetime
-
 class IncidentLog(Base):
     __tablename__ = "incident_logs"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     incident_id = Column(String, nullable=True)
-    vehicle_id = Column(String, nullable=True)
-    route_id = Column(String, nullable=True)
-    description = Column(String, nullable=True)
+    vehicle_id = Column(String, index=True, nullable=False)
+    route_id = Column(String, index=True, nullable=False)
+    description = Column(String, nullable=False)
     status = Column(String, default="NEW", nullable=True)
     source = Column(String, default="SYSTEM", nullable=True)
     trip_id = Column(String, nullable=True)
@@ -39,8 +39,8 @@ class IncidentLog(Base):
     action = Column(String, nullable=True)
     reason = Column(String, nullable=True)
     resolution_notes = Column(String, nullable=True)
-    recorded_at = Column(DateTime, default=datetime.utcnow, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=True)
+    recorded_at = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), index=True)
+    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), nullable=True)
 
 class RouteModel(Base):
     __tablename__ = "routes"
@@ -116,18 +116,18 @@ class EtaLog(Base):
     __tablename__ = "eta_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    vehicle_id = Column(String, index=True, nullable=True)
-    route_id = Column(String, index=True, nullable=True)
-    stop_id = Column(String, index=True, nullable=True)
-    deviation_min = Column(Float, nullable=True, default=0.0)
-    recorded_at = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    vehicle_id = Column(String, index=True, nullable=False)
+    route_id = Column(String, index=True, nullable=False)
+    stop_id = Column(String, index=True, nullable=False)
+    deviation_min = Column(Float, nullable=False, default=0.0)
+    recorded_at = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), index=True)
     
     # Сумісність із ControlPointEtaModel
     trip_id = Column(String, index=True, nullable=True)
     station_id = Column(String, nullable=True)
-    estimated_arrival_time = Column(DateTime, nullable=True)
-    actual_arrival_time = Column(DateTime, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=True)
+    estimated_arrival_time = Column(DateTime(timezone=True), nullable=True)
+    actual_arrival_time = Column(DateTime(timezone=True), nullable=True)
+    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), nullable=True)
 
 ControlPointEtaModel = EtaLog
 
