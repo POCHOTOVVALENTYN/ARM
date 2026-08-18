@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useScheduleStore } from '../../store/useScheduleStore';
+import { useScheduleStore, ODESSA_DEFAULT_ROUTES } from '../../store/useScheduleStore';
 import { useRouteStore } from '../../store/useRouteStore';
 import { 
   Bus, 
@@ -12,7 +12,8 @@ import {
   X,
   Save,
   Check,
-  GripVertical
+  GripVertical,
+  ChevronDown
 } from 'lucide-react';
 import {
   DndContext,
@@ -24,13 +25,13 @@ import {
   DragEndEvent
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { toast } from 'sonner';
 
 interface SortableRowProps {
   block: any;
@@ -83,23 +84,23 @@ const SortableRow: React.FC<SortableRowProps> = ({
             {block.id}
           </span>
           <span className="font-extrabold text-slate-900 text-sm">
-            {block.routeId}
+            №{block.routeId}
           </span>
         </div>
       </td>
       <td className="p-3">
         {isArchiveMode ? (
-          <span className="text-sm font-bold text-slate-700">{getScheduleTypeName(block.scheduleType || 'single')}</span>
+          <span className="text-sm font-bold text-slate-700">{getScheduleTypeName(block.scheduleType || 'double')}</span>
         ) : (
           <select
-            value={block.scheduleType || 'single'}
+            value={block.scheduleType || 'double'}
             onChange={(e) => handleUpdateField(block.id, 'scheduleType', e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer"
           >
-            <option value="single">Однозмінний</option>
-            <option value="double">Двохзмінний</option>
-            <option value="split">Розривний</option>
-            <option value="peak">Піковий</option>
+            <option value="double">Двозмінний (DOUBLE)</option>
+            <option value="single">Однозмінний (SINGLE)</option>
+            <option value="split">Розривний (SPLIT з ТО)</option>
+            <option value="peak">Піковий (PEAK)</option>
           </select>
         )}
       </td>
@@ -110,9 +111,9 @@ const SortableRow: React.FC<SortableRowProps> = ({
           <input
             type="text"
             value={block.vehicleNumber || ''}
-            placeholder="Напр. T3 №4020"
+            placeholder="Борт (напр. 4020)"
             onChange={(e) => handleUpdateField(block.id, 'vehicleNumber', e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none placeholder:font-normal"
+            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono"
           />
         )}
       </td>
@@ -125,11 +126,11 @@ const SortableRow: React.FC<SortableRowProps> = ({
           <select
             value={block.depotId || 'depot_tram_1'}
             onChange={(e) => handleUpdateField(block.id, 'depotId', e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer"
           >
-            <option value="depot_tram_1">Трам. Депо №1</option>
-            <option value="depot_tram_2">Трам. Депо №2</option>
-            <option value="depot_trolley_1">Трол. Депо</option>
+            <option value="depot_tram_1">Трамвайне депо №1</option>
+            <option value="depot_tram_2">Трамвайне депо №2</option>
+            <option value="depot_trolley_1">Тролейбусне депо</option>
           </select>
         )}
       </td>
@@ -139,7 +140,7 @@ const SortableRow: React.FC<SortableRowProps> = ({
         ) : (
           <input
             type="time"
-            value={block.depotExitTime || ''}
+            value={block.depotExitTime || '05:30'}
             onChange={(e) => handleUpdateField(block.id, 'depotExitTime', e.target.value)}
             className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
           />
@@ -151,7 +152,7 @@ const SortableRow: React.FC<SortableRowProps> = ({
         ) : (
           <input
             type="time"
-            value={block.depotReturnTime || ''}
+            value={block.depotReturnTime || '23:00'}
             onChange={(e) => handleUpdateField(block.id, 'depotReturnTime', e.target.value)}
             className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono font-bold text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
           />
@@ -161,18 +162,15 @@ const SortableRow: React.FC<SortableRowProps> = ({
         <div className="flex items-center justify-center space-x-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => setViewTripsBlockId(block.id)}
-            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
             title="Порейсний розклад"
           >
             <ListOrdered className="w-4 h-4" />
           </button>
           {!isArchiveMode && (
             <button
-              onClick={() => {
-                
-                  requestDeleteVehicleBlock(block.id);
-              }}
-              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+              onClick={() => requestDeleteVehicleBlock(block.id)}
+              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
               title="Видалити"
             >
               <Trash className="w-4 h-4" />
@@ -185,7 +183,12 @@ const SortableRow: React.FC<SortableRowProps> = ({
 };
 
 export const DutyBuilderView: React.FC = () => {
-  const { routes } = useRouteStore();
+  const storeRoutes = useRouteStore(state => state.routes);
+  const scheduleRoutes = useScheduleStore(state => state.routes);
+  const routes = (storeRoutes && storeRoutes.length > 0) 
+    ? storeRoutes 
+    : ((scheduleRoutes && scheduleRoutes.length > 0) ? scheduleRoutes : ODESSA_DEFAULT_ROUTES);
+
   const { 
     draftBlocks, 
     updateVehicleBlockInfo, 
@@ -193,6 +196,8 @@ export const DutyBuilderView: React.FC = () => {
     deleteVehicleBlock,
     clearVehicleBlocks,
     reorderVehicleBlocks,
+    commitDraft,
+    isDraftModified,
     selectedDate,
     setSelectedDate
   } = useScheduleStore();
@@ -220,11 +225,10 @@ export const DutyBuilderView: React.FC = () => {
     });
   };
 
-  
   // Generation Modal
   const [isGenModalOpen, setIsGenModalOpen] = useState(false);
-  const [genRoute, setGenRoute] = useState<string>('');
-  const [genCount, setGenCount] = useState<number>(1);
+  const [genRoute, setGenRoute] = useState<string>('18');
+  const [genCount, setGenCount] = useState<number>(8);
 
   // View Trips Modal
   const [viewTripsBlockId, setViewTripsBlockId] = useState<string | null>(null);
@@ -243,18 +247,10 @@ export const DutyBuilderView: React.FC = () => {
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    
     if (over && active.id !== over.id) {
       reorderVehicleBlocks(active.id as string, over.id as string);
     }
   };
-
-  // Set default route for generation
-  useEffect(() => {
-    if (routes.length > 0 && !genRoute) {
-      setGenRoute(routes[0].id);
-    }
-  }, [routes, genRoute]);
 
   const blocksForDate = draftBlocks.filter(b => b.date === selectedDate || (!b.date && selectedDate === today));
 
@@ -270,22 +266,28 @@ export const DutyBuilderView: React.FC = () => {
   const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
     if (genCount < 1 || genCount > 50) return;
-    const r = routes.find(rt => rt.id === genRoute);
+    const r = routes.find(rt => String(rt.id) === String(genRoute)) || routes[0];
     if (!r) return;
     
-    generateMultipleBlocks(r.id, r.type, genCount, selectedDate);
+    generateMultipleBlocks(String(r.id), r.type as any, genCount, selectedDate);
     setIsGenModalOpen(false);
-    setRouteFilter(r.id); // Switch to the generated route
+    setRouteFilter(String(r.id));
+    toast.success(`Згенеровано ${genCount} нарядів для маршруту №${r.number || r.id}`);
   };
 
   const handleUpdateField = (blockId: string, field: string, value: string) => {
     updateVehicleBlockInfo(blockId, { [field]: value });
   };
 
+  const handleSaveDraft = () => {
+    commitDraft();
+    toast.success('Наряди успішно зафіксовано в системі!');
+  };
+
   const getScheduleTypeName = (type: string) => {
     switch(type) {
       case 'single': return 'Однозмінний';
-      case 'double': return 'Двохзмінний';
+      case 'double': return 'Двозмінний';
       case 'split': return 'Розривний';
       case 'peak': return 'Піковий';
       default: return type;
@@ -295,38 +297,43 @@ export const DutyBuilderView: React.FC = () => {
   const selectedTripsBlock = draftBlocks.find(b => b.id === viewTripsBlockId);
 
   return (
-    <div className="h-full flex flex-col space-y-6">
+    <div className="h-full flex flex-col space-y-6 font-sans">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-900 tracking-tight flex items-center space-x-2">
             <Bus className="w-7 h-7 text-blue-600" />
-            <span>Конструктор нарядів</span>
+            <span>Конструктор нарядів (Duty Master)</span>
           </h2>
-          <p className="text-sm font-medium text-slate-500 mt-1">
-            Масове створення та управління нарядами вагонів
+          <p className="text-xs font-medium text-slate-500 mt-1">
+            Масове формування нарядів, закріплення типів змін (SINGLE, DOUBLE, PEAK, SPLIT) та номерів вагонів
           </p>
         </div>
 
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center space-x-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs">
             <Calendar className="w-4 h-4 text-slate-500" />
             <input 
               type="date" 
               value={selectedDate}
-              min={today}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent border-none text-sm font-bold text-slate-700 focus:outline-none cursor-pointer"
+              className="bg-transparent border-none text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
             />
           </div>
-          {isArchiveMode ? (
-            <div className="bg-amber-100 text-amber-800 font-extrabold text-xs px-4 py-2.5 rounded-xl border border-amber-200 flex items-center space-x-2">
-              <Clock className="w-4 h-4" />
-              <span>Режим Архіву</span>
-            </div>
-          ) : (
+
+          {isDraftModified && (
+            <button
+              onClick={handleSaveDraft}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow-xs flex items-center space-x-1.5 cursor-pointer transition-all"
+            >
+              <Save className="w-4 h-4" />
+              <span>Зберегти наряди</span>
+            </button>
+          )}
+
+          {!isArchiveMode && (
             <button
               onClick={() => setIsGenModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl border border-blue-700 shadow-xs flex items-center space-x-2 cursor-pointer transition-all hover:scale-105"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-xs flex items-center space-x-2 cursor-pointer transition-all hover:scale-105"
             >
               <Plus className="w-4 h-4" />
               <span>Створити Наряди</span>
@@ -339,34 +346,37 @@ export const DutyBuilderView: React.FC = () => {
         {/* Table Toolbar */}
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center space-x-3 w-full sm:w-auto">
-            <select
-              value={routeFilter}
-              onChange={(e) => setRouteFilter(e.target.value)}
-              className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="all">Всі маршрути</option>
-              {routes.map(r => {
-                const count = blocksForDate.filter(b => b.routeId === r.id).length;
-                return (
-                  <option key={r.id} value={r.id}>
-                    Маршрут №{r.id} ({count})
-                  </option>
-                );
-              })}
-            </select>
+            <div className="relative">
+              <select
+                value={routeFilter}
+                onChange={(e) => setRouteFilter(e.target.value)}
+                className="appearance-none bg-white border border-slate-300 rounded-xl pl-3 pr-8 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+              >
+                <option value="all">Всі маршрути ({routes.length})</option>
+                {routes.map(r => {
+                  const count = blocksForDate.filter(b => String(b.routeId) === String(r.id)).length;
+                  return (
+                    <option key={r.id} value={r.id}>
+                      {r.type === 'trolleybus' ? 'Тролейбус' : 'Трамвай'} №{r.number || r.id} ({count} нар.)
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
             
             <input
               type="text"
-              placeholder="Пошук (ID, Вагон)..."
+              placeholder="Пошук (ID, Борт, Маршрут)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
 
           <div className="flex items-center space-x-3">
             <span className="text-xs font-mono font-extrabold bg-blue-50 text-blue-700 px-3 py-1 rounded-lg border border-blue-200">
-              {filteredBlocks.length} записів
+              {filteredBlocks.length} нарядів
             </span>
             {!isArchiveMode && filteredBlocks.length > 0 && (
               <button
@@ -375,7 +385,7 @@ export const DutyBuilderView: React.FC = () => {
                     clearVehicleBlocks(filteredBlocks.map(b => b.id));
                   });
                 }}
-                className="text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1 transition-colors"
+                className="text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Очистити список</span>
@@ -387,14 +397,14 @@ export const DutyBuilderView: React.FC = () => {
         {/* Data Table */}
         <div className="flex-1 overflow-auto">
           <table className="w-full text-left border-collapse">
-            <thead className="bg-slate-100 sticky top-0 z-10 shadow-sm text-xs uppercase tracking-wider font-extrabold text-slate-500">
+            <thead className="bg-slate-100 sticky top-0 z-10 shadow-sm text-[11px] uppercase tracking-wider font-extrabold text-slate-600">
               <tr>
-                <th className="p-3 border-b border-slate-200">ID Наряду</th>
+                <th className="p-3 border-b border-slate-200">ID Наряду / Маршрут</th>
                 <th className="p-3 border-b border-slate-200">Тип Графіку</th>
-                <th className="p-3 border-b border-slate-200">Вагон / Модель</th>
-                <th className="p-3 border-b border-slate-200">Депо</th>
-                <th className="p-3 border-b border-slate-200">Виїзд</th>
-                <th className="p-3 border-b border-slate-200">Заїзд</th>
+                <th className="p-3 border-b border-slate-200">Бортовий номер вагона</th>
+                <th className="p-3 border-b border-slate-200">Депо випуску</th>
+                <th className="p-3 border-b border-slate-200">Виїзд на лінію</th>
+                <th className="p-3 border-b border-slate-200">Заїзд у депо</th>
                 <th className="p-3 border-b border-slate-200 text-center">Дії</th>
               </tr>
             </thead>
@@ -410,8 +420,9 @@ export const DutyBuilderView: React.FC = () => {
                 >
                   {filteredBlocks.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">
-                        Немає нарядів для відображення. {isArchiveMode ? '' : 'Створіть нові наряди.'}
+                      <td colSpan={7} className="p-10 text-center text-slate-400 font-medium">
+                        <p className="text-sm font-bold text-slate-600 mb-1">На обрану дату ({selectedDate}) наряди ще не створено.</p>
+                        <p className="text-xs text-slate-400">Натисніть кнопку «Створити Наряди» вгорі для генерації випуску.</p>
                       </td>
                     </tr>
                   ) : (
@@ -436,13 +447,13 @@ export const DutyBuilderView: React.FC = () => {
 
       {/* Generation Modal */}
       {isGenModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-extrabold text-slate-800 text-lg">Масове створення нарядів</h3>
+              <h3 className="font-extrabold text-slate-800 text-base">Масове створення нарядів</h3>
               <button 
                 onClick={() => setIsGenModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 p-1.5 rounded-lg transition-colors"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -450,50 +461,49 @@ export const DutyBuilderView: React.FC = () => {
             
             <form onSubmit={handleGenerate} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Оберіть маршрут:</label>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Оберіть маршрут:</label>
                 <select
                   value={genRoute}
                   onChange={(e) => setGenRoute(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer"
                   required
                 >
-                  <option value="" disabled>Оберіть зі списку...</option>
                   {routes.map(r => (
                     <option key={r.id} value={r.id}>
-                      Маршрут №{r.id} ({r.type === 'tram' ? 'Трамвай' : 'Тролейбус'})
+                      {r.type === 'trolleybus' ? 'Тролейбус' : 'Трамвай'} №{r.number || r.id} — {r.name}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Кількість нарядів:</label>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Кількість нарядів:</label>
                 <input
                   type="number"
                   min="1"
                   max="50"
                   value={genCount}
                   onChange={(e) => setGenCount(parseInt(e.target.value) || 1)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono font-bold text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
                   required
                 />
-                <p className="text-xs text-slate-500 mt-1 font-medium">Буде створено порожніх блоків для заповнення у таблиці.</p>
+                <p className="text-[11px] text-slate-500 mt-1">Буде згенеровано блоки B_{genRoute}_1 .. B_{genRoute}_{genCount} для заповнення.</p>
               </div>
 
               <div className="pt-4 flex justify-end space-x-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsGenModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Скасувати
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl shadow-xs transition-colors flex items-center space-x-2"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center space-x-2 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Згенерувати</span>
+                  <span>Створити</span>
                 </button>
               </div>
             </form>
@@ -503,16 +513,16 @@ export const DutyBuilderView: React.FC = () => {
 
       {/* Trips Modal */}
       {viewTripsBlockId && selectedTripsBlock && (
-        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-              <h3 className="font-extrabold text-slate-800 text-lg flex items-center space-x-2">
+              <h3 className="font-extrabold text-slate-800 text-base flex items-center space-x-2">
                 <ListOrdered className="w-5 h-5 text-blue-600" />
-                <span>Розклад: {selectedTripsBlock.id}</span>
+                <span>Розклад наряду: {selectedTripsBlock.id} (Маршрут №{selectedTripsBlock.routeId})</span>
               </h3>
               <button 
                 onClick={() => setViewTripsBlockId(null)}
-                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 p-1.5 rounded-lg transition-colors"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -520,20 +530,20 @@ export const DutyBuilderView: React.FC = () => {
             
             <div className="p-6 overflow-auto bg-slate-50/50">
               {selectedTripsBlock.trips.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 font-medium border-2 border-dashed border-slate-200 rounded-xl">
+                <div className="text-center py-8 text-slate-400 font-medium border-2 border-dashed border-slate-200 rounded-xl text-xs">
                   Порейсний розклад для цього наряду ще не згенеровано або порожній.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {selectedTripsBlock.trips.map((trip) => (
-                    <div key={trip.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between hover:border-blue-300 transition-colors">
+                  {selectedTripsBlock.trips.map((trip: any) => (
+                    <div key={trip.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
                       <div className="flex flex-col">
                         <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-0.5">
                           {trip.direction === 1 ? 'Прямий' : 'Зворотній'}
                         </span>
-                        <span className="font-bold text-slate-800 text-sm">{trip.startStationId} → {trip.endStationId}</span>
+                        <span className="font-bold text-slate-800 text-xs">{trip.startStationId} → {trip.endStationId}</span>
                       </div>
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-3 text-xs">
                         <div className="flex flex-col items-end">
                           <span className="text-[10px] font-bold text-slate-400">Відправлення</span>
                           <span className="font-mono font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{trip.departureTime}</span>
@@ -555,32 +565,30 @@ export const DutyBuilderView: React.FC = () => {
 
       {/* Confirm Dialog */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#2D334A] rounded-xl shadow-2xl w-full max-w-md border border-slate-700 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-6">
-              <h3 className="font-extrabold text-white text-xl mb-3">
-                {confirmDialog.title}
-              </h3>
-              <p className="text-slate-300 text-sm mb-8">
-                {confirmDialog.message}
-              </p>
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-                  className="px-5 py-2.5 bg-[#3B425C] hover:bg-[#464E6C] text-slate-200 font-bold rounded-lg transition-colors text-sm"
-                >
-                  Отмена
-                </button>
-                <button
-                  onClick={() => {
-                    confirmDialog.onConfirm();
-                    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-                  }}
-                  className="px-6 py-2.5 bg-[#5B3DF5] hover:bg-[#6D52F6] text-white font-extrabold rounded-lg shadow-xs transition-colors text-sm"
-                >
-                  ОК
-                </button>
-              </div>
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
+            <h3 className="font-extrabold text-slate-900 text-lg">
+              {confirmDialog.title}
+            </h3>
+            <p className="text-slate-600 text-xs">
+              {confirmDialog.message}
+            </p>
+            <div className="flex justify-end space-x-2 pt-2">
+              <button
+                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Скасувати
+              </button>
+              <button
+                onClick={() => {
+                  confirmDialog.onConfirm();
+                  setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl shadow-xs transition-colors text-xs cursor-pointer"
+              >
+                Видалити
+              </button>
             </div>
           </div>
         </div>
@@ -588,3 +596,5 @@ export const DutyBuilderView: React.FC = () => {
     </div>
   );
 };
+
+export default DutyBuilderView;

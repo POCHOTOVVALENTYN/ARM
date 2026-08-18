@@ -187,11 +187,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       items: [
         { label: 'Графік Марея (D3 / Canvas)', path: '/dispatch/marey', icon: Activity },
         { label: 'Діаграма Ґантта Змін', path: '/dispatch/gantt', icon: Clock },
-        { label: 'Менеджер Відтяжок (Slack)', path: '/dispatch/slack', icon: Zap },
-        { label: 'Оперативні розклади', path: '/dispatch/generator', icon: RefreshCw },
+        { label: 'Конструктор графіків (Оперативні розклади)', path: '/dispatch/generator', icon: RefreshCw },
         { label: 'Карта Руху (Live Map)', path: '/dispatch/map', icon: MapPin },
+        { label: 'Менеджер Відтяжок (Slack)', path: '/dispatch/slack', icon: Zap },
         { label: 'Майстер Гарячого Резерву', path: '/dispatch/hot-reserve', icon: Zap },
-        { label: 'Бібліотека Об\'їздів', path: '/dispatch/detours', icon: ShieldAlert },
+        { label: 'Оперативні перемикання (Об\'їзди)', path: '/dispatch/detours', icon: ShieldAlert },
       ],
     },
     {
@@ -199,7 +199,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Layers,
       items: [
         { label: 'Конструктор Нарядів', path: '/planning/duties', icon: Bus },
-        { label: 'Сітка статичних нарядів', path: '/planning/trips', icon: TableIcon },
+        { label: 'Сітка статичних нарядів (Сітка рейсів)', path: '/planning/trips', icon: TableIcon },
         { label: 'Валідатор КЗпП та Вузлів', path: '/planning/validate', icon: ShieldAlert },
         { label: 'Карта Симуляції GTFS (Leaflet)', path: '/planning/simulation', icon: Radio },
         { label: 'Архів Нарядів (Archive)', path: '/planning/archive', icon: Archive },
@@ -221,8 +221,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Users,
       items: [
         { label: 'Табель та Книжки Водіїв', path: '/crew/roster', icon: Users },
-        { label: 'Призначення Екіпажів', path: '/crew/assignment', icon: UserCheck },
-        { label: 'Електронний Шляховий Лист', path: '/crew/waybill', icon: FileText },
+        { label: 'Призначення Екіпажів (Рознарядка)', path: '/crew/assignment', icon: UserCheck },
+        { label: 'Книжка водія (Шляховий лист)', path: '/crew/waybill', icon: FileText },
       ],
     },
     {
@@ -230,7 +230,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Lock,
       superuserOnly: true,
       items: [
-        { label: 'Панель Керування & Резервування', path: '/admin', icon: Lock },
+        { label: 'Панель Керування & Користувачі', path: '/admin', icon: Lock },
         { label: 'Експорт/Імпорт Open Data & GTFS', path: '/export/gtfs', icon: Download },
       ],
     },
@@ -242,9 +242,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
     <header ref={headerRef} className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 sticky top-0 z-50 shadow-xs font-sans">
       {/* Top Application Header Banner */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3 border-b border-slate-200/80 dark:border-slate-800/80">
-        {/* Brand & System Identifier (Matching Image 2 КП "ОМЕТ" СЛУЖБА РУХУ) */}
+        {/* Brand & System Identifier */}
         <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => setPath('/')}>
-          {/* Logo Badge Icon */}
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-600/25 group-hover:scale-105 transition-transform shrink-0">
             <Radio className="w-5 h-5 text-white" />
           </div>
@@ -260,7 +259,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
             <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium font-sans mt-0.5 flex items-center space-x-1.5">
               <span>АРМ «Розклади»</span>
               <span className="inline-block w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600"></span>
-              <span className="font-mono text-[10px] font-bold text-blue-700 bg-white px-1.5 py-0.2 rounded border border-blue-200 shadow-2xs">v2.4</span>
+              <span className="font-mono text-[10px] font-bold text-blue-700 bg-white px-1.5 py-0.2 rounded border border-blue-200 shadow-2xs">v2.5</span>
             </p>
           </div>
         </div>
@@ -426,7 +425,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
         </div>
       </div>
 
-      {/* Navigation Bar (White Background with Soft Light-Blue Shadow and Blue Bordered Buttons) */}
+      {/* Navigation Bar */}
       <div className="bg-white dark:bg-slate-900 border-t border-blue-100 dark:border-slate-800 shadow-[0_8px_30px_rgba(37,99,235,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] px-4 sm:px-6 lg:px-8 relative z-30">
         <nav className="max-w-7xl mx-auto flex items-center space-x-2 py-2 text-xs font-bold flex-wrap">
           {visibleNavGroups.map((group, idx) => {
@@ -519,4 +518,3 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
     </header>
   );
 };
-

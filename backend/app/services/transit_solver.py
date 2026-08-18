@@ -3,6 +3,9 @@ import copy
 import math
 from datetime import datetime, timedelta, time as dt_time
 from typing import List, Dict, Any, Tuple, Optional
+from app.core.logging_config import get_logger
+
+logger = get_logger("transit_solver")
 
 def parse_time_str(t_str: str) -> dt_time:
     parts = t_str.strip().split(":")
@@ -35,12 +38,8 @@ def generate_optimized_schedule(
 ):
     """
     Математичне ядро для генерації розкладів КП "ОМЕТ".
-    Підтримує:
-    1. Дворівневий розрахунок (контрольні точки для сітки нарядів та похвилинна інтерполяція всіх зупинок для водія).
-    2. Типи нарядів: SINGLE (однозмінний), DOUBLE (двозмінний), PEAK (піковий), SPLIT (розривний з заміною вагона в депо на ТО).
-    3. Нульові рейси (з посадкою пасажирів).
-    4. Нормативні обіди (15 хв трамвай / 20 хв тролейбус) з урахуванням тривалості зміни за КЗпП.
     """
+    logger.info(f"📐 Розрахунок розкладу для Маршруту #{route_id}: {vehicles_count} випусків ({start_time} - {end_time}), довжина {route_length_km}км, швидкість {avg_speed_kmh}км/год")
     start_dt = datetime.strptime(start_time, "%H:%M")
     end_dt = datetime.strptime(end_time, "%H:%M")
     
@@ -58,11 +57,15 @@ def generate_optimized_schedule(
     
     if layover_min > 10:
         excess_time = layover_min - 10
-        actual_trip_min += int(excess_time)
+        actual_trip_min = base_trip_min + int(excess_time)
         actual_layover_min = 10
+        logger.info(f"⚖️ Відтяжка ({layover_min:.1f}хв > 10хв) скоригована демпфуванням: рейс={actual_trip_min}хв, відстій={actual_layover_min}хв")
     elif layover_min < 3:
         actual_layover_min = 3
         headway_min = max(2, math.ceil(((actual_trip_min * 2) + 6) / max(1, vehicles_count)))
+        logger.info(f"⚡ Інтервал оптимізовано: рейс={actual_trip_min}хв, інтервал={headway_min}хв, відстій={actual_layover_min}хв")
+    else:
+        logger.info(f"⏱️ Стандартний графік: рейс={actual_trip_min}хв, інтервал={headway_min}хв, відстій={actual_layover_min}хв")
         
     duties = []
     global_trip_counter = 1

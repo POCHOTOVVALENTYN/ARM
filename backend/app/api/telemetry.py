@@ -8,6 +8,7 @@ from app.services.telemetry_adapters import telemetry_manager
 router = APIRouter(prefix="/telemetry", tags=["Live Telemetry & GPS"])
 
 @router.get("/live")
+@router.get("/vehicles")
 async def get_live_vehicles(
     route_id: Optional[str] = Query(None)
 ):

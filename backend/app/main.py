@@ -26,11 +26,16 @@ from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
 from app.core.config import settings
 from app.db.init_admin import seed_initial_admin
+from app.core.logging_config import setup_logging, get_logger
+from app.core.logging_middleware import DetailedRequestLoggingMiddleware, logs_router
 
-logger = logging.getLogger("app.main")
+# Ініціалізація розширеного кольорового логування
+setup_logging(log_level="INFO")
+logger = get_logger("main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("⚡ Запуск підсистем АРМ Диспетчера ОМЕТ...")
     # 1. Ініціалізуємо Redis
     await init_redis()
     
@@ -40,6 +45,7 @@ async def lifespan(app: FastAPI):
 
     # 3. Запускаємо бойовий збір телеметрії (Wialon / GTFS-RT ОМР / Симуляція, 10с)
     telemetry_task = asyncio.create_task(fetch_and_process_realtime_data())
+    logger.info("📡 Фоновий сервіс телеметрії GTFS-RT успішно запущено")
     
     yield
     
@@ -52,9 +58,12 @@ async def lifespan(app: FastAPI):
     
     # 5. Закриваємо з'єднання з Redis
     await close_redis()
+    logger.info("🛑 Сервер успішно зупинено")
 
 app = FastAPI(title="OMET Dispatch & Schedules API", version="2.5.0", lifespan=lifespan)
 
+# Діагностичний middleware для логування кожного запиту
+app.add_middleware(DetailedRequestLoggingMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # CORS конфігурація
@@ -65,6 +74,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Логи клієнта та системна діагностика
+app.include_router(logs_router, prefix="/api")
+app.include_router(logs_router, prefix="/api/v1")
+app.include_router(logs_router, prefix="")
 
 # --- ПІДКЛЮЧЕННЯ РОУТЕРІВ (/api/v1 та аліаси для сумісності) ---
 

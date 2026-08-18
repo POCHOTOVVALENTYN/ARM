@@ -5,8 +5,9 @@ from app.core.redis import get_redis
 from app.api.websocket import ws_manager
 from app.services.telemetry_adapters import telemetry_manager
 from app.services.telemetry_worker import process_deviations, check_and_trigger_incident
+from app.core.logging_config import get_logger
 
-logger = logging.getLogger("app.realtime_fetcher")
+logger = get_logger("realtime_fetcher")
 
 async def fetch_and_process_realtime_data():
     """
@@ -42,11 +43,12 @@ async def fetch_and_process_realtime_data():
                     "type": "TELEMETRY_UPDATE",
                     "data": processed_data
                 })
+                logger.debug(f"🛰️ Оброблено {len(processed_data)} вагонів (з {len(raw_telemetry)} сирих точок) -> Redis 'telemetry:vehicles' & WebSocket")
 
         except asyncio.CancelledError:
             logger.info("🛑 Фоновий воркер телеметрії зупинено")
             break
         except Exception as e:
-            logger.error(f"Помилка в циклі телеметрії: {e}")
+            logger.error(f"❌ Помилка в циклі телеметрії: {e}", exc_info=True)
 
         await asyncio.sleep(10)

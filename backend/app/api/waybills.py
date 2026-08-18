@@ -13,6 +13,9 @@ from app.models.models import Waybill, Vehicle, Driver, StationModel
 from app.models.schedule import StaticDuty, StaticShift, StaticTrip, StaticStopTime, Schedule, ScheduleStatus
 from app.api.dependencies import get_current_dispatcher
 from app.api.websocket import ws_manager
+from app.core.logging_config import get_logger
+
+logger = get_logger("waybills")
 
 router = APIRouter(prefix="/waybills", tags=["Smart Waybills & Crew Assignment"])
 
@@ -128,9 +131,11 @@ async def assign_waybill(
     # 5. Завантаження розкладу в Redis (термін дії - 24 години)
     try:
         redis = await get_redis()
-        await redis.set(f"schedule_cache:vehicle:{req.vehicle_id}", json.dumps(schedule_cache), ex=86400)
+        cache_json = json.dumps(schedule_cache)
+        await redis.set(f"schedule_cache:vehicle:{req.vehicle_id}", cache_json, ex=86400)
+        logger.info(f"📋 Е-Путівку #{new_waybill.id} видано: Наряд {duty_obj.duty_number} -> Борт #{req.vehicle_id} -> Водій '{req.driver_id}' ({len(stops_cache)} зупинок, {len(cache_json)} байт у Redis)")
     except Exception as e:
-        print(f"Помилка запису в Redis: {e}")
+        logger.error(f"❌ Помилка запису в Redis: {e}", exc_info=True)
 
     await db.commit()
 

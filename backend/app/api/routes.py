@@ -87,7 +87,37 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 from app.core.database import get_db
-from app.models.models import RouteShape
+from app.models.models import RouteShape, RouteModel
+
+@router.get("", summary="Отримання списку всіх маршрутів КП ОМЕТ")
+@router.get("/", summary="Отримання списку всіх маршрутів КП ОМЕТ")
+async def get_all_routes(db: AsyncSession = Depends(get_db)):
+    """Повертає список доступних маршрутів трамваїв та тролейбусів."""
+    query = select(RouteModel)
+    result = await db.execute(query)
+    routes = result.scalars().all()
+    
+    if not routes:
+        # Резервний список якщо база ще порожня
+        return [
+            {"id": "18", "number": "18", "name": "Куликове поле — 16-а ст. В. Фонтану", "type": "TRAM", "length_km": 10.5, "default_speed_kmh": 14.5},
+            {"id": "5", "number": "5", "name": "Автовокзал — Аркадія", "type": "TRAM", "length_km": 12.0, "default_speed_kmh": 14.0},
+            {"id": "7", "number": "7", "name": "вул. Паустовського — вул. Пастера", "type": "TRAM", "length_km": 16.2, "default_speed_kmh": 15.0},
+            {"id": "28", "number": "28", "name": "вул. Пастера — Парк ім. Т. Шевченка", "type": "TRAM", "length_km": 6.8, "default_speed_kmh": 13.5}
+        ]
+        
+    return [
+        {
+            "id": r.id,
+            "number": r.number,
+            "name": r.name,
+            "type": r.type,
+            "color": r.color or ("#2563eb" if r.type == "TRAM" else "#059669"),
+            "length_km": r.length_km or 10.5,
+            "default_speed_kmh": r.default_speed_kmh or 14.5
+        }
+        for r in routes
+    ]
 
 @router.get("/{route_id}/shape")
 async def get_route_shape(

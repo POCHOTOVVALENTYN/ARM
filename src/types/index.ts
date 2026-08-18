@@ -63,11 +63,14 @@ export interface Route {
   name: string;
   type: TransportType;
   status: RouteStatus;
-  primaryTerminalId: string;
-  secondaryTerminalId: string;
-  lengthDir1Km: number;
-  lengthDir2Km: number;
-  stations: string[];
+  primaryTerminalId?: string;
+  secondaryTerminalId?: string;
+  lengthDir1Km?: number;
+  lengthDir2Km?: number;
+  length_km?: number;
+  default_speed_kmh?: number;
+  color?: string;
+  stations?: string[];
   allStations?: string[]; // Includes unique stations from both directions
   segments: RouteSegment[];
   controlPoints?: RouteControlPoint[];

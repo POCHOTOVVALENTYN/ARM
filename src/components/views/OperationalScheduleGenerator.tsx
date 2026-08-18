@@ -1,18 +1,22 @@
-import React, { useState } from 'react';
-import { Calculator, Settings, Activity, ArrowRight, Save, TrendingUp, Route as RouteIcon, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calculator, Settings, Activity, ArrowRight, Save, TrendingUp, Route as RouteIcon, CheckCircle2, ChevronDown } from 'lucide-react';
 import { useGenerateDraftSchedule, useCommitScheduleDraft } from '../../hooks/useScheduleQueries';
+import { useScheduleStore, ODESSA_DEFAULT_ROUTES } from '../../store/useScheduleStore';
 import { RouteTable } from '../routes/RouteTable';
 import { toast } from 'sonner';
 
 export const OperationalScheduleGenerator: React.FC = () => {
+  const routesFromStore = useScheduleStore(state => state.routes);
+  const routes = routesFromStore && routesFromStore.length > 0 ? routesFromStore : ODESSA_DEFAULT_ROUTES;
+
   const [routeId, setRouteId] = useState('18');
-  const [vehiclesCount, setVehiclesCount] = useState(12);
+  const [vehiclesCount, setVehiclesCount] = useState(8);
   const [startTime, setStartTime] = useState('05:30');
   const [endTime, setEndTime] = useState('23:00');
   
-  // НОВІ ФІЗИЧНІ ПАРАМЕТРИ
-  const [routeLengthKm, setRouteLengthKm] = useState(11.5);
-  const [avgSpeedKmh, setAvgSpeedKmh] = useState(14.5);
+  // ФІЗИЧНІ ПАРАМЕТРИ
+  const [routeLengthKm, setRouteLengthKm] = useState(11.8);
+  const [avgSpeedKmh, setAvgSpeedKmh] = useState(15.0);
   const [zeroTripMin, setZeroTripMin] = useState(15);
   const [useElasticSmoother, setUseElasticSmoother] = useState(true);
 
@@ -21,6 +25,16 @@ export const OperationalScheduleGenerator: React.FC = () => {
 
   const generateMutation = useGenerateDraftSchedule();
   const commitMutation = useCommitScheduleDraft();
+
+  // Автоматичне підтягування довжини та швидкості при зміні маршруту
+  const handleRouteChange = (newRouteId: string) => {
+    setRouteId(newRouteId);
+    const selected = routes.find(r => String(r.id) === String(newRouteId));
+    if (selected) {
+      if (selected.length_km) setRouteLengthKm(Number(selected.length_km));
+      if (selected.default_speed_kmh) setAvgSpeedKmh(Number(selected.default_speed_kmh));
+    }
+  };
 
   const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +53,7 @@ export const OperationalScheduleGenerator: React.FC = () => {
       { 
         onSuccess: (data) => {
           setGeneratedDraft(data);
-          toast.success(`Згенеровано розклад для маршруту №${routeId} (${data.metrics.total_trips} рейсів)`);
+          toast.success(`Згенеровано розклад для маршруту №${routeId} (${data.metrics?.total_trips || data.duties?.length || 0} нарядів)`);
         },
         onError: (err: any) => {
           toast.error(`Помилка генерації розкладу: ${err?.message || 'Сервер не відповідає'}`);
@@ -55,12 +69,12 @@ export const OperationalScheduleGenerator: React.FC = () => {
       {
         route_id: generatedDraft.route_id || routeId,
         duties: generatedDraft.duties,
-        version_name: `Розрахунок від ${new Date().toLocaleDateString()}`
+        version_name: `Еталонний розклад від ${new Date().toLocaleDateString()}`
       },
       {
         onSuccess: (res: any) => {
           setSaveSuccess(true);
-          toast.success(`Еталонний розклад для маршруту №${routeId} успішно записано в БД (ID: ${res.schedule_id})`);
+          toast.success(`Еталонний розклад для маршруту №${routeId} успішно збережено в БД (ID: ${res.schedule_id})`);
         },
         onError: (err: any) => {
           toast.error(`Помилка збереження в БД: ${err?.message || 'Не вдалося зберегти розклад'}`);
@@ -70,115 +84,143 @@ export const OperationalScheduleGenerator: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full bg-slate-50 dark:bg-slate-950 p-6 gap-6 font-sans">
+    <div className="flex flex-col lg:flex-row h-full bg-slate-50 dark:bg-slate-950 p-6 gap-6 font-sans">
       {/* Ліва панель: Введення параметрів */}
-      <div className="w-1/3 bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-full overflow-y-auto">
-        <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center mb-6">
-          <Calculator className="mr-2 text-blue-600 dark:text-blue-400" /> Конструктор графіків
-        </h2>
+      <div className="w-full lg:w-1/3 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col overflow-y-auto space-y-5">
+        <div>
+          <span className="px-2.5 py-0.5 bg-blue-600 text-white text-[10px] font-black rounded uppercase">
+            Transit Solver v2.5
+          </span>
+          <h2 className="text-xl font-black text-slate-800 dark:text-white flex items-center mt-1">
+            <Calculator className="mr-2 text-blue-600 dark:text-blue-400" /> Конструктор графіків
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Математичний розрахунок табелів, інтервалів та поворотних рейсів
+          </p>
+        </div>
 
         <form onSubmit={handleGenerate} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">Маршрут</label>
-              <input 
-                type="text" 
-                value={routeId} 
-                onChange={e => setRouteId(e.target.value)} 
-                className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none font-bold" 
-                required 
-              />
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">
+              Оберіть маршрут:
+            </label>
+            <div className="relative">
+              <select
+                value={routeId}
+                onChange={e => handleRouteChange(e.target.value)}
+                className="w-full appearance-none bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-extrabold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+              >
+                {routes.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.type === 'trolleybus' ? 'Тролейбус' : 'Трамвай'} №{r.number || r.id} — {r.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">Випуск (Вагонів)</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">
+                Випуск (Вагонів)
+              </label>
               <input 
                 type="number" 
                 value={vehiclesCount} 
                 onChange={e => setVehiclesCount(Number(e.target.value))} 
-                className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none font-bold" 
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" 
                 required 
-                min={1} 
+                min={1}
+                max={50}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">
+                Нульовий рейс (хв)
+              </label>
+              <input 
+                type="number" 
+                value={zeroTripMin} 
+                onChange={e => setZeroTripMin(Number(e.target.value))} 
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                required 
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">Початок руху</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">
+                Початок руху
+              </label>
               <input 
                 type="time" 
                 value={startTime} 
                 onChange={e => setStartTime(e.target.value)} 
-                className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded font-mono font-bold" 
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none" 
                 required 
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">Кінець руху</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase">
+                Кінець руху
+              </label>
               <input 
                 type="time" 
                 value={endTime} 
                 onChange={e => setEndTime(e.target.value)} 
-                className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded font-mono font-bold" 
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none" 
                 required 
               />
             </div>
           </div>
           
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded border border-slate-200 dark:border-slate-700 space-y-4">
-            <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200 flex items-center">
-              <RouteIcon size={16} className="mr-2 text-slate-500 dark:text-slate-400"/> Фізика маршруту
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+            <h3 className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center uppercase">
+              <RouteIcon size={15} className="mr-1.5 text-blue-600 dark:text-blue-400"/> Фізичні характеристики
             </h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Довжина (км)</label>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Довжина кола (км)</label>
                 <input 
                   type="number" 
                   step="0.1" 
                   value={routeLengthKm} 
                   onChange={e => setRouteLengthKm(Number(e.target.value))} 
-                  className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded font-bold" 
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-bold text-slate-800 dark:text-white" 
                   required 
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Швидкість (км/год)</label>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Швидкість (км/год)</label>
                 <input 
                   type="number" 
                   step="0.1" 
                   value={avgSpeedKmh} 
                   onChange={e => setAvgSpeedKmh(Number(e.target.value))} 
-                  className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded font-bold" 
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-bold text-slate-800 dark:text-white" 
                   required 
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Нульовий рейс з депо (хв)</label>
-              <input 
-                type="number" 
-                value={zeroTripMin} 
-                onChange={e => setZeroTripMin(Number(e.target.value))} 
-                className="w-full border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-white p-2 rounded font-bold" 
-                required 
-              />
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">З урахуванням посадки пасажирів по дорозі на диспетчерський пункт.</p>
-            </div>
           </div>
 
-          <div className="pt-2">
-            <label className="flex items-start space-x-3 cursor-pointer p-3 rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+          <div>
+            <label className="flex items-start space-x-3 cursor-pointer p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
               <input 
                 type="checkbox" 
                 checked={useElasticSmoother} 
                 onChange={e => setUseElasticSmoother(e.target.checked)} 
-                className="mt-1 accent-blue-600" 
+                className="mt-0.5 accent-blue-600" 
               />
               <div>
-                <p className="font-bold text-slate-700 dark:text-slate-200 text-sm flex items-center">
-                  <TrendingUp size={16} className="mr-1 text-amber-500" /> Пікове згладжування
+                <p className="font-bold text-slate-800 dark:text-slate-200 text-xs flex items-center">
+                  <TrendingUp size={14} className="mr-1 text-amber-500" /> Пікове згладжування (Elastic Smoother)
                 </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Компенсація заторів (+25% до часу рейсу з 7 до 9 та з 16 до 18 год).</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Автоматична компенсація заторів у пікові години (07:00-09:30 та 16:30-19:00).
+                </p>
               </div>
             </label>
           </div>
@@ -186,31 +228,31 @@ export const OperationalScheduleGenerator: React.FC = () => {
           <button 
             type="submit" 
             disabled={generateMutation.isPending} 
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors flex justify-center items-center disabled:opacity-50 shadow-sm cursor-pointer"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl transition-all flex justify-center items-center disabled:opacity-50 shadow-sm cursor-pointer text-xs uppercase tracking-wider"
           >
-            {generateMutation.isPending ? 'Розрахунок...' : 'Генерувати математичну модель'}
+            {generateMutation.isPending ? 'Розрахунок математичної моделі...' : 'Генерувати математичну модель'}
           </button>
         </form>
 
         {generatedDraft && (
-          <div className="mt-6 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
-            <h3 className="font-bold text-emerald-800 dark:text-emerald-300 mb-2 flex items-center">
-              <Activity size={16} className="mr-2" /> Параметри згенерованого розкладу
+          <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-2xl p-4 space-y-2">
+            <h3 className="font-extrabold text-xs text-emerald-900 dark:text-emerald-200 flex items-center uppercase tracking-wide">
+              <Activity size={15} className="mr-1.5 text-emerald-600" /> Метрики згенерованого розкладу
             </h3>
-            <ul className="text-sm text-emerald-700 dark:text-emerald-300 space-y-1">
-              <li className="flex justify-between border-b border-emerald-200/50 dark:border-emerald-800/50 pb-1">
+            <ul className="text-xs text-emerald-800 dark:text-emerald-300 space-y-1.5 font-mono">
+              <li className="flex justify-between border-b border-emerald-200 dark:border-emerald-800/50 pb-1">
                 <span>Розрахований інтервал:</span> <strong>{generatedDraft.metrics?.headway_min} хв</strong>
               </li>
-              <li className="flex justify-between border-b border-emerald-200/50 dark:border-emerald-800/50 pb-1">
-                <span>Час рейсу (в один бік):</span> <strong>{generatedDraft.metrics?.actual_trip_min} хв</strong>
+              <li className="flex justify-between border-b border-emerald-200 dark:border-emerald-800/50 pb-1">
+                <span>Час рейсу в один бік:</span> <strong>{generatedDraft.metrics?.actual_trip_min} хв</strong>
               </li>
-              <li className="flex justify-between border-b border-emerald-200/50 dark:border-emerald-800/50 pb-1">
-                <span>Відтяжка на кільці:</span> <strong>{generatedDraft.metrics?.layover_min} хв</strong>
+              <li className="flex justify-between border-b border-emerald-200 dark:border-emerald-800/50 pb-1">
+                <span>Відтяжка на кінцевій:</span> <strong>{generatedDraft.metrics?.layover_min} хв</strong>
               </li>
-              <li className="flex justify-between border-b border-emerald-200/50 dark:border-emerald-800/50 pb-1" title="Якщо відтяжка була більше 10 хв, система автоматично занизила швидкість">
-                <span>Фактична швидкість:</span> <strong>{generatedDraft.metrics?.actual_speed_kmh} км/год</strong>
+              <li className="flex justify-between border-b border-emerald-200 dark:border-emerald-800/50 pb-1">
+                <span>Експлуатаційна швидкість:</span> <strong>{generatedDraft.metrics?.actual_speed_kmh} км/год</strong>
               </li>
-              <li className="flex justify-between pt-1">
+              <li className="flex justify-between pt-0.5">
                 <span>Усього рейсів:</span> <strong>{generatedDraft.metrics?.total_trips}</strong>
               </li>
             </ul>
@@ -218,35 +260,50 @@ export const OperationalScheduleGenerator: React.FC = () => {
         )}
       </div>
 
-      {/* Права панель */}
-      <div className="w-2/3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col overflow-hidden">
+      {/* Права панель: Попередній перегляд та затвердження */}
+      <div className="w-full lg:w-2/3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col overflow-hidden min-h-[500px]">
         {!generatedDraft ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10">
-            <Calculator size={48} className="mb-4 text-slate-300 dark:text-slate-600" />
-            <p className="font-bold">Введіть фізичні параметри маршруту та натисніть «Генерувати математичну модель»</p>
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center space-y-3">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+              <Calculator size={32} />
+            </div>
+            <h3 className="font-extrabold text-slate-700 dark:text-slate-300 text-sm">
+              Чорновик розкладу ще не сформовано
+            </h3>
+            <p className="text-xs text-slate-500 max-w-sm">
+              Оберіть маршрут, вкажіть випуск рухомого складу та натисніть «Генерувати математичну модель» для перегляду сітки.
+            </p>
           </div>
         ) : (
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="p-4 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-slate-800 dark:text-white">Попередній перегляд (Чорновик)</h3>
+              <div className="flex items-center space-x-2">
+                <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  Попередній перегляд сітки нарядів (Маршрут №{routeId})
+                </span>
+                <span className="text-xs font-mono font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                  {generatedDraft.duties?.length || 0} нарядів
+                </span>
+              </div>
               
-              {/* Кнопка збереження / підтвердження */}
+              {/* Кнопка збереження */}
               {saveSuccess ? (
-                <div className="flex items-center text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 px-4 py-2 rounded-xl font-bold text-sm">
-                  <CheckCircle2 size={18} className="mr-2 text-emerald-600" />
-                  Успішно збережено в БД
+                <div className="flex items-center text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 px-4 py-2 rounded-xl font-bold text-xs">
+                  <CheckCircle2 size={16} className="mr-1.5 text-emerald-600" />
+                  Затверджено та збережено в БД
                 </div>
               ) : (
                 <button 
                   onClick={handleCommit}
                   disabled={commitMutation.isPending}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center transition-all disabled:opacity-50 cursor-pointer shadow-sm"
                 >
-                  <Save size={16} className="mr-2" /> 
-                  {commitMutation.isPending ? 'Збереження...' : 'Затвердити в Бойовий розклад'}
+                  <Save size={15} className="mr-1.5" /> 
+                  {commitMutation.isPending ? 'Запис у БД...' : 'Затвердити в Бойовий розклад'}
                 </button>
               )}
             </div>
+
             <div className="flex-1 overflow-auto p-4">
               <RouteTable schedule={generatedDraft} routeId={routeId} />
             </div>

@@ -4,7 +4,8 @@ export enum UserRole { ADMIN = 'ADMIN', DISPATCHER = 'DISPATCHER', DRIVER = 'DRI
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import apiClient from '../utils/apiClient';
-import { VehicleBlock, TransportType, DriverDuty, Trip } from '../types';
+import { VehicleBlock, TransportType, DriverDuty, Trip, Route } from '../types';
+import { useRouteStore } from './useRouteStore';
 
 export interface TelemetryData {
   [vehicle_id: string]: {
@@ -16,11 +17,122 @@ export interface TelemetryData {
   };
 }
 
+export const ODESSA_DEFAULT_ROUTES: Route[] = [
+  {
+    id: "18",
+    number: "18",
+    name: "Куликове поле — 16-та ст. Великого Фонтану",
+    type: "tram",
+    status: "active",
+    length_km: 11.8,
+    default_speed_kmh: 15.0,
+    color: "#DC2626",
+    description: "Основна магістраль Великого Фонтану (єдине проміжне кільце — 11 ст. Фонтану)",
+    segments: []
+  },
+  {
+    id: "7",
+    number: "7",
+    name: "вул. Паустовського — 11-та ст. Люстдорфської дороги",
+    type: "tram",
+    status: "active",
+    length_km: 33.2,
+    default_speed_kmh: 16.5,
+    color: "#2563EB",
+    description: "Магістральний маршрут «Північ-Південь» через Пересипський міст та Старосінну площу",
+    segments: []
+  },
+  {
+    id: "17",
+    number: "17",
+    name: "Куликове поле — 11-та ст. Великого Фонтану",
+    type: "tram",
+    status: "active",
+    length_km: 8.8,
+    default_speed_kmh: 15.2,
+    color: "#F59E0B",
+    description: "Скорочений маршрут лінії Фонтану до кільця 11 ст. Великого Фонтану",
+    segments: []
+  },
+  {
+    id: "5",
+    number: "5",
+    name: "Аркадія — Центральний Автовокзал",
+    type: "tram",
+    status: "active",
+    length_km: 14.2,
+    default_speed_kmh: 14.0,
+    color: "#16A34A",
+    description: "Зв'язок Аркадії, Французького бульвару, Привозу та Автовокзалу (розворот на кільці «Парк Шевченка»)",
+    segments: []
+  },
+  {
+    id: "28",
+    number: "28",
+    name: "Парк Шевченка — вул. Пастера",
+    type: "tram",
+    status: "active",
+    length_km: 8.4,
+    default_speed_kmh: 13.5,
+    color: "#9333EA",
+    description: "Кільцевий центральний маршрут через вул. Леонтовича та Тираспольську площу",
+    segments: []
+  },
+  {
+    id: "8",
+    number: "8",
+    name: "Залізничний вокзал — вул. Інглезі",
+    type: "trolleybus",
+    status: "active",
+    length_km: 9.6,
+    default_speed_kmh: 16.0,
+    color: "#EA580C",
+    description: "Тролейбусна лінія через вул. Космонавтів та Адміральський проспект",
+    segments: []
+  },
+  {
+    id: "9",
+    number: "9",
+    name: "вул. Інглезі — вул. Рішельєвська / Грецька",
+    type: "trolleybus",
+    status: "active",
+    length_km: 12.0,
+    default_speed_kmh: 15.5,
+    color: "#0891B2",
+    description: "Тролейбусне сполучення Черемушок з центром міста",
+    segments: []
+  },
+  {
+    id: "Tr7",
+    number: "7",
+    name: "вул. Архітекторська — вул. Новосельського",
+    type: "trolleybus",
+    status: "active",
+    length_km: 15.4,
+    default_speed_kmh: 15.0,
+    color: "#4F46E5",
+    description: "Магістральний тролейбус Київського району (Таїрова) до Центру",
+    segments: []
+  },
+  {
+    id: "10",
+    number: "10",
+    name: "вул. Інглезі — Пересипський міст",
+    type: "trolleybus",
+    status: "active",
+    length_km: 13.8,
+    default_speed_kmh: 15.2,
+    color: "#D97706",
+    description: "Швидкісний тролейбусний діагональний маршрут Черемушки — Пересип",
+    segments: []
+  }
+];
+
 interface ScheduleState {
   generatedTrips: Trip[];
   currentTime: number;
   currentScheduleId: number | null;
-  currentScheduleStatus: any | null; // ScheduleStatus
+  currentScheduleStatus: any | null;
   setGeneratedTrips: (trips: Trip[]) => void;
   setCurrentScheduleInfo: (id: number, status: any) => void;
   setDraftSchedule: (schedulePayload: any) => void;
@@ -37,7 +149,6 @@ interface ScheduleState {
   user: { name: string; role?: UserRole; badge?: string };
   userRole: string;
   
-  // Restored mock fields
   loadGtfsData?: any;
   isGtfsActive?: any;
   undoLastAction?: any;
@@ -68,7 +179,6 @@ interface ScheduleState {
   reorderVehicleBlocks: (activeId: string, overId: string) => void;
   discardDraft: () => void;
 
-  // Action Handlers
   setLiveSchedule: (schedule: any) => void;
   updateTelemetry: (data: any) => void;
   setIsProcessingTransaction: (status: boolean) => void;
@@ -81,7 +191,6 @@ interface ScheduleState {
   setInitialSchedule: (blocks: VehicleBlock[], duties: DriverDuty[]) => void;
   updateTripDeparture: (blockId: string, tripId: string, startTime: number, delayMinutes: number) => Promise<void>;
 
-  // Global Initialization
   routes: any[];
   stops: any[];
   isInitialized: boolean;
@@ -94,6 +203,7 @@ export const useScheduleStore = create<ScheduleState>()(
     currentTime: 360,
     currentScheduleId: null,
     currentScheduleStatus: null,
+    isDraftModified: false,
     setGeneratedTrips: (trips) => set((state) => { state.generatedTrips = trips; }),
     setCurrentScheduleInfo: (id, status) => set((state) => { 
       state.currentScheduleId = id; 
@@ -153,17 +263,22 @@ export const useScheduleStore = create<ScheduleState>()(
     user: { name: 'Головний Диспетчер', role: UserRole.ADMIN, badge: '12345' },
     userRole: 'DISPATCHER',
 
-    routes: [],
+    routes: ODESSA_DEFAULT_ROUTES,
     stops: [],
     isInitialized: false,
 
     fetchInitialData: async () => {
       try {
         const response = await apiClient.get('/schedule/init');
+        const rList = response.data.routes && response.data.routes.length > 0 ? response.data.routes : ODESSA_DEFAULT_ROUTES;
+        const sList = response.data.stops || [];
+
+        // Синхронізуємо useRouteStore з завантаженими маршрутами!
+        useRouteStore.getState().setInitialRoutes(rList);
+
         set((draft) => {
-          draft.routes = response.data.routes || [];
-          draft.stops = response.data.stops || [];
-          // Assuming blocks and duties also come from this endpoint based on schedule_init.py
+          draft.routes = rList;
+          draft.stops = sList;
           draft.liveBlocks = response.data.blocks || [];
           draft.liveDuties = response.data.driver_duties || [];
           draft.liveSchedule = { current_blocks: response.data.blocks || [] };
@@ -171,24 +286,27 @@ export const useScheduleStore = create<ScheduleState>()(
         });
       } catch (error) {
         console.error('Критична помилка ініціалізації розкладу', error);
-        set((draft) => { draft.isInitialized = true; });
+        useRouteStore.getState().setInitialRoutes(ODESSA_DEFAULT_ROUTES);
+        set((draft) => { 
+          draft.routes = ODESSA_DEFAULT_ROUTES;
+          draft.isInitialized = true; 
+        });
       }
     },
 
-    // Restored Mock Data Defaults to prevent crashes
     draftBlocks: [],
     selectedDate: new Date().toISOString().split('T')[0],
     setSelectedDate: (date: string) => set((state) => { state.selectedDate = date; }),
     generateMultipleBlocks: (routeId: string, transportType: TransportType, count: number, date?: string) => {
       set((state) => {
         const newBlocks = Array.from({ length: count }).map((_, i) => ({
-          id: `B_${routeId}_${Date.now()}_${i}`,
+          id: `B_${routeId}_${i + 1}`,
           vehicleNumber: '',
-          type: transportType,
-          depotId: 'depot_1',
+          type: transportType || 'tram',
+          depotId: transportType === 'trolleybus' ? 'depot_trolley_1' : 'depot_tram_1',
           routeId,
           date: date || state.selectedDate,
-          depotExitTime: '05:00',
+          depotExitTime: '05:30',
           depotReturnTime: '23:00',
           trips: []
         }));
@@ -242,10 +360,8 @@ export const useScheduleStore = create<ScheduleState>()(
     }),
     applySlackToNode: () => {},
     
-    // History
     redoStack: [],
     historyStack: [],
-    isDraftModified: false,
 
     setLiveSchedule: (schedule) => {
       set((state) => {
@@ -256,13 +372,11 @@ export const useScheduleStore = create<ScheduleState>()(
     },
 
     updateTelemetry: (incomingData: any) => set((draft) => {
-      // Якщо це об'єкт з багатьма vehicle_id (наприклад, початкове завантаження)
       if (Object.keys(incomingData).length > 0 && !incomingData.vehicle_id) {
         Object.keys(incomingData).forEach(key => {
           draft.telemetry[key] = incomingData[key];
         });
       } else if (incomingData.vehicle_id) {
-        // Безпечна пряма мутація для конкретного ТЗ
         draft.telemetry[incomingData.vehicle_id] = incomingData;
       }
     }),

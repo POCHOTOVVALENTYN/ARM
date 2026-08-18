@@ -3,7 +3,15 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
-import pytz
+try:
+    from zoneinfo import ZoneInfo
+    KYIV_TZ = ZoneInfo("Europe/Kyiv")
+except ImportError:
+    try:
+        import pytz
+        KYIV_TZ = pytz.timezone("Europe/Kyiv")
+    except ImportError:
+        KYIV_TZ = timezone.utc
 
 from sqlalchemy import insert, select
 from app.core.redis import get_redis
@@ -21,8 +29,7 @@ CRITICAL_DELAY_MINUTES = 5.0
 
 def get_kyiv_current_minute() -> float:
     """Отримує поточний час за Києвом у хвилинах від опівночі."""
-    tz = pytz.timezone("Europe/Kyiv")
-    now = datetime.now(tz)
+    now = datetime.now(KYIV_TZ)
     return float(now.hour * 60 + now.minute + now.second / 60.0)
 
 async def check_and_trigger_incident(redis, vehicle: dict):

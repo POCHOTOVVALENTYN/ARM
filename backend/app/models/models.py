@@ -2,7 +2,6 @@
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Time, Date
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
 Base = declarative_base()
@@ -93,7 +92,7 @@ class RouteShape(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     route_id = Column(String, index=True, nullable=False)
     direction_id = Column(Integer, nullable=False) # 0 - Прямий, 1 - Зворотній
-    geometry = Column(JSONB, nullable=False) # [{lat: ..., lng: ...}]
+    geometry = Column(JSON, nullable=False) # [{lat: ..., lng: ...}]
 
 class RouteStation(Base):
     __tablename__ = "route_stations"
@@ -189,7 +188,7 @@ class ActiveDetour(Base):
     vehicle_id = Column(String, index=True, nullable=False)
     route_id = Column(String, nullable=False)
     reason = Column(String, nullable=False) # Причина (ДТП, обрив мережі тощо)
-    target_loop = Column(String, nullable=True) # Назва розворотного кільця (напр. "6 ст. Великого Фонтану")
+    target_loop = Column(String, nullable=True) # Назва розворотного кільця
     new_path_description = Column(String, nullable=False) # Опис оперативного прямування
     
     started_at = Column(DateTime(timezone=True), default=datetime.utcnow)

@@ -6,7 +6,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from sqlalchemy.future import select
-from app.core.database import AsyncSessionLocal, init_db
+import app.core.database as db_module
 from app.models.models import (
     EmergencyTemplateModel,
     HubNodeModel,
@@ -159,10 +159,10 @@ ROUTE_18_STOPS = [
 
 async def seed_data():
     print("Ініціалізація структури бази даних...")
-    await init_db()
+    await db_module.init_db()
     
     print("Наповнення еталонними маршрутами та зупинками Одеси...")
-    async with AsyncSessionLocal() as db:
+    async with db_module.AsyncSessionLocal() as db:
         # 1. Станції
         for st in ODESSA_STATIONS:
             exists = await db.execute(select(StationModel).filter_by(id=st["id"]))
