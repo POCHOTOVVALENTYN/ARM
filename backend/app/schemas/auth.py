@@ -5,6 +5,7 @@ class DispatcherResponse(BaseModel):
     id: int
     username: str
     full_name: Optional[str] = None
+    role: Optional[str] = "DISPATCHER"
     is_active: bool
     is_superuser: bool
 
@@ -19,4 +20,5 @@ class DispatcherCreate(BaseModel):
     username: str
     password: str
     full_name: Optional[str] = None
+    role: Optional[str] = "DISPATCHER" # SUPERUSER, PLANNER, DISPATCHER, LINE_DISPATCHER, OBSERVER
     is_superuser: bool = False

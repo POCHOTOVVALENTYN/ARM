@@ -1,22 +1,37 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/apiClient';
 
+export interface WaybillStop {
+  stop_id: string;
+  stop_name: string;
+  arrival_time: string;
+  departure_time: string;
+  is_control_point: boolean;
+}
+
 export interface WaybillTrip {
   trip_number: number;
+  direction: string;
   route: string;
+  start_station: string;
+  end_station: string;
   plan_start: string;
   plan_end: string;
   fact_start: string | null;
   fact_end: string | null;
   status: 'COMPLETED' | 'IN_PROGRESS' | 'PENDING' | 'CANCELLED';
+  is_zero?: boolean;
+  stops?: WaybillStop[];
 }
 
 export interface SmartWaybill {
   waybill_id: number | string;
   target_date: string;
   driver: { id: number | string; full_name: string; class_rank: number };
-  vehicle: { id: string; model: string };
+  vehicle: { id: string; model: string; type?: string };
   duty_id: number;
+  duty_number: string;
+  route_id: string;
   trips: WaybillTrip[];
   summary: {
     total_planned_trips: number;
@@ -30,12 +45,12 @@ export const useSmartWaybill = (driverId: number | string | null, targetDate: st
     queryKey: ['waybill', driverId, targetDate],
     queryFn: async () => {
       if (!driverId || !targetDate) return null;
-      const { data } = await api.get<SmartWaybill>(`/crew/waybill?driver_id=${driverId}&target_date=${targetDate}`);
+      const { data } = await api.get<SmartWaybill>(`/waybills/driver/${driverId}/active?target_date=${targetDate}`);
       return data;
     },
     enabled: !!driverId && !!targetDate,
     retry: false,
-    staleTime: 30000,
+    staleTime: 15000,
   });
 };
 
@@ -49,8 +64,9 @@ export const useAssignWaybill = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['waybills'] });
-      queryClient.invalidateQueries({ queryKey: ['vehicles-status'] });
-      queryClient.invalidateQueries({ queryKey: ['active-schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['daily-deployments'] });
+      queryClient.invalidateQueries({ queryKey: ['available-resources'] });
+      queryClient.invalidateQueries({ queryKey: ['available-duties'] });
     }
   });
 };

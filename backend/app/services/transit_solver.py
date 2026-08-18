@@ -1,8 +1,25 @@
 # backend/app/services/transit_solver.py
 import copy
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from typing import List, Dict, Any, Tuple, Optional
+
+def parse_time_str(t_str: str) -> dt_time:
+    parts = t_str.strip().split(":")
+    h = int(parts[0])
+    m = int(parts[1])
+    s = int(parts[2]) if len(parts) > 2 else 0
+    return dt_time(hour=h, minute=m, second=s)
+
+def time_to_minutes(t: dt_time) -> float:
+    return float(t.hour * 60 + t.minute + t.second / 60.0)
+
+def minutes_to_time(minutes_float: float) -> dt_time:
+    total_seconds = int((minutes_float % 1440) * 60)
+    hours = (total_seconds // 3600) % 24
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return dt_time(hour=hours, minute=minutes, second=seconds)
 
 def generate_optimized_schedule(
     route_id: str, 
@@ -12,26 +29,29 @@ def generate_optimized_schedule(
     route_length_km: float,
     avg_speed_kmh: float,
     zero_trip_min: int = 15,
-    use_elastic_smoother: bool = True
+    use_elastic_smoother: bool = True,
+    duty_type_distribution: Optional[Dict[str, int]] = None, # single, double, peak, split
+    stations_list: Optional[List[Dict[str, Any]]] = None # List of stops with name, id, is_control_point
 ):
     """
     Математичне ядро для генерації розкладів КП "ОМЕТ".
-    Враховує фізику (швидкість/відстань), нульові рейси (з пасажирами) та обіди на кільці.
+    Підтримує:
+    1. Дворівневий розрахунок (контрольні точки для сітки нарядів та похвилинна інтерполяція всіх зупинок для водія).
+    2. Типи нарядів: SINGLE (однозмінний), DOUBLE (двозмінний), PEAK (піковий), SPLIT (розривний з заміною вагона в депо на ТО).
+    3. Нульові рейси (з посадкою пасажирів).
+    4. Нормативні обіди (15 хв трамвай / 20 хв тролейбус) з урахуванням тривалості зміни за КЗпП.
     """
     start_dt = datetime.strptime(start_time, "%H:%M")
     end_dt = datetime.strptime(end_time, "%H:%M")
     
     # 1. Фізичний розрахунок часу рейсу
-    # Час (год) = Відстань / Швидкість * 60 -> Хвилини
-    base_trip_min = math.ceil((route_length_km / max(1.0, avg_speed_kmh)) * 60)
+    base_trip_min = max(10, math.ceil((route_length_km / max(1.0, avg_speed_kmh)) * 60))
     
-    # 2. Розрахунок оборотного рейсу та інтервалу
-    # Мінімальний відстій - 3 хвилини
+    # 2. Розрахунок оборотного рейсу та інтервалу (х_min = 2..4 хв буфер на кінцевих)
     cycle_min = (base_trip_min * 2) + (3 * 2)
-    headway_min = math.ceil(cycle_min / max(1, vehicles_count)) if vehicles_count > 0 else 0
+    headway_min = math.ceil(cycle_min / max(1, vehicles_count)) if vehicles_count > 0 else 5
     
     # 3. Обмеження відтяжки (Макс 10 хвилин)
-    # Якщо розрахований інтервал дає занадто великий відстій, ми ШТУЧНО УПОВІЛЬНЮЄМО вагон (додаємо час у рейс)
     layover_min = (headway_min * vehicles_count - (base_trip_min * 2)) / 2 if vehicles_count > 0 else 3
     actual_trip_min = base_trip_min
     actual_layover_min = int(layover_min)
@@ -42,85 +62,327 @@ def generate_optimized_schedule(
         actual_layover_min = 10
     elif layover_min < 3:
         actual_layover_min = 3
-        # Якщо інтервал не вміщається, вагони їздитимуть "хвіст у хвіст"
-        headway_min = math.ceil(((actual_trip_min * 2) + 6) / max(1, vehicles_count))
+        headway_min = max(2, math.ceil(((actual_trip_min * 2) + 6) / max(1, vehicles_count)))
         
     duties = []
     global_trip_counter = 1
     total_generated_trips = 0
     
     for v_idx in range(vehicles_count):
-        # Зсув випуску з депо
+        # Визначаємо тип наряду для цього виходу
+        # За замовчуванням більшість випусків двозмінні (DOUBLE), частина пікові (PEAK) або розривні (SPLIT)
+        if v_idx % 4 == 0:
+            duty_type = "DOUBLE"
+        elif v_idx % 4 == 1:
+            duty_type = "SINGLE"
+        elif v_idx % 4 == 2:
+            duty_type = "SPLIT"
+        else:
+            duty_type = "PEAK"
+
+        duty_num_str = f"{route_id}-{v_idx + 1:02d}"
         v_start = start_dt + timedelta(minutes=v_idx * headway_min)
         current_time = v_start
         
-        trips = []
-        had_lunch = False
+        shifts = []
         
-        # --- НУЛЬОВИЙ РЕЙС (Виїзд з депо з пасажирами) ---
-        zero_trip_end = current_time + timedelta(minutes=zero_trip_min)
-        trips.append({
-            "id": global_trip_counter,
-            "direction": "Нульовий (з пасажирами)",
-            "start_time": current_time.strftime("%H:%M"),
-            "end_time": zero_trip_end.strftime("%H:%M"),
-            "is_zero": True
-        })
-        global_trip_counter += 1
-        current_time = zero_trip_end
-        
-        # --- РОБОТА НА ЛІНІЇ ---
-        while current_time < end_dt:
-            # Пікове розтягування (Elastic Smoother)
-            trip_duration = actual_trip_min
-            if use_elastic_smoother and ((7 <= current_time.hour <= 9) or (16 <= current_time.hour <= 18)):
-                trip_duration = int(actual_trip_min * 1.25)
-                
-            trip_end = current_time + timedelta(minutes=trip_duration)
-            if trip_end > end_dt:
-                break
-                
-            direction = "Прямий" if len(trips) % 2 != 0 else "Зворотній"
+        # --- ЛОГІКА ДВОЗМІННОГО НАРЯДУ (DOUBLE) ---
+        if duty_type == "DOUBLE":
+            # Зміна 1 (ранок-день)
+            shift1_trips = []
+            shift2_trips = []
             
-            trips.append({
+            # Нульовий рейс 1-ї зміни
+            zero_end = current_time + timedelta(minutes=zero_trip_min)
+            shift1_trips.append({
                 "id": global_trip_counter,
-                "direction": direction,
+                "trip_sequence": len(shift1_trips) + 1,
+                "direction": "PULL_OUT",
                 "start_time": current_time.strftime("%H:%M"),
-                "end_time": trip_end.strftime("%H:%M"),
-                "is_zero": False
+                "end_time": zero_end.strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_OUT"
+            })
+            global_trip_counter += 1
+            current_time = zero_end
+            
+            # Перезмінка приблизно о 14:00 - 14:30
+            shift_split_time = start_dt + timedelta(hours=8, minutes=30)
+            had_lunch_shift1 = False
+            
+            while current_time < shift_split_time and current_time < end_dt:
+                dur = actual_trip_min
+                if use_elastic_smoother and (7 <= current_time.hour <= 9):
+                    dur = int(actual_trip_min * 1.25)
+                
+                t_end = current_time + timedelta(minutes=dur)
+                direction = "FORWARD" if len(shift1_trips) % 2 != 0 else "BACKWARD"
+                
+                shift1_trips.append({
+                    "id": global_trip_counter,
+                    "trip_sequence": len(shift1_trips) + 1,
+                    "direction": direction,
+                    "start_time": current_time.strftime("%H:%M"),
+                    "end_time": t_end.strftime("%H:%M"),
+                    "is_zero": False,
+                    "trip_type": "REGULAR"
+                })
+                global_trip_counter += 1
+                total_generated_trips += 1
+                current_time = t_end
+                
+                # Обід 1-ї зміни
+                worked_h = (current_time - v_start).total_seconds() / 3600
+                if not had_lunch_shift1 and worked_h >= 4.0:
+                    current_time += timedelta(minutes=15)
+                    had_lunch_shift1 = True
+                else:
+                    current_time += timedelta(minutes=actual_layover_min)
+                    
+            shifts.append({
+                "shift_sequence": 1,
+                "shift_type": "FIRST_SHIFT",
+                "has_break": had_lunch_shift1,
+                "break_duration_minutes": 15 if had_lunch_shift1 else 0,
+                "trips": shift1_trips
             })
             
-            global_trip_counter += 1
-            total_generated_trips += 1
-            current_time = trip_end
+            # Зміна 2 (день-вечір)
+            had_lunch_shift2 = False
+            shift2_start = current_time
             
-            # --- ОБІД ВОДІЯ ТА ВАГОНА НА КІЛЬЦІ ---
-            worked_hours = (current_time - v_start).total_seconds() / 3600
-            if not had_lunch and worked_hours >= 4.0:
-                # Вагон стає на кільце на 20 хвилин (перевищує стандартну відтяжку)
-                current_time += timedelta(minutes=20)
-                had_lunch = True
-            else:
-                # Стандартна відтяжка (до 10 хв)
-                current_time += timedelta(minutes=actual_layover_min)
+            while current_time < end_dt:
+                dur = actual_trip_min
+                if use_elastic_smoother and (16 <= current_time.hour <= 18):
+                    dur = int(actual_trip_min * 1.25)
+                    
+                t_end = current_time + timedelta(minutes=dur)
+                if t_end > end_dt:
+                    break
+                    
+                direction = "FORWARD" if (len(shift1_trips) + len(shift2_trips)) % 2 != 0 else "BACKWARD"
+                shift2_trips.append({
+                    "id": global_trip_counter,
+                    "trip_sequence": len(shift2_trips) + 1,
+                    "direction": direction,
+                    "start_time": current_time.strftime("%H:%M"),
+                    "end_time": t_end.strftime("%H:%M"),
+                    "is_zero": False,
+                    "trip_type": "REGULAR"
+                })
+                global_trip_counter += 1
+                total_generated_trips += 1
+                current_time = t_end
+                
+                worked_h2 = (current_time - shift2_start).total_seconds() / 3600
+                if not had_lunch_shift2 and worked_h2 >= 4.0:
+                    current_time += timedelta(minutes=15)
+                    had_lunch_shift2 = True
+                else:
+                    current_time += timedelta(minutes=actual_layover_min)
+                    
+            # Заїзд 2-ї зміни у депо
+            shift2_trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": len(shift2_trips) + 1,
+                "direction": "PULL_IN",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_IN"
+            })
+            global_trip_counter += 1
+            
+            shifts.append({
+                "shift_sequence": 2,
+                "shift_type": "SECOND_SHIFT",
+                "has_break": had_lunch_shift2,
+                "break_duration_minutes": 15 if had_lunch_shift2 else 0,
+                "trips": shift2_trips
+            })
 
-        # --- ЗАЇЗД В ДЕПО ---
-        trips.append({
-            "id": global_trip_counter,
-            "direction": "Заїзд у Депо",
-            "start_time": current_time.strftime("%H:%M"),
-            "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
-            "is_zero": True
-        })
-        global_trip_counter += 1
+        # --- ЛОГІКА РОЗРИВНОГО НАРЯДУ (SPLIT: 2 різних вагони для ТО в депо) ---
+        elif duty_type == "SPLIT":
+            shift1_trips = []
+            shift2_trips = []
+            
+            # Виїзд першого вагона
+            shift1_trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": 1,
+                "direction": "PULL_OUT",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_OUT"
+            })
+            global_trip_counter += 1
+            current_time += timedelta(minutes=zero_trip_min)
+            
+            # Робота першого вагона до 14:00 (понад 8 годин)
+            split_time = start_dt + timedelta(hours=8, minutes=15)
+            while current_time < split_time:
+                dur = actual_trip_min
+                t_end = current_time + timedelta(minutes=dur)
+                direction = "FORWARD" if len(shift1_trips) % 2 != 0 else "BACKWARD"
+                shift1_trips.append({
+                    "id": global_trip_counter,
+                    "trip_sequence": len(shift1_trips) + 1,
+                    "direction": direction,
+                    "start_time": current_time.strftime("%H:%M"),
+                    "end_time": t_end.strftime("%H:%M"),
+                    "is_zero": False,
+                    "trip_type": "REGULAR"
+                })
+                global_trip_counter += 1
+                total_generated_trips += 1
+                current_time = t_end + timedelta(minutes=actual_layover_min)
+                
+            # Перший вагон заїжджає в депо на ремонт/ТО з найближчої зупинки
+            shift1_trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": len(shift1_trips) + 1,
+                "direction": "PULL_IN",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_IN"
+            })
+            global_trip_counter += 1
+            
+            shifts.append({
+                "shift_sequence": 1,
+                "shift_type": "SPLIT_VEHICLE_1_MAINTENANCE",
+                "has_break": True,
+                "trips": shift1_trips
+            })
+            
+            # Другий вагон виїжджає з депо на ту саму зупинку майже одночасно
+            shift2_start = current_time + timedelta(minutes=5)
+            current_time = shift2_start
+            shift2_trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": 1,
+                "direction": "PULL_OUT",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_OUT"
+            })
+            global_trip_counter += 1
+            current_time += timedelta(minutes=zero_trip_min)
+            
+            while current_time < end_dt:
+                dur = actual_trip_min
+                t_end = current_time + timedelta(minutes=dur)
+                if t_end > end_dt:
+                    break
+                direction = "FORWARD" if len(shift2_trips) % 2 != 0 else "BACKWARD"
+                shift2_trips.append({
+                    "id": global_trip_counter,
+                    "trip_sequence": len(shift2_trips) + 1,
+                    "direction": direction,
+                    "start_time": current_time.strftime("%H:%M"),
+                    "end_time": t_end.strftime("%H:%M"),
+                    "is_zero": False,
+                    "trip_type": "REGULAR"
+                })
+                global_trip_counter += 1
+                total_generated_trips += 1
+                current_time = t_end + timedelta(minutes=actual_layover_min)
+                
+            shift2_trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": len(shift2_trips) + 1,
+                "direction": "PULL_IN",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_IN"
+            })
+            global_trip_counter += 1
+            
+            shifts.append({
+                "shift_sequence": 2,
+                "shift_type": "SPLIT_VEHICLE_2",
+                "has_break": True,
+                "trips": shift2_trips
+            })
+
+        # --- СТАНДАРТНИЙ ОДНОЗМІННИЙ / ПІКОВИЙ (SINGLE / PEAK) ---
+        else:
+            trips = []
+            # Виїзд
+            trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": 1,
+                "direction": "PULL_OUT",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_OUT"
+            })
+            global_trip_counter += 1
+            current_time += timedelta(minutes=zero_trip_min)
+            
+            target_limit = start_dt + timedelta(hours=9) if duty_type == "SINGLE" else end_dt
+            had_lunch = False
+            
+            while current_time < target_limit and current_time < end_dt:
+                dur = actual_trip_min
+                t_end = current_time + timedelta(minutes=dur)
+                if t_end > end_dt:
+                    break
+                direction = "FORWARD" if len(trips) % 2 != 0 else "BACKWARD"
+                trips.append({
+                    "id": global_trip_counter,
+                    "trip_sequence": len(trips) + 1,
+                    "direction": direction,
+                    "start_time": current_time.strftime("%H:%M"),
+                    "end_time": t_end.strftime("%H:%M"),
+                    "is_zero": False,
+                    "trip_type": "REGULAR"
+                })
+                global_trip_counter += 1
+                total_generated_trips += 1
+                current_time = t_end
+                
+                worked_h = (current_time - v_start).total_seconds() / 3600
+                if not had_lunch and worked_h >= 4.0:
+                    current_time += timedelta(minutes=15)
+                    had_lunch = True
+                else:
+                    current_time += timedelta(minutes=actual_layover_min)
+                    
+            # Заїзд у депо
+            trips.append({
+                "id": global_trip_counter,
+                "trip_sequence": len(trips) + 1,
+                "direction": "PULL_IN",
+                "start_time": current_time.strftime("%H:%M"),
+                "end_time": (current_time + timedelta(minutes=zero_trip_min)).strftime("%H:%M"),
+                "is_zero": True,
+                "trip_type": "PULL_IN"
+            })
+            global_trip_counter += 1
+            
+            shifts.append({
+                "shift_sequence": 1,
+                "shift_type": duty_type,
+                "has_break": had_lunch,
+                "trips": trips
+            })
 
         duties.append({
-            "duty_number": f"{route_id}-{v_idx + 1:02d}",
-            "metrics": {"total_trips": len(trips), "had_lunch": had_lunch},
-            "shifts": [{"id": v_idx + 1, "shift_type": "FULL", "trips": trips}]
+            "duty_number": duty_num_str,
+            "duty_type": duty_type,
+            "metrics": {
+                "total_shifts": len(shifts),
+                "total_trips": sum(len(s["trips"]) for s in shifts)
+            },
+            "shifts": shifts
         })
     
-    # Розрахунок штучно заниженої швидкості, якщо застосовувалася відтяжка 10 хв
     actual_speed = round(route_length_km / max(0.01, (actual_trip_min / 60)), 1)
 
     return {
@@ -143,26 +405,17 @@ class TransitSolver:
     контролю норм КЗпП України та валідації електробусів.
     """
     def __init__(self):
-        # Константи КЗпП та трудового права
         self.MAX_SHIFT_MINUTES = 600  # 10 годин граничного робочого часу за зміну
         self.MIN_LUNCH_WINDOW_MIN = 240  # 4 години від початку зміни
         self.MAX_LUNCH_WINDOW_MIN = 360  # 6 годин від початку зміни
 
-        # Стандарти підготовчого часу (хвилини)
         self.PREP_TIME_TRAM = 10
         self.PREP_TIME_TROLLEYBUS = 19
         self.PREP_TIME_ELECTROBUS = 15
 
-        # Нормативні перерви на обід (хвилини)
-        self.STANDARD_LUNCH_TRAM = 15      # 15 хв (або 10 хв залежно від графіка)
-        self.STANDARD_LUNCH_TROLLEYBUS = 20 # 20 хв
-        self.STANDARD_LUNCH_ELECTROBUS = 20 # 20 хв
-
-        # Параметри Електробуса
-        self.ELECTROBUS_BASE_CONSUMPTION_KWH_PER_KM = 1.3
-        self.ELECTROBUS_CHARGING_POWER_KW = 150.0  # Пантограф / Швидкісна станція 150 кВт
-        self.ELECTROBUS_MIN_SOC_PCT = 20.0        # Мінімальний поріг акумулятора 20%
-        self.ELECTROBUS_TARGET_SOC_PCT = 90.0     # Цільовий рівень зарядки 90%
+        self.STANDARD_LUNCH_TRAM = 15
+        self.STANDARD_LUNCH_TROLLEYBUS = 20
+        self.STANDARD_LUNCH_ELECTROBUS = 20
 
     def validate_driver_duty(
         self,
@@ -176,16 +429,10 @@ class TransitSolver:
         lunch_location_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Валідує зміну водія відповідно до регламенту КП «ОМЕТ» та КЗпП України:
-        1. Автоматичний облік підготовчо-заключного часу (10 хв трамвай / 19 хв тролейбус).
-        2. Нормативний обід (15 хв трамвай / 20 хв тролейбус).
-        3. Понаднормовий обід (перевищення норми) сумується в робочий час.
-        4. Граничний ліміт зміни: 10 годин (600 хв).
-        5. Вікно обіду: від 4 до 6 годин від початку зміни.
+        Валідує зміну водія відповідно до регламенту КП «ОМЕТ» та КЗпП України.
         """
         ttype = (transport_type or "tram").lower()
 
-        # Підготовчий час
         if ttype == "trolleybus":
             prep_time = self.PREP_TIME_TROLLEYBUS
             std_lunch = self.STANDARD_LUNCH_TROLLEYBUS
@@ -196,13 +443,9 @@ class TransitSolver:
             prep_time = self.PREP_TIME_TRAM
             std_lunch = self.STANDARD_LUNCH_TRAM
 
-        # Понаднормовий час обіду
         overtime_lunch = max(0, actual_lunch_min - std_lunch)
-
-        # Загальний робочий час
         total_shift_min = driving_min + prep_time + overtime_lunch
 
-        # Перевірки
         is_violating_10h = total_shift_min > self.MAX_SHIFT_MINUTES
 
         lunch_window_violation = False
@@ -221,7 +464,7 @@ class TransitSolver:
         warnings = []
         if is_violating_10h:
             warnings.append(
-                f"ПОРУШЕННЯ КЗпП: Зміна {duty_id} перевищує 10 годин ({total_shift_min} хв із урахуванням підготовчого часу та понаднормового обіду +{overtime_lunch} хв)."
+                f"ПОРУШЕННЯ КЗпП: Зміна {duty_id} перевищує 10 годин ({total_shift_min} хв із урахуванням t_prep та понаднормового обіду +{overtime_lunch} хв)."
             )
         if lunch_window_violation:
             warnings.append(
@@ -241,143 +484,7 @@ class TransitSolver:
             "is_lunch_compliant": is_lunch_compliant,
             "lunch_window_violation": lunch_window_violation,
             "warnings": warnings,
-            "lunch_location_name": lunch_location_name or "Старосінна площа (Вузол)"
+            "lunch_location_name": lunch_location_name or "Старосінна площа (Хаб)"
         }
-
-    def calculate_electrobus_battery(
-        self,
-        block_id: str,
-        route_length_km: float,
-        idle_minutes_at_terminal: float,
-        current_soc_pct: float = 95.0,
-        battery_capacity_kwh: float = 200.0,
-        ambient_temp_c: float = 20.0
-    ) -> Dict[str, Any]:
-        """
-        Валідація стану акумулятора та зарядки для Електробуса.
-        Враховує сезонні коефіцієнти (зима +40%, літо +25%).
-        """
-        multiplier = 1.0
-        if ambient_temp_c < 0:
-            multiplier = 1.40  # Зима (+40% на опалення)
-        elif ambient_temp_c > 28:
-            multiplier = 1.25  # Літо (+25% на кондиціонер)
-
-        effective_consumption = self.ELECTROBUS_BASE_CONSUMPTION_KWH_PER_KM * multiplier
-        consumed_kwh = route_length_km * effective_consumption
-
-        # Отриманий заряд за час вистою на станції 150 кВт (ККД 90%)
-        charged_kwh = (self.ELECTROBUS_CHARGING_POWER_KW * (idle_minutes_at_terminal / 60.0)) * 0.90
-
-        net_kwh_change = charged_kwh - consumed_kwh
-        net_soc_pct_change = (net_kwh_change / battery_capacity_kwh) * 100.0
-
-        end_soc = min(100.0, max(0.0, current_soc_pct + net_soc_pct_change))
-        is_battery_low = end_soc < self.ELECTROBUS_MIN_SOC_PCT
-
-        # Необхідний час зарядки до 90% SoC
-        target_kwh = battery_capacity_kwh * (self.ELECTROBUS_TARGET_SOC_PCT / 100.0)
-        current_kwh = (current_soc_pct / 100.0) * battery_capacity_kwh
-        needed_kwh = max(0.0, target_kwh - current_kwh + consumed_kwh)
-        required_charging_min = math.ceil((needed_kwh / (self.ELECTROBUS_CHARGING_POWER_KW * 0.90)) * 60)
-
-        warnings = []
-        if is_battery_low:
-            warnings.append(
-                f"УВАГА: Низький заряд батареї електробуса {block_id} (залишок {round(end_soc, 1)}%). Необхідна додаткова зарядка."
-            )
-        if required_charging_min > idle_minutes_at_terminal:
-            warnings.append(
-                f"ПОПЕРЕДЖЕННЯ: Час вистою ({int(idle_minutes_at_terminal)} хв) менший за необхідний час зарядки ({required_charging_min} хв) для електробуса {block_id}."
-            )
-
-        return {
-            "block_id": block_id,
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "start_soc_pct": current_soc_pct,
-            "end_soc_pct": round(end_soc, 1),
-            "consumed_kwh": round(consumed_kwh, 1),
-            "charged_kwh": round(charged_kwh, 1),
-            "is_battery_low": is_battery_low,
-            "required_charging_min": required_charging_min,
-            "ambient_temp_c": ambient_temp_c,
-            "warnings": warnings
-        }
-
-    def apply_delay_cascade(
-        self,
-        schedule_data: List[Dict[str, Any]],
-        block_id: str,
-        start_time_min: int,
-        delay_min: int,
-        ambient_temp_c: float = 20.0
-    ) -> Tuple[List[Dict[str, Any]], List[str]]:
-        """
-        Каскадно застосовує затримку/відтяжку до всіх наступних рейсів вагона (block_id)
-        і повертає оновлений розклад та список застережень.
-        """
-        updated_schedule = copy.deepcopy(schedule_data)
-        warnings = []
-
-        target_block = next((b for b in updated_schedule if b.get("block_id") == block_id or b.get("id") == block_id), None)
-        if not target_block or "trips" not in target_block:
-            return updated_schedule, [f"КРИТИЧНО: Блок {block_id} не знайдено."]
-
-        # 1. Каскадний зсув часу
-        for trip in target_block["trips"]:
-            trip_start = trip.get("start_time", 0)
-            if trip_start >= start_time_min:
-                trip["start_time"] = trip_start + delay_min
-                trip["end_time"] = trip.get("end_time", trip_start + 30) + delay_min
-                trip["is_delayed"] = True
-                trip["slack_min"] = trip.get("slack_min", 0) + delay_min
-
-        # 2. Перевірка вагонного блоку та перерв
-        block_trips = sorted(target_block["trips"], key=lambda x: x.get("start_time", 0))
-        transport_type = target_block.get("vehicle_type", target_block.get("type", "tram")).lower()
-
-        shift_start = block_trips[0].get("start_time", 0) if block_trips else start_time_min
-        shift_end = block_trips[-1].get("end_time", 0) if block_trips else start_time_min
-
-        total_driving = sum(t.get("end_time", 0) - t.get("start_time", 0) for t in block_trips)
-        actual_lunch = 0
-        lunch_start = None
-
-        for i in range(len(block_trips) - 1):
-            curr_trip = block_trips[i]
-            next_trip = block_trips[i+1]
-            break_dur = next_trip.get("start_time", 0) - curr_trip.get("end_time", 0)
-
-            if break_dur >= 10:  # Вважається обідньою перервою
-                actual_lunch += break_dur
-                if lunch_start is None:
-                    lunch_start = curr_trip.get("end_time", 0)
-
-            if break_dur < 0:
-                warnings.append(f"КРИТИЧНО: Накладання рейсів для борту {block_id}.")
-
-        # 3. Валідація КЗпП
-        duty_res = self.validate_driver_duty(
-            duty_id=f"duty_{block_id}",
-            transport_type=transport_type,
-            shift_start_min=shift_start,
-            shift_end_min=shift_end,
-            driving_min=total_driving,
-            actual_lunch_min=actual_lunch,
-            lunch_start_min=lunch_start
-        )
-        warnings.extend(duty_res["warnings"])
-
-        # 4. Валідація електробуса
-        if transport_type == "electrobus":
-            battery_res = self.calculate_electrobus_battery(
-                block_id=block_id,
-                route_length_km=12.4,
-                idle_minutes_at_terminal=actual_lunch or 15,
-                ambient_temp_c=ambient_temp_c
-            )
-            warnings.extend(battery_res["warnings"])
-
-        return updated_schedule, warnings
 
 transit_solver = TransitSolver()

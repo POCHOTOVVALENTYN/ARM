@@ -6,14 +6,14 @@ import json
 
 from app.core.database import AsyncSessionLocal
 from app.api.dependencies import get_db, get_current_dispatcher, get_current_active_superuser
-from app.models.models import DepotModel, HubNodeModel, RouteDepotConfigModel, BreakLocationConfigModel, SystemConfig
+from app.models.models import DepotModel, HubNodeModel, RouteDepotConfigModel, BreakLocationConfigModel, SystemConfig, Dispatcher
 from app.core.redis import get_cache, set_cache, invalidate_cache
 from app.schemas.settings import (
     DepotCreate, HubNodeCreate, RouteDepotConfigCreate, BreakLocationConfigCreate,
     SystemConfigResponse, SystemConfigUpdate
 )
 
-router = APIRouter(prefix="/settings", tags=["Settings"])
+router = APIRouter(prefix="/settings", tags=["Settings & Fleet Config"])
 
 # --- SYSTEM CONFIG (SINGLE-ROW TABLE PATTERN + RBAC) ---
 @router.get("", response_model=SystemConfigResponse)
@@ -89,7 +89,11 @@ async def get_depots(db: AsyncSession = Depends(get_db)):
     return data
 
 @router.post("/depots", response_model=Dict[str, Any])
-async def create_depot(depot: DepotCreate, db: AsyncSession = Depends(get_db)):
+async def create_depot(
+    depot: DepotCreate, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     new_depot = DepotModel(**depot.model_dump())
     db.add(new_depot)
     await db.commit()
@@ -97,7 +101,11 @@ async def create_depot(depot: DepotCreate, db: AsyncSession = Depends(get_db)):
     return depot.model_dump()
 
 @router.delete("/depots/{depot_id}")
-async def delete_depot(depot_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_depot(
+    depot_id: str, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     result = await db.execute(select(DepotModel).where(DepotModel.id == depot_id))
     depot = result.scalar_one_or_none()
     if depot:
@@ -127,7 +135,11 @@ async def get_hubs(db: AsyncSession = Depends(get_db)):
     return data
 
 @router.post("/hubs", response_model=Dict[str, Any])
-async def create_hub(hub: HubNodeCreate, db: AsyncSession = Depends(get_db)):
+async def create_hub(
+    hub: HubNodeCreate, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     new_hub = HubNodeModel(**hub.model_dump())
     db.add(new_hub)
     await db.commit()
@@ -135,7 +147,11 @@ async def create_hub(hub: HubNodeCreate, db: AsyncSession = Depends(get_db)):
     return hub.model_dump()
 
 @router.delete("/hubs/{hub_id}")
-async def delete_hub(hub_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_hub(
+    hub_id: str, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     result = await db.execute(select(HubNodeModel).where(HubNodeModel.id == hub_id))
     hub = result.scalar_one_or_none()
     if hub:
@@ -165,7 +181,11 @@ async def get_route_depot_configs(db: AsyncSession = Depends(get_db)):
     return data
 
 @router.post("/route-depot-configs", response_model=Dict[str, Any])
-async def create_route_depot_config(config: RouteDepotConfigCreate, db: AsyncSession = Depends(get_db)):
+async def create_route_depot_config(
+    config: RouteDepotConfigCreate, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     new_config = RouteDepotConfigModel(**config.model_dump())
     db.add(new_config)
     await db.commit()
@@ -173,7 +193,11 @@ async def create_route_depot_config(config: RouteDepotConfigCreate, db: AsyncSes
     return config.model_dump()
 
 @router.delete("/route-depot-configs/{config_id}")
-async def delete_route_depot_config(config_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_route_depot_config(
+    config_id: str, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     result = await db.execute(select(RouteDepotConfigModel).where(RouteDepotConfigModel.id == config_id))
     config = result.scalar_one_or_none()
     if config:
@@ -203,7 +227,11 @@ async def get_break_locations(db: AsyncSession = Depends(get_db)):
     return data
 
 @router.post("/break-locations", response_model=Dict[str, Any])
-async def create_break_location(loc: BreakLocationConfigCreate, db: AsyncSession = Depends(get_db)):
+async def create_break_location(
+    loc: BreakLocationConfigCreate, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     new_loc = BreakLocationConfigModel(**loc.model_dump())
     db.add(new_loc)
     await db.commit()
@@ -211,7 +239,11 @@ async def create_break_location(loc: BreakLocationConfigCreate, db: AsyncSession
     return loc.model_dump()
 
 @router.delete("/break-locations/{loc_id}")
-async def delete_break_location(loc_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_break_location(
+    loc_id: str, 
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
     result = await db.execute(select(BreakLocationConfigModel).where(BreakLocationConfigModel.id == loc_id))
     loc = result.scalar_one_or_none()
     if loc:

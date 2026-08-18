@@ -1,16 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from typing import List, Optional, Union
 from datetime import date
 from pydantic import BaseModel
 import uuid
 
 from app.api.dependencies import get_db, get_current_dispatcher
-from app.models.models import Driver, Vehicle, DriverDuty
-from app.api.websocket import manager as ws_manager
+from app.models.models import Driver, Vehicle, Waybill, StationModel
+from app.models.schedule import StaticDuty, StaticShift, StaticTrip, StaticStopTime
+from app.api.websocket import ws_manager
 
-router = APIRouter(prefix="/crew", tags=["Crew Assignment"])
+router = APIRouter(prefix="/crew", tags=["Crew & Resources"])
 
 # Схеми для валідації
 class AssignmentCreate(BaseModel):
@@ -20,13 +22,13 @@ class AssignmentCreate(BaseModel):
     target_date: date
 
 class AssignmentResponse(BaseModel):
-    id: Union[int, str]
-    duty_id: Optional[int] = None
-    driver_id: Optional[Union[int, str]] = None
-    vehicle_id: Optional[str] = None
+    id: int
+    duty_id: int
+    driver_id: str
+    vehicle_id: str
     target_date: Optional[date] = None
     dispatcher_id: Optional[int] = None
-    status: Optional[str] = "ASSIGNED"
+    status: Optional[str] = "ACTIVE"
 
     class Config:
         from_attributes = True
@@ -40,8 +42,8 @@ async def get_available_resources(
     """Повертає списки водіїв та рухомого складу, які ще не призначені на вказану дату."""
     check_date = target_date or date.today()
     
-    # 1. Знаходимо вже призначених водіїв та ТЗ на цю дату
-    assigned_query = select(DriverDuty.driver_id, DriverDuty.vehicle_id).where(DriverDuty.target_date == check_date)
+    # 1. Знаходимо вже призначених водіїв та ТЗ на цю дату у таблиці waybills
+    assigned_query = select(Waybill.driver_id, Waybill.vehicle_id).where(Waybill.date == check_date)
     result = await db.execute(assigned_query)
     assigned = result.all()
     
@@ -60,7 +62,7 @@ async def get_available_resources(
     # 3. Отримуємо вільні транспортні засоби
     vehicles_query = select(Vehicle).where(
         and_(
-            Vehicle.status == "AVAILABLE",
+            Vehicle.status.in_(["AVAILABLE", "ACTIVE"]),
             Vehicle.id.notin_(assigned_vehicles) if assigned_vehicles else True
         )
     )
@@ -91,12 +93,31 @@ async def get_daily_deployments(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_dispatcher)
 ):
-    """Повертає всі активні призначення екіпажів на вказану дату."""
+    """Повертає всі активні призначення екіпажів на вказану дату (з Waybill)."""
     check_date = target_date or date.today()
-    query = select(DriverDuty).where(DriverDuty.target_date == check_date)
+    query = (
+        select(Waybill)
+        .where(Waybill.date == check_date)
+        .options(selectinload(Waybill.duty), selectinload(Waybill.driver), selectinload(Waybill.vehicle))
+    )
     result = await db.execute(query)
-    duties = result.scalars().all()
-    return duties
+    waybills = result.scalars().all()
+    
+    return [
+        {
+            "id": w.id,
+            "duty_id": w.duty_id,
+            "duty_number": w.duty.duty_number if w.duty else f"#{w.duty_id}",
+            "route_id": w.duty.route_id if w.duty else "UNKNOWN",
+            "driver_id": w.driver_id,
+            "driver_name": w.driver.full_name if w.driver else f"Водій #{w.driver_id}",
+            "vehicle_id": w.vehicle_id,
+            "vehicle_model": w.vehicle.model if w.vehicle else "Tatra T3",
+            "target_date": str(w.date),
+            "status": w.status
+        }
+        for w in waybills
+    ]
 
 @router.post("/assign", response_model=AssignmentResponse, summary="Призначення водія та рухомого складу на наряд")
 async def assign_crew_to_duty(
@@ -104,21 +125,20 @@ async def assign_crew_to_duty(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_dispatcher)
 ):
-    """Створює електронну путівку: прив'язує водія та вагон до наряду."""
+    """Створює електронну путівку (Waybill): прив'язує водія та вагон до наряду."""
     
-    new_assignment = DriverDuty(
-        id=str(uuid.uuid4()),
+    new_waybill = Waybill(
         duty_id=assignment.duty_id,
         driver_id=str(assignment.driver_id),
         vehicle_id=str(assignment.vehicle_id),
-        target_date=assignment.target_date,
+        date=assignment.target_date,
         dispatcher_id=current_user.id,
-        status="ASSIGNED"
+        status="ACTIVE"
     )
     
-    db.add(new_assignment)
+    db.add(new_waybill)
     await db.commit()
-    await db.refresh(new_assignment)
+    await db.refresh(new_waybill)
     
     # WebSocket сповіщення диспетчерам про нову путівку
     await ws_manager.broadcast({
@@ -128,71 +148,16 @@ async def assign_crew_to_duty(
             "driver_id": str(assignment.driver_id),
             "vehicle_id": str(assignment.vehicle_id),
             "target_date": assignment.target_date.isoformat(),
-            "assignment_id": new_assignment.id
+            "assignment_id": new_waybill.id
         }
     })
     
-    return new_assignment
-
-@router.get("/waybill", summary="Генерація електронного шляхового листа")
-async def get_smart_waybill(
-    driver_id: Union[int, str] = Query(...),
-    target_date: date = Query(...),
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_dispatcher)
-):
-    """Генерує електронний шляховий лист (путівку) для водія на вказану дату."""
-    
-    # 1. Шукаємо призначення (путівку)
-    driver_id_str = str(driver_id)
-    duty_query = select(DriverDuty).where(
-        and_(
-            (DriverDuty.driver_id == driver_id_str) | (DriverDuty.driver_id == driver_id),
-            DriverDuty.target_date == target_date
-        )
-    ).order_by(DriverDuty.id.desc())
-    assignment = (await db.execute(duty_query)).scalars().first()
-    
-    if not assignment:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"На дату {target_date} для водія #{driver_id} немає відкритих путівок"
-        )
-
-    # 2. Отримуємо дані про водія та вагон
-    driver_query = select(Driver).where((Driver.id == driver_id_str) | (Driver.id == driver_id))
-    driver = (await db.execute(driver_query)).scalars().first()
-    
-    vehicle_query = select(Vehicle).where(Vehicle.id == str(assignment.vehicle_id))
-    vehicle = (await db.execute(vehicle_query)).scalars().first()
-    
-    driver_info = {
-        "id": driver.id if driver else driver_id,
-        "full_name": (driver.full_name or driver.name) if driver else f"Водій #{driver_id}",
-        "class_rank": (driver.class_rank or 1) if driver else 1
-    }
-    vehicle_info = {
-        "id": vehicle.id if vehicle else str(assignment.vehicle_id),
-        "model": vehicle.model if vehicle else "Tatra T3"
-    }
-
-    mock_trips = [
-        {"trip_number": 1, "route": "18", "plan_start": "06:00", "plan_end": "06:45", "fact_start": "06:01", "fact_end": "06:47", "status": "COMPLETED"},
-        {"trip_number": 2, "route": "18", "plan_start": "07:00", "plan_end": "07:45", "fact_start": "07:02", "fact_end": "07:46", "status": "COMPLETED"},
-        {"trip_number": 3, "route": "18", "plan_start": "08:00", "plan_end": "08:45", "fact_start": "08:05", "fact_end": None, "status": "IN_PROGRESS"},
-        {"trip_number": 4, "route": "18", "plan_start": "09:00", "plan_end": "09:45", "fact_start": None, "fact_end": None, "status": "PENDING"},
-    ]
-
-    return {
-        "waybill_id": assignment.id,
-        "target_date": target_date.isoformat(),
-        "driver": driver_info,
-        "vehicle": vehicle_info,
-        "duty_id": assignment.duty_id,
-        "trips": mock_trips,
-        "summary": {
-            "total_planned_trips": 4,
-            "completed_trips": 2,
-            "total_work_hours": "8 год 15 хв"
-        }
-    }
+    return AssignmentResponse(
+        id=new_waybill.id,
+        duty_id=new_waybill.duty_id,
+        driver_id=new_waybill.driver_id,
+        vehicle_id=new_waybill.vehicle_id,
+        target_date=new_waybill.date,
+        dispatcher_id=new_waybill.dispatcher_id,
+        status=new_waybill.status
+    )

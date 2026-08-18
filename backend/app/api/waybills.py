@@ -3,24 +3,25 @@ from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, and_
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.models.models import Waybill, Vehicle
+from app.models.models import Waybill, Vehicle, Driver, StationModel
 from app.models.schedule import StaticDuty, StaticShift, StaticTrip, StaticStopTime, Schedule, ScheduleStatus
 from app.api.dependencies import get_current_dispatcher
 from app.api.websocket import ws_manager
 
-router = APIRouter(prefix="/waybills", tags=["Smart Waybills"])
+router = APIRouter(prefix="/waybills", tags=["Smart Waybills & Crew Assignment"])
 
 class WaybillCreate(BaseModel):
     duty_id: int
     vehicle_id: str
     driver_id: str
     target_date: str # Формат YYYY-MM-DD
+    shift_sequence: Optional[int] = 1
 
 @router.post("/assign")
 async def assign_waybill(
@@ -36,7 +37,7 @@ async def assign_waybill(
     except Exception:
         waybill_date = date.today()
 
-    # 1. Перевіряємо наявність ТЗ або створюємо/оновлюємо його статус
+    # 1. Перевіряємо наявність ТЗ або оновлюємо статус
     veh_res = await db.execute(select(Vehicle).where(Vehicle.id == req.vehicle_id))
     vehicle_obj = veh_res.scalar_one_or_none()
     if not vehicle_obj:
@@ -44,19 +45,36 @@ async def assign_waybill(
             id=req.vehicle_id,
             type="TRAM",
             model="Tatra T3",
-            status="ACTIVE",
+            status="ON_ROUTE",
             is_active=True
         )
         db.add(vehicle_obj)
         await db.flush()
     else:
-        vehicle_obj.status = "ACTIVE"
+        vehicle_obj.status = "ON_ROUTE"
         vehicle_obj.is_active = True
 
-    # 2. Запис електронної путівки в базу даних
+    # 2. Перевіряємо водія
+    driver_res = await db.execute(select(Driver).where(Driver.id == req.driver_id))
+    driver_obj = driver_res.scalar_one_or_none()
+    if not driver_obj:
+        driver_obj = Driver(
+            id=req.driver_id,
+            full_name=f"Водій #{req.driver_id}",
+            name=f"Водій #{req.driver_id}",
+            status="WORK",
+            is_active=True
+        )
+        db.add(driver_obj)
+        await db.flush()
+    else:
+        driver_obj.status = "WORK"
+
+    # 3. Запис електронної путівки в базу даних
     new_waybill = Waybill(
         date=waybill_date,
         duty_id=req.duty_id,
+        shift_sequence=req.shift_sequence or 1,
         vehicle_id=req.vehicle_id,
         driver_id=req.driver_id,
         status="ACTIVE"
@@ -64,7 +82,7 @@ async def assign_waybill(
     db.add(new_waybill)
     await db.flush()
     
-    # 3. Витягуємо повну структуру рейсів та зупинок наряду для Redis
+    # 4. Витягуємо повну структуру рейсів та зупинок наряду для Redis
     query = (
         select(StaticDuty)
         .where(StaticDuty.id == req.duty_id)
@@ -90,12 +108,14 @@ async def assign_waybill(
                     "stop_id": str(st.stop_id),
                     "stop_sequence": st.stop_sequence,
                     "trip_id": trip.id,
-                    "direction": str(trip.direction),
+                    "direction": str(t.direction) if 't' in locals() else str(trip.direction),
                     "arrival_minute": arr_min,
-                    "departure_minute": dep_min
+                    "departure_minute": dep_min,
+                    "is_control_point": st.is_control_point
                 })
 
     schedule_cache = {
+        "waybill_id": new_waybill.id,
         "duty_id": duty_obj.id,
         "duty_number": duty_obj.duty_number,
         "route_id": duty_obj.route_id,
@@ -105,7 +125,7 @@ async def assign_waybill(
         "stops": stops_cache
     }
     
-    # 4. Завантаження розкладу в Redis (термін дії - 24 години = 86400 с)
+    # 5. Завантаження розкладу в Redis (термін дії - 24 години)
     try:
         redis = await get_redis()
         await redis.set(f"schedule_cache:vehicle:{req.vehicle_id}", json.dumps(schedule_cache), ex=86400)
@@ -114,17 +134,21 @@ async def assign_waybill(
 
     await db.commit()
 
-    # 5. Оповіщення диспетчерів через WebSocket
+    # 6. Оповіщення диспетчерів через WebSocket
     await ws_manager.broadcast({
-        "type": "waybill_assigned",
-        "waybill_id": new_waybill.id,
-        "vehicle_id": req.vehicle_id,
-        "duty_id": req.duty_id,
-        "route_id": duty_obj.route_id
+        "type": "WAYBILL_ASSIGNED",
+        "payload": {
+            "waybill_id": new_waybill.id,
+            "vehicle_id": req.vehicle_id,
+            "duty_id": req.duty_id,
+            "driver_id": req.driver_id,
+            "route_id": duty_obj.route_id,
+            "duty_number": duty_obj.duty_number
+        }
     })
 
     return {
-        "message": "Путівку створено, телеметрію активовано!", 
+        "message": "Путівку створено, телеметрію та похвилинний розклад активовано!", 
         "waybill_id": new_waybill.id,
         "vehicle_id": req.vehicle_id,
         "duty_number": duty_obj.duty_number
@@ -141,7 +165,16 @@ async def get_today_waybills(
     except Exception:
         req_date = date.today()
 
-    query = select(Waybill).where(Waybill.date == req_date)
+    query = (
+        select(Waybill)
+        .where(Waybill.date == req_date)
+        .options(
+            selectinload(Waybill.duty),
+            selectinload(Waybill.vehicle),
+            selectinload(Waybill.driver)
+        )
+        .order_by(Waybill.id.desc())
+    )
     result = await db.execute(query)
     waybills = result.scalars().all()
     
@@ -150,8 +183,12 @@ async def get_today_waybills(
             "id": w.id,
             "date": str(w.date),
             "duty_id": w.duty_id,
+            "duty_number": w.duty.duty_number if w.duty else f"#{w.duty_id}",
+            "route_id": w.duty.route_id if w.duty else "UNKNOWN",
             "vehicle_id": w.vehicle_id,
+            "vehicle_model": w.vehicle.model if w.vehicle else "Tatra T3",
             "driver_id": w.driver_id,
+            "driver_name": w.driver.full_name if w.driver else f"Водій #{w.driver_id}",
             "status": w.status
         }
         for w in waybills
@@ -199,9 +236,102 @@ async def get_available_duties(
             "id": d.id,
             "number": d.duty_number,
             "route": d.route_id,
+            "duty_type": str(d.duty_type),
             "start": first_trip_time,
             "end": last_trip_time,
             "trips_count": len(all_trips)
         })
 
     return output
+
+@router.get("/driver/{driver_id}/active")
+async def get_driver_active_waybill(
+    driver_id: str,
+    target_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Отримує повну електронну путівку та порейсний розклад для водія.
+    """
+    try:
+        req_date = date.fromisoformat(target_date) if target_date else date.today()
+    except Exception:
+        req_date = date.today()
+
+    query = (
+        select(Waybill)
+        .where((Waybill.driver_id == driver_id) & (Waybill.date == req_date))
+        .options(
+            selectinload(Waybill.duty)
+            .selectinload(StaticDuty.shifts)
+            .selectinload(StaticShift.trips)
+            .selectinload(StaticTrip.stop_times),
+            selectinload(Waybill.vehicle),
+            selectinload(Waybill.driver)
+        )
+        .order_by(Waybill.id.desc())
+    )
+    result = await db.execute(query)
+    waybill = result.scalars().first()
+
+    if not waybill:
+        raise HTTPException(status_code=404, detail=f"Для водія #{driver_id} на дату {req_date} немає активної путівки")
+
+    stations_res = await db.execute(select(StationModel))
+    stations_map = {s.id: s.name for s in stations_res.scalars().all()}
+
+    trips_data = []
+    if waybill.duty and waybill.duty.shifts:
+        for s in waybill.duty.shifts:
+            for t in s.trips or []:
+                st_list = t.stop_times or []
+                p_start = str(st_list[0].departure_time)[:5] if st_list else "--:--"
+                p_end = str(st_list[-1].arrival_time)[:5] if st_list else "--:--"
+                
+                trips_data.append({
+                    "trip_number": t.trip_sequence,
+                    "direction": str(t.direction),
+                    "route": waybill.duty.route_id,
+                    "start_station": stations_map.get(st_list[0].stop_id, st_list[0].stop_id) if st_list else "--",
+                    "end_station": stations_map.get(st_list[-1].stop_id, st_list[-1].stop_id) if st_list else "--",
+                    "plan_start": p_start,
+                    "plan_end": p_end,
+                    "fact_start": p_start, # Буде зіставлятися з GPS
+                    "fact_end": None,
+                    "status": "IN_PROGRESS" if t.trip_sequence == 1 else "PENDING",
+                    "is_zero": t.is_zero_run,
+                    "stops": [
+                        {
+                            "stop_id": st.stop_id,
+                            "stop_name": stations_map.get(st.stop_id, st.stop_id),
+                            "arrival_time": str(st.arrival_time)[:5],
+                            "departure_time": str(st.departure_time)[:5],
+                            "is_control_point": st.is_control_point
+                        }
+                        for st in st_list
+                    ]
+                })
+
+    return {
+        "waybill_id": waybill.id,
+        "target_date": str(waybill.date),
+        "duty_id": waybill.duty_id,
+        "duty_number": waybill.duty.duty_number if waybill.duty else f"#{waybill.duty_id}",
+        "route_id": waybill.duty.route_id if waybill.duty else "UNKNOWN",
+        "driver": {
+            "id": waybill.driver_id,
+            "full_name": waybill.driver.full_name if waybill.driver else f"Водій #{waybill.driver_id}",
+            "class_rank": waybill.driver.class_rank if waybill.driver else 1
+        },
+        "vehicle": {
+            "id": waybill.vehicle_id,
+            "model": waybill.vehicle.model if waybill.vehicle else "Tatra T3",
+            "type": waybill.vehicle.type if waybill.vehicle else "tram"
+        },
+        "trips": trips_data,
+        "summary": {
+            "total_planned_trips": len(trips_data),
+            "completed_trips": 0,
+            "total_work_hours": "8 год 30 хв"
+        }
+    }

@@ -6,8 +6,9 @@ import { useIncidentStore } from '../store/useIncidentStore'
 import { useDriverStore } from '../store/useDriverStore'
 import { useTelemetryStore, VehicleTelemetry } from '../store/useTelemetryStore'
 import { useAuthStore } from '../store/useAuthStore'
+import { toast } from 'sonner'
 
-export const useWebSocket = (baseUrl: string) => {
+export const useWebSocket = (customBaseUrl?: string) => {
   const wsRef = useRef<WebSocket | null>(null)
   const queryClient = useQueryClient()
   const token = useAuthStore((state) => state.token)
@@ -24,15 +25,27 @@ export const useWebSocket = (baseUrl: string) => {
     let isMounted = true
     let reconnectTimeoutId: any = null
 
+    // Динамічне визначення протоколу (ws/wss) та хоста для продакшену
+    const getBaseWsUrl = () => {
+      if (customBaseUrl && (customBaseUrl.startsWith('ws://') || customBaseUrl.startsWith('wss://'))) {
+        return customBaseUrl
+      }
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.port === '5173' || window.location.port === '3000'
+        ? `${window.location.hostname}:8000`
+        : window.location.host
+      return `${protocol}//${host}/ws`
+    }
+
     const connect = () => {
-      const wsUrl = `${baseUrl}?token=${token}`
+      const wsUrl = `${getBaseWsUrl()}?token=${token}`
 
       try {
         const ws = new WebSocket(wsUrl)
         wsRef.current = ws
 
         ws.onopen = () => {
-          console.log('⚡ [WebSocket] З\'єднання встановлено')
+          console.log('⚡ [WebSocket] З\'єднання з диспетчерським сервером ОМЕТ встановлено')
           useDriverStore.getState().setConnectionStatus('CONNECTED')
           setTelemetryConnected(true)
         }
@@ -56,6 +69,48 @@ export const useWebSocket = (baseUrl: string) => {
                 break
               }
 
+              case 'DRIVER_ALERT': {
+                if (payload) {
+                  toast.error(`🚨 СИГНАЛ ВІД ВОДІЯ (Борт #${payload.vehicle_id}): ${payload.message}`, {
+                    duration: 8000,
+                  })
+                  queryClient.invalidateQueries({ queryKey: ['driver-alerts'] })
+                  queryClient.invalidateQueries({ queryKey: ['active-driver-alerts'] })
+                }
+                break
+              }
+
+              case 'DRIVER_ALERT_RESOLVED': {
+                queryClient.invalidateQueries({ queryKey: ['driver-alerts'] })
+                queryClient.invalidateQueries({ queryKey: ['active-driver-alerts'] })
+                break
+              }
+
+              case 'DISPATCHER_DIRECTIVE': {
+                if (payload) {
+                  toast.warning(`📢 НАКАЗ ДИСПЕТЧЕРА (${payload.dispatcher_name || 'Диспетчер'}): ${payload.message}`, {
+                    duration: 10000,
+                  })
+                  queryClient.invalidateQueries({ queryKey: ['driver-directives'] })
+                }
+                break
+              }
+
+              case 'DIRECTIVE_ACK': {
+                queryClient.invalidateQueries({ queryKey: ['driver-directives'] })
+                toast.success(`✓ Водій борта #${payload.vehicle_id} підтвердив отримання вказівки.`)
+                break
+              }
+
+              case 'WAYBILL_ASSIGNED':
+              case 'CREW_ASSIGNED': {
+                queryClient.invalidateQueries({ queryKey: ['waybills'] })
+                queryClient.invalidateQueries({ queryKey: ['daily-deployments'] })
+                queryClient.invalidateQueries({ queryKey: ['available-resources'] })
+                queryClient.invalidateQueries({ queryKey: ['available-duties'] })
+                break
+              }
+
               case 'STATE_UPDATE':
                 if (setLiveSchedule) setLiveSchedule(payload)
                 break
@@ -68,7 +123,7 @@ export const useWebSocket = (baseUrl: string) => {
               case 'new_incident': {
                 if (payload) {
                   addLiveIncident(payload)
-                  console.log(`🚨 [WebSocket] Новий інцидент: ТЗ ${payload.vehicle_id} - ${payload.description}`)
+                  toast.error(`🚨 Авто-інцидент: ТЗ ${payload.vehicle_id} - ${payload.description}`)
                   queryClient.invalidateQueries({ queryKey: ['active-incidents'] })
                   queryClient.invalidateQueries({ queryKey: ['incidents'] })
                 }
@@ -77,7 +132,6 @@ export const useWebSocket = (baseUrl: string) => {
 
               case 'INCIDENT_RESOLVED':
               case 'incident_resolved': {
-                console.log('⚡ [WebSocket] Отримано сигнал incident_resolved')
                 queryClient.invalidateQueries({ queryKey: ['active-incidents'] })
                 queryClient.invalidateQueries({ queryKey: ['incidents'] })
                 break
@@ -85,8 +139,9 @@ export const useWebSocket = (baseUrl: string) => {
 
               case 'DETOUR_UPDATED':
               case 'detour_updated': {
-                console.log('⚡ [WebSocket] Отримано сигнал detour_updated. Оновлення перемикань...')
+                toast.info('⚡ Оновлено статус оперативних перемикань (об\'їздів).')
                 queryClient.invalidateQueries({ queryKey: ['active-detours'] })
+                queryClient.invalidateQueries({ queryKey: ['detours'] })
                 break
               }
 
@@ -97,30 +152,10 @@ export const useWebSocket = (baseUrl: string) => {
                 }
                 break
 
-              case 'GEOFENCE_EVENT': {
-                const { vehicle_id, event: geoEvent } = payload || {}
-                if (geoEvent === 'DISPATCHED') {
-                  console.log(`🚀 [ГЕОЗОНА] Вагон ${vehicle_id} ВИЇХАВ з депо на лінію!`)
-                } else if (geoEvent === 'RETURNED') {
-                  console.log(`🏠 [ГЕОЗОНА] Вагон ${vehicle_id} ПОВЕРНУВСЯ у депо!`)
-                }
-                break
-              }
-
-              case 'WAYBILL_UPDATE': {
-                const updatedVehicleId = payload?.vehicle_id
-                const currentBlock = useDriverStore.getState().currentBlock
-                if (updatedVehicleId && currentBlock && currentBlock.block_id.includes(updatedVehicleId)) {
-                  useDriverStore.getState().fetchBlock(updatedVehicleId)
-                }
-                break
-              }
-
               case 'INVALIDATE_SCHEDULES':
               case 'invalidate_schedules':
               case 'SCHEDULE_DRAFT_UPDATED':
               case 'schedule_draft_updated': {
-                console.log('⚡ [WebSocket] Отримано сигнал invalidate_schedules / schedule_draft_updated. Оновлення серверного кешу...')
                 queryClient.invalidateQueries({ queryKey: ['active-schedules'] })
                 queryClient.invalidateQueries({ queryKey: ['active-schedule'] })
                 queryClient.invalidateQueries({ queryKey: ['schedule'] })
@@ -136,35 +171,26 @@ export const useWebSocket = (baseUrl: string) => {
           }
         }
 
-        // --- ЛОГІКА ЗАХИСТУ ВІД НЕСКІНЧЕННОГО ЦИКЛУ (BUG-B3) ---
         ws.onclose = (event) => {
           useDriverStore.getState().setConnectionStatus('OFFLINE')
           setTelemetryConnected(false)
 
-          // Код 1008 означає Policy Violation (недійсний або прострочений токен)
           if (event.code === 1008) {
-            console.error('WebSocket: Помилка авторизації. Токен недійсний або прострочено (Код 1008).')
-            
-            // Викликаємо logout напряму зі стору (поза контекстом React)
+            console.error('WebSocket: Помилка авторизації (Код 1008).')
             useAuthStore.getState().logout()
-
-            // Примусовий редирект на екран логіну
             if (window.location.pathname !== '/login') {
               window.location.href = '/login'
             }
-
-            return // ЗУПИНЯЄМО виконання — жодних повторних підключень з невалідним токеном!
+            return
           }
 
-          // Якщо звичайний обрив зв'язку і компонент досі змонтований — робимо реконект
           if (isMounted) {
-            console.log('WebSocket disconnected. Reconnecting in 5s...')
             reconnectTimeoutId = setTimeout(connect, 5000)
           }
         }
 
         ws.onerror = (err) => {
-          console.error('WebSocket connection error:', err)
+          console.error('WebSocket error:', err)
         }
       } catch (err) {
         console.error('Не вдалося створити WebSocket:', err)
@@ -180,7 +206,7 @@ export const useWebSocket = (baseUrl: string) => {
         wsRef.current.close(1000, 'Component unmounted')
       }
     }
-  }, [baseUrl, token, updateVehicles, setTelemetryConnected, updateTelemetry, setLiveSchedule, setValidationWarnings, queryClient, addLiveIncident])
+  }, [customBaseUrl, token, updateVehicles, setTelemetryConnected, updateTelemetry, setLiveSchedule, setValidationWarnings, queryClient, addLiveIncident])
 
   return wsRef.current
 }

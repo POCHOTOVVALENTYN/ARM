@@ -2,92 +2,268 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select, update, func
 from sqlalchemy.orm import selectinload
-from typing import List, Optional, Union
-from datetime import date
+from typing import List, Optional, Union, Dict, Any
+from datetime import date, time as dt_time
+from pydantic import BaseModel
 
-from app.api.dependencies import get_db
+from app.api.dependencies import get_db, get_current_dispatcher
 from app.schemas.schedule import GenerateGridRequest, StaticDutyResponse, ScheduleResponse
-from app.models.schedule import Schedule, ScheduleStatus
-from app.models.models import EtaLog
+from app.models.schedule import (
+    Schedule, ScheduleStatus, StaticDuty, StaticShift, StaticTrip, StaticStopTime,
+    ServiceDay, DutyType, TripDirection
+)
+from app.models.models import EtaLog, RouteStation, StationModel, RouteModel
 from app.services.schedule_engine import ScheduleEnginePipeline
 from app.repositories.schedule_repo import ScheduleRepository
 from app.services.telemetry_worker import cache_active_schedule_in_redis
+from app.services.transit_solver import generate_optimized_schedule, parse_time_str, minutes_to_time
 from app.api.websocket import ws_manager
 
-router = APIRouter(prefix="/schedules", tags=["Schedules"])
+router = APIRouter(prefix="/schedules", tags=["Schedules & Transit Solver"])
 
-@router.post("/generate", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
-async def generate_static_grid(request: GenerateGridRequest, db: AsyncSession = Depends(get_db)):
-    try:
-        pipeline = ScheduleEnginePipeline(request)
-        target_date = date.today()
-        
-        schedule_id = await pipeline.execute_and_save_draft(db, request.route_id, target_date)
-        
-        repo = ScheduleRepository(db)
-        full_schedule = await repo.get_schedule_with_full_hierarchy(schedule_id)
-        
-        if not full_schedule:
-            raise HTTPException(status_code=500, detail="Помилка завантаження згенерованого розкладу з БД")
-            
-        return full_schedule
+# --- Схеми запитів/відповідей ---
+class TripUpdate(BaseModel):
+    start_time: str
+    end_time: str
 
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Помилка генерації сітки: {str(e)}")
+class GenerateScheduleRequest(BaseModel):
+    route_id: str
+    vehicles_count: int
+    start_time: str
+    end_time: str
+    route_length_km: float
+    avg_speed_kmh: float
+    zero_trip_min: int = 15
+    use_elastic_smoother: bool = True
 
-@router.post("/{schedule_id}/activate", status_code=status.HTTP_200_OK)
-async def activate_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
-    # 1. Знайти чорновик
-    query = select(Schedule).where(
-        Schedule.id == schedule_id, 
-        Schedule.status == ScheduleStatus.DRAFT
+class TripCreate(BaseModel):
+    direction: str
+    start_time: str
+    end_time: str
+    is_zero: bool = False
+    trip_type: Optional[str] = "REGULAR"
+
+class ShiftCreate(BaseModel):
+    id: Optional[Union[int, str]] = None
+    shift_sequence: Optional[int] = 1
+    shift_type: Optional[str] = "FULL"
+    vehicle_id: Optional[str] = None
+    has_break: Optional[bool] = False
+    break_duration_minutes: Optional[int] = 0
+    trips: List[TripCreate] = []
+
+class DutyCreate(BaseModel):
+    duty_number: str
+    duty_type: Optional[str] = "DOUBLE"
+    shifts: List[ShiftCreate] = []
+
+class ScheduleCommitRequest(BaseModel):
+    route_id: str
+    duties: List[DutyCreate]
+    version_name: Optional[str] = "Еталонний розклад ОМЕТ"
+
+# --- Ендпоінти генерації та збереження розкладів ---
+
+@router.post("/generate-draft")
+async def api_generate_draft(
+    req: GenerateScheduleRequest
+):
+    """
+    Генерує математичну модель добового розкладу в пам'яті (Transit Solver).
+    """
+    draft_data = generate_optimized_schedule(
+        route_id=req.route_id,
+        vehicles_count=req.vehicles_count,
+        start_time=req.start_time,
+        end_time=req.end_time,
+        route_length_km=req.route_length_km,
+        avg_speed_kmh=req.avg_speed_kmh,
+        zero_trip_min=req.zero_trip_min,
+        use_elastic_smoother=req.use_elastic_smoother
     )
-    result = await db.execute(query)
-    draft = result.scalar_one_or_none()
-    
-    if not draft:
-        raise HTTPException(
-            status_code=404, 
-            detail="Чорновик не знайдено або він вже активований"
-        )
+    return draft_data
 
-    # 2. Архівувати поточний активний розклад для цього ж маршруту
+@router.post("/commit-draft")
+async def commit_schedule_draft(
+    req: ScheduleCommitRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Зберігає згенерований розклад як активний (Еталонний).
+    Реалізує ДВОРІВНЕВИЙ розрахунок:
+    - Рівень 1: Контрольні точки (is_control_point = True) для «Сітки статичних нарядів».
+    - Рівень 2: Повна похвилинна інтерполяція ВСІХ проміжних зупинок для «Табеля та книжки водія».
+    """
+    today = date.today()
+
+    # 1. Створюємо шапку еталонного розкладу
+    new_schedule = Schedule(
+        route_id=req.route_id,
+        active_date=today,
+        status=ScheduleStatus.ACTIVE,
+        version_name=req.version_name or "Еталонний розклад ОМЕТ"
+    )
+    db.add(new_schedule)
+    await db.flush() # new_schedule.id
+    
+    # 2. Архівуємо всі інші активні розклади для цього маршруту
     archive_stmt = (
         update(Schedule)
-        .where(Schedule.route_id == draft.route_id)
-        .where(Schedule.status == ScheduleStatus.ACTIVE)
+        .where((Schedule.route_id == req.route_id) & (Schedule.id != new_schedule.id))
         .values(status=ScheduleStatus.ARCHIVED)
     )
     await db.execute(archive_stmt)
 
-    # 3. Активувати новий чорновик
-    draft.status = ScheduleStatus.ACTIVE
+    # 3. Завантажуємо всі зупинки маршруту для прямого та зворотного напрямків
+    dir0_query = (
+        select(RouteStation.stop_id, RouteStation.stop_sequence, StationModel.name, StationModel.is_dispatch_station)
+        .join(StationModel, RouteStation.stop_id == StationModel.id, isouter=True)
+        .where((RouteStation.route_id == req.route_id) & (RouteStation.direction_id == 0))
+        .order_by(RouteStation.stop_sequence.asc())
+    )
+    dir0_stops = (await db.execute(dir0_query)).all()
+
+    dir1_query = (
+        select(RouteStation.stop_id, RouteStation.stop_sequence, StationModel.name, StationModel.is_dispatch_station)
+        .join(StationModel, RouteStation.stop_id == StationModel.id, isouter=True)
+        .where((RouteStation.route_id == req.route_id) & (RouteStation.direction_id == 1))
+        .order_by(RouteStation.stop_sequence.asc())
+    )
+    dir1_stops = (await db.execute(dir1_query)).all()
+
+    # Fallback якщо RouteStation не заповнено для цього маршруту
+    if not dir0_stops:
+        all_st_res = (await db.execute(select(StationModel).limit(15))).scalars().all()
+        dir0_stops = [(s.id, idx + 1, s.name, s.is_dispatch_station) for idx, s in enumerate(all_st_res)]
+        dir1_stops = list(reversed(dir0_stops))
+
+    # 4. Запис Нарядів (Duties), Змін (Shifts) та Рейсів (Trips) з повною інтерполяцією зупинок
+    for duty in req.duties:
+        duty_t_str = str(duty.duty_type or "DOUBLE").upper()
+        dtype_enum = DutyType.DOUBLE
+        if "SINGLE" in duty_t_str:
+            dtype_enum = DutyType.SINGLE
+        elif "SPLIT" in duty_t_str:
+            dtype_enum = DutyType.SPLIT
+        elif "PEAK" in duty_t_str:
+            dtype_enum = DutyType.PEAK
+
+        new_duty = StaticDuty(
+            schedule_id=new_schedule.id,
+            route_id=req.route_id,
+            duty_number=str(duty.duty_number),
+            service_id=ServiceDay.WORKDAY,
+            duty_type=dtype_enum
+        )
+        db.add(new_duty)
+        await db.flush()
+        
+        for idx_shift, shift in enumerate(duty.shifts, start=1):
+            new_shift = StaticShift(
+                duty_id=new_duty.id,
+                shift_sequence=shift.shift_sequence or idx_shift,
+                vehicle_id=shift.vehicle_id,
+                has_break=shift.has_break or False,
+                break_duration_minutes=shift.break_duration_minutes or (15 if shift.has_break else 0)
+            )
+            db.add(new_shift)
+            await db.flush()
+            
+            for idx_trip, trip in enumerate(shift.trips, start=1):
+                dir_str = str(trip.direction).upper()
+                if "PULL_OUT" in dir_str or "ВИЇЗД" in dir_str or "НУЛЬОВИЙ" in dir_str:
+                    tdir = TripDirection.PULL_OUT
+                    trip_type = "PULL_OUT"
+                    is_zero = True
+                    trip_stops = dir0_stops
+                elif "PULL_IN" in dir_str or "ЗАЇЗД" in dir_str:
+                    tdir = TripDirection.PULL_IN
+                    trip_type = "PULL_IN"
+                    is_zero = True
+                    trip_stops = dir1_stops
+                elif "BACKWARD" in dir_str or "ЗВОРОТ" in dir_str or "2" in dir_str:
+                    tdir = TripDirection.BACKWARD
+                    trip_type = "REGULAR"
+                    is_zero = False
+                    trip_stops = dir1_stops or list(reversed(dir0_stops))
+                else:
+                    tdir = TripDirection.FORWARD
+                    trip_type = "REGULAR"
+                    is_zero = False
+                    trip_stops = dir0_stops
+
+                new_trip = StaticTrip(
+                    shift_id=new_shift.id,
+                    trip_sequence=idx_trip,
+                    direction=tdir,
+                    trip_type=trip_type,
+                    is_zero_run=is_zero,
+                    smoothing_state="normal",
+                    smoothing_delta=0.0
+                )
+                db.add(new_trip)
+                await db.flush()
+
+                try:
+                    st_time = parse_time_str(trip.start_time)
+                    en_time = parse_time_str(trip.end_time)
+                except Exception:
+                    st_time = parse_time_str("06:00")
+                    en_time = parse_time_str("06:45")
+
+                st_mins = st_time.hour * 60 + st_time.minute + st_time.second / 60.0
+                en_mins = en_time.hour * 60 + en_time.minute + en_time.second / 60.0
+                if en_mins < st_mins:
+                    en_mins += 1440
+                total_duration = max(1.0, en_mins - st_mins)
+
+                num_stops = len(trip_stops)
+                if num_stops == 0:
+                    continue
+
+                for s_idx, stop_row in enumerate(trip_stops):
+                    fraction = (s_idx / (num_stops - 1)) if num_stops > 1 else 0.0
+                    stop_point_min = (st_mins + fraction * total_duration) % 1440
+                    t_point = minutes_to_time(stop_point_min)
+
+                    is_ctrl = (s_idx == 0) or (s_idx == num_stops - 1) or bool(stop_row[3])
+
+                    stop_time_entry = StaticStopTime(
+                        trip_id=new_trip.id,
+                        stop_id=str(stop_row[0]),
+                        stop_sequence=s_idx + 1,
+                        arrival_time=t_point,
+                        departure_time=t_point,
+                        is_break_location=bool(s_idx == num_stops - 1 and shift.has_break),
+                        is_control_point=is_ctrl
+                    )
+                    db.add(stop_time_entry)
+
     await db.commit()
 
-    # 4. Завантажити ієрархію та закешувати в Redis для швидкісного розрахунку відхилень (telemetry_worker)
     repo = ScheduleRepository(db)
-    full_schedule = await repo.get_schedule_with_full_hierarchy(draft.id)
+    full_schedule = await repo.get_schedule_with_full_hierarchy(new_schedule.id)
     if full_schedule:
         await cache_active_schedule_in_redis(full_schedule)
 
-    # 5. Real-time WebSocket інвалідація кешу TanStack Query для всіх підключених диспетчерів
     await ws_manager.broadcast({
         "type": "invalidate_schedules",
-        "schedule_id": draft.id,
-        "route_id": draft.route_id
+        "schedule_id": new_schedule.id,
+        "route_id": req.route_id
     })
-
-    return {"message": "Розклад успішно активовано", "schedule_id": draft.id, "status": "ACTIVE"}
+    
+    return {
+        "message": "Еталонний розклад успішно збережено з повною похвилинною інтерполяцією зупинок!", 
+        "schedule_id": new_schedule.id,
+        "status": "ACTIVE"
+    }
 
 @router.get("/active", response_model=List[ScheduleResponse])
 async def get_all_active_schedules(
     route_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Повертає список усіх активних розкладів підприємства (або розклад конкретного маршруту).
-    """
+    """Повертає список усіх активних розкладів підприємства."""
     repo = ScheduleRepository(db)
     if route_id:
         single_sched = await repo.get_active_schedule_for_route(route_id)
@@ -98,63 +274,123 @@ async def get_all_active_schedules(
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
 async def get_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
+    """Отримання повної структури розкладу."""
     repo = ScheduleRepository(db)
     schedule = await repo.get_schedule_with_full_hierarchy(schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="Розклад не знайдено")
     return schedule
 
-@router.get("/analytics/route/{route_id}/deviations")
-async def get_route_deviations(
-    route_id: str, 
-    target_date: Optional[date] = Query(default=None),
+@router.get("/{schedule_id}/driver-logbook")
+async def get_driver_logbook(
+    schedule_id: int,
+    duty_number: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Повертає середнє та максимальне відхилення по зупинках маршруту за конкретну дату.
+    Повертає похвилинний розклад руху з усіма проміжними зупинками
+    спеціально для розділу «Персональний» / «Табель та книжка водіїв».
     """
-    actual_date = target_date or date.today()
     query = (
-        select(
-            EtaLog.stop_id,
-            func.avg(EtaLog.deviation_min).label("avg_deviation"),
-            func.max(EtaLog.deviation_min).label("max_deviation"),
-            func.count(EtaLog.id).label("total_passages")
+        select(StaticDuty)
+        .where(StaticDuty.schedule_id == schedule_id)
+        .options(
+            selectinload(StaticDuty.shifts)
+            .selectinload(StaticShift.trips)
+            .selectinload(StaticTrip.stop_times)
         )
-        .where(EtaLog.route_id == route_id)
-        .where(func.date(EtaLog.recorded_at) == actual_date)
-        .group_by(EtaLog.stop_id)
     )
-    
+    if duty_number:
+        query = query.where(StaticDuty.duty_number == duty_number)
+
     result = await db.execute(query)
-    stats = result.all()
-    
-    return [
-        {
-            "stop_id": row.stop_id, 
-            "avg_deviation": round(float(row.avg_deviation or 0.0), 1),
-            "max_deviation": round(float(row.max_deviation or 0.0), 1),
-            "total_passages": int(row.total_passages or 0)
-        } 
-        for row in stats
-    ]
+    duties = result.scalars().all()
 
-# --- Модель та ендпоінт редагування рейсу ---
-from pydantic import BaseModel
-from datetime import time as dt_time
-from app.models.schedule import StaticTrip, StaticStopTime
-from app.api.dependencies import get_current_dispatcher
+    stations_res = await db.execute(select(StationModel))
+    stations_map = {s.id: s.name for s in stations_res.scalars().all()}
 
-class TripUpdate(BaseModel):
-    start_time: str
-    end_time: str
+    output = []
+    for d in duties:
+        for s in d.shifts or []:
+            for t in s.trips or []:
+                stops_detail = []
+                for st in t.stop_times or []:
+                    stops_detail.append({
+                        "sequence": st.stop_sequence,
+                        "stop_id": st.stop_id,
+                        "stop_name": stations_map.get(st.stop_id, f"Зупинка #{st.stop_id}"),
+                        "arrival_time": str(st.arrival_time)[:5],
+                        "departure_time": str(st.departure_time)[:5],
+                        "is_control_point": st.is_control_point,
+                        "is_break": st.is_break_location
+                    })
 
-def parse_time_str(t_str: str) -> dt_time:
-    parts = t_str.strip().split(":")
-    h = int(parts[0])
-    m = int(parts[1])
-    s = int(parts[2]) if len(parts) > 2 else 0
-    return dt_time(hour=h, minute=m, second=s)
+                output.append({
+                    "duty_number": d.duty_number,
+                    "shift_sequence": s.shift_sequence,
+                    "trip_sequence": t.trip_sequence,
+                    "direction": str(t.direction),
+                    "trip_type": t.trip_type,
+                    "is_zero_run": t.is_zero_run,
+                    "start_time": str(t.stop_times[0].arrival_time)[:5] if t.stop_times else "--:--",
+                    "end_time": str(t.stop_times[-1].arrival_time)[:5] if t.stop_times else "--:--",
+                    "stops": stops_detail
+                })
+
+    return output
+
+@router.get("/{schedule_id}/control-grid")
+async def get_control_points_grid(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Повертає сітку розкладу ТІЛЬКИ по контрольних точках (кінцеві + хаби)
+    для розділу «Планування» / «Сітка статичних нарядів».
+    """
+    query = (
+        select(StaticDuty)
+        .where(StaticDuty.schedule_id == schedule_id)
+        .options(
+            selectinload(StaticDuty.shifts)
+            .selectinload(StaticShift.trips)
+            .selectinload(StaticTrip.stop_times)
+        )
+    )
+    result = await db.execute(query)
+    duties = result.scalars().all()
+
+    stations_res = await db.execute(select(StationModel))
+    stations_map = {s.id: s.name for s in stations_res.scalars().all()}
+
+    grid = []
+    for d in duties:
+        duty_trips = []
+        for s in d.shifts or []:
+            for t in s.trips or []:
+                control_stops = [st for st in (t.stop_times or []) if st.is_control_point]
+                duty_trips.append({
+                    "trip_sequence": t.trip_sequence,
+                    "direction": str(t.direction),
+                    "start_control_point": stations_map.get(control_stops[0].stop_id, control_stops[0].stop_id) if control_stops else "--",
+                    "start_time": str(control_stops[0].departure_time)[:5] if control_stops else "--:--",
+                    "end_control_point": stations_map.get(control_stops[-1].stop_id, control_stops[-1].stop_id) if control_stops else "--",
+                    "end_time": str(control_stops[-1].arrival_time)[:5] if control_stops else "--:--",
+                    "intermediate_controls": [
+                        {
+                            "name": stations_map.get(st.stop_id, st.stop_id),
+                            "time": str(st.arrival_time)[:5]
+                        }
+                        for st in control_stops[1:-1]
+                    ]
+                })
+        grid.append({
+            "duty_number": d.duty_number,
+            "duty_type": str(d.duty_type),
+            "trips": duty_trips
+        })
+
+    return grid
 
 @router.put("/trips/{trip_id}", summary="Оновлення планового часу відправлення та прибуття для конкретного рейсу")
 async def update_trip_time(
@@ -163,7 +399,7 @@ async def update_trip_time(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_dispatcher)
 ):
-    """Оновлення планового часу відправлення та прибуття для конкретного рейсу."""
+    """Оновлення планового часу рейсу з пропорційною інтерполяцією проміжних зупинок."""
     try:
         start_t = parse_time_str(trip_data.start_time)
         end_t = parse_time_str(trip_data.end_time)
@@ -195,7 +431,7 @@ async def update_trip_time(
             # Пропорційна інтерполяція для проміжних зупинок
             start_mins = start_t.hour * 60 + start_t.minute + start_t.second / 60.0
             end_mins = end_t.hour * 60 + end_t.minute + end_t.second / 60.0
-            if end_mins < start_mins: # перехід через північ
+            if end_mins < start_mins:
                 end_mins += 1440
             total_span = max(1.0, end_mins - start_mins)
             n_segments = len(sorted_stops) - 1
@@ -211,205 +447,9 @@ async def update_trip_time(
 
     await db.commit()
 
-    # Оскільки ми редагуємо розклад, інвалідуємо пов'язані кеші для інших диспетчерів
     await ws_manager.broadcast({
         "type": "schedule_draft_updated",
         "trip_id": trip_id
     })
 
     return {"message": "Час рейсу успішно оновлено", "trip_id": trip_id}
-
-
-from app.services.transit_solver import generate_optimized_schedule
-
-class GenerateScheduleRequest(BaseModel):
-    route_id: str
-    vehicles_count: int
-    start_time: str
-    end_time: str
-    route_length_km: float
-    avg_speed_kmh: float
-    zero_trip_min: int = 15
-    use_elastic_smoother: bool = True
-
-@router.post("/generate-draft")
-async def api_generate_draft(
-    req: GenerateScheduleRequest
-):
-    draft_data = generate_optimized_schedule(
-        route_id=req.route_id,
-        vehicles_count=req.vehicles_count,
-        start_time=req.start_time,
-        end_time=req.end_time,
-        route_length_km=req.route_length_km,
-        avg_speed_kmh=req.avg_speed_kmh,
-        zero_trip_min=req.zero_trip_min,
-        use_elastic_smoother=req.use_elastic_smoother
-    )
-    return draft_data
-
-
-# --- Pydantic Схеми для валідації збереження розкладу ---
-from app.models.schedule import (
-    StaticDuty, 
-    StaticShift, 
-    StaticTrip, 
-    StaticStopTime,
-    ServiceDay, 
-    DutyType, 
-    TripDirection
-)
-from app.models.models import RouteStation, StationModel
-
-class TripCreate(BaseModel):
-    direction: str
-    start_time: str
-    end_time: str
-    is_zero: bool = False
-
-class ShiftCreate(BaseModel):
-    id: Optional[Union[int, str]] = None
-    shift_type: Optional[str] = "FULL"
-    trips: List[TripCreate] = []
-
-class DutyCreate(BaseModel):
-    duty_number: str
-    shifts: List[ShiftCreate] = []
-
-class ScheduleCommitRequest(BaseModel):
-    route_id: str
-    duties: List[DutyCreate]
-    version_name: Optional[str] = "Автоматична генерація"
-
-@router.post("/commit-draft")
-async def commit_schedule_draft(
-    req: ScheduleCommitRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Зберігає згенерований Transit Solver-ом розклад як активний (Еталонний).
-    """
-    today = date.today()
-
-    # 1. Створюємо шапку еталонного розкладу
-    new_schedule = Schedule(
-        route_id=req.route_id,
-        active_date=today,
-        status=ScheduleStatus.ACTIVE
-    )
-    db.add(new_schedule)
-    await db.flush() # Отримуємо new_schedule.id
-    
-    # 2. Архівуємо всі інші активні розклади для цього маршруту
-    archive_stmt = (
-        update(Schedule)
-        .where((Schedule.route_id == req.route_id) & (Schedule.id != new_schedule.id))
-        .values(status=ScheduleStatus.ARCHIVED)
-    )
-    await db.execute(archive_stmt)
-
-    # Отримуємо ID реальних зупинок маршруту
-    stops_result = await db.execute(
-        select(RouteStation.stop_id)
-        .where(RouteStation.route_id == req.route_id)
-        .order_by(RouteStation.stop_sequence)
-    )
-    route_stop_ids = stops_result.scalars().all()
-    if not route_stop_ids or len(route_stop_ids) < 2:
-        # Fallback до базових станцій
-        st_res = await db.execute(select(StationModel.id).limit(2))
-        route_stop_ids = st_res.scalars().all() or ["687083", "708888"]
-
-    terminal_start = route_stop_ids[0]
-    terminal_end = route_stop_ids[-1]
-
-    # 3. Запис Нарядів (Duties), Змін (Shifts) та Рейсів (Trips)
-    for duty in req.duties:
-        new_duty = StaticDuty(
-            schedule_id=new_schedule.id,
-            route_id=req.route_id,
-            duty_number=str(duty.duty_number),
-            service_id=ServiceDay.WORKDAY,
-            duty_type=DutyType.DOUBLE
-        )
-        db.add(new_duty)
-        await db.flush() # Отримуємо new_duty.id
-        
-        for idx_shift, shift in enumerate(duty.shifts, start=1):
-            new_shift = StaticShift(
-                duty_id=new_duty.id,
-                shift_sequence=idx_shift,
-                has_break=False
-            )
-            db.add(new_shift)
-            await db.flush()
-            
-            for idx_trip, trip in enumerate(shift.trips, start=1):
-                dir_str = str(trip.direction).lower()
-                if "нульовий" in dir_str or "виїзд" in dir_str:
-                    tdir = TripDirection.PULL_OUT
-                elif "заїзд" in dir_str:
-                    tdir = TripDirection.PULL_IN
-                elif "зворот" in dir_str or "reverse" in dir_str or "backward" in dir_str:
-                    tdir = TripDirection.BACKWARD
-                else:
-                    tdir = TripDirection.FORWARD
-
-                new_trip = StaticTrip(
-                    shift_id=new_shift.id,
-                    trip_sequence=idx_trip,
-                    direction=tdir,
-                    smoothing_state="normal",
-                    smoothing_delta=0.0
-                )
-                db.add(new_trip)
-                await db.flush()
-
-                try:
-                    st_time = parse_time_str(trip.start_time)
-                    en_time = parse_time_str(trip.end_time)
-                except Exception:
-                    st_time = parse_time_str("06:00")
-                    en_time = parse_time_str("06:45")
-
-                stop1 = StaticStopTime(
-                    trip_id=new_trip.id,
-                    stop_id=terminal_start,
-                    stop_sequence=1,
-                    arrival_time=st_time,
-                    departure_time=st_time
-                )
-                stop2 = StaticStopTime(
-                    trip_id=new_trip.id,
-                    stop_id=terminal_end,
-                    stop_sequence=2,
-                    arrival_time=en_time,
-                    departure_time=en_time
-                )
-                db.add(stop1)
-                db.add(stop2)
-
-    await db.commit()
-
-    # 4. Кешуємо в Redis для розрахунку відхилень у telemetry_worker
-    repo = ScheduleRepository(db)
-    full_schedule = await repo.get_schedule_with_full_hierarchy(new_schedule.id)
-    if full_schedule:
-        await cache_active_schedule_in_redis(full_schedule)
-
-    # 5. Сповіщаємо підключених диспетчерів через WebSocket
-    await ws_manager.broadcast({
-        "type": "invalidate_schedules",
-        "schedule_id": new_schedule.id,
-        "route_id": req.route_id
-    })
-    
-    return {
-        "message": "Еталонний розклад успішно збережено", 
-        "schedule_id": new_schedule.id,
-        "status": "ACTIVE"
-    }
-
-
-
-

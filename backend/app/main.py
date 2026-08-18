@@ -8,7 +8,6 @@ import logging
 from app.api.routes import router as solver_router
 from app.api.websocket import router as ws_router, ws_manager
 from app.api.incidents import router as incidents_router
-from app.api.blocks import router as blocks_router 
 from app.api.schedule_init import router as schedule_router
 from app.api.drivers import router as drivers_router
 from app.api.stations import router as stations_router
@@ -20,6 +19,8 @@ from app.api.auth import router as auth_router
 from app.api.analytics import router as analytics_router
 from app.api.depots import router as depots_router
 from app.api.waybills import router as waybills_router
+from app.api.driver_communication import router as driver_comm_router
+from app.api.telemetry import router as telemetry_router
 from app.services.realtime_fetcher import fetch_and_process_realtime_data
 from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
@@ -28,7 +29,6 @@ from app.db.init_admin import seed_initial_admin
 
 logger = logging.getLogger("app.main")
 
-# Lifespan контекст для запуску фонових процесів
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 1. Ініціалізуємо Redis
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     await seed_initial_admin()
 
-    # 3. Запускаємо бойовий збір телеметрії GTFS-RT (10с інтервал)
+    # 3. Запускаємо бойовий збір телеметрії (Wialon / GTFS-RT ОМР / Симуляція, 10с)
     telemetry_task = asyncio.create_task(fetch_and_process_realtime_data())
     
     yield
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     # 5. Закриваємо з'єднання з Redis
     await close_redis()
 
-app = FastAPI(title="OMET Dispatch API", version="2.4.0", lifespan=lifespan)
+app = FastAPI(title="OMET Dispatch & Schedules API", version="2.5.0", lifespan=lifespan)
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -66,41 +66,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Підключення роутерів авторизації
-app.include_router(auth_router, prefix="/api")
-app.include_router(auth_router, prefix="")
+# --- ПІДКЛЮЧЕННЯ РОУТЕРІВ (/api/v1 та аліаси для сумісності) ---
 
-# Підключення бізнес-роутерів
+# Автентифікація та користувачі
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api")
+
+# Двосторонній зв'язок Диспетчер <-> Водій
+app.include_router(driver_comm_router, prefix="/api/v1")
+app.include_router(driver_comm_router, prefix="/api")
+
+# Жива телеметрія та GPS
+app.include_router(telemetry_router, prefix="/api/v1")
+app.include_router(telemetry_router, prefix="/api")
+
+# Розклади та математичне ядро
+app.include_router(new_schedules_router, prefix="/api/v1")
+app.include_router(new_schedules_router, prefix="/api")
 app.include_router(solver_router, prefix="/api/v1/routes", tags=["Routes"])
 app.include_router(solver_router, prefix="/api/routes", tags=["Routes"])
-app.include_router(solver_router, prefix="/routes", tags=["Routes"])
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
-app.include_router(incidents_router, prefix="/api/v1")
-app.include_router(incidents_router, prefix="/api")
-app.include_router(incidents_router, prefix="")
-app.include_router(blocks_router, prefix="/api/v1")
-app.include_router(schedule_router, prefix="/api", tags=["Schedule Init"])
+
+# Електронні путівки (Smart Waybill) та Кадри
+app.include_router(waybills_router, prefix="/api/v1")
+app.include_router(waybills_router, prefix="/api")
 app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(drivers_router, prefix="/api")
-app.include_router(drivers_router, prefix="")
+
+# Інциденти, НС та оперативні перемикання
+app.include_router(incidents_router, prefix="/api/v1")
+app.include_router(incidents_router, prefix="/api")
+app.include_router(emergencies_router, prefix="/api/v1")
+app.include_router(emergencies_router, prefix="/api")
+
+# Інфраструктура, Депо, Станції, Хаби, Аналітика
+app.include_router(depots_router, prefix="/api/v1")
+app.include_router(depots_router, prefix="/api")
 app.include_router(stations_router, prefix="/api/v1")
 app.include_router(control_points_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api")
-app.include_router(settings_router, prefix="")
-app.include_router(emergencies_router, prefix="/api/v1")
-app.include_router(emergencies_router, prefix="/api")
-app.include_router(emergencies_router, prefix="")
-app.include_router(new_schedules_router, prefix="/api/v1")
-app.include_router(new_schedules_router, prefix="/api")
-app.include_router(new_schedules_router, prefix="")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api")
-app.include_router(analytics_router, prefix="")
-app.include_router(depots_router, prefix="/api/v1")
-app.include_router(depots_router, prefix="/api")
-app.include_router(depots_router, prefix="")
-app.include_router(waybills_router, prefix="/api/v1")
-app.include_router(waybills_router, prefix="/api")
-app.include_router(waybills_router, prefix="")
+
+# Ініціалізація статичних даних (Legacy compatibility)
+app.include_router(schedule_router, prefix="/api/v1")
+app.include_router(schedule_router, prefix="/api")
+
+# WebSocket маршрути
 app.include_router(ws_router)

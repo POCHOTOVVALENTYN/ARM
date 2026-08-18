@@ -12,180 +12,189 @@ from app.models.models import (
     HubNodeModel,
     DepotModel,
     RouteDepotConfigModel,
-    BreakLocationConfigModel
+    BreakLocationConfigModel,
+    RouteModel,
+    StationModel,
+    RouteStation
 )
 
-EMERGENCY_TEMPLATES = [
-  {
-    "id": "em_1",
-    "title": "Аварія на вул. Преображенській (блокування трамваїв)",
-    "cause": "ДТП стороннього автотранспорту на коліях біля вул. Тираспольської",
-    "affectedRouteIds": ["T3", "T10"],
-    "affectedStationIds": ["st_tiraspol"],
-    "detourDescription": "Перенаправлення вагонів маршруту №3 через Старосінну площу та Прохоровську колію із заїздом у Трамвайне депо №1.",
-    "alternativeStations": ["st_starosinna", "st_vodoprovidna"]
-  },
-  {
-    "id": "em_2",
-    "title": "Обрив контактного дроту на Пересипському мості",
-    "cause": "Пошкодження габаритною вантажівкою контактної мережі тролейбусів та трамваїв",
-    "affectedRouteIds": ["T7"],
-    "affectedStationIds": ["st_peresyp"],
-    "detourDescription": "Переведення трамваїв маршруту №7 у скорочений режим \"вул. Паустовського — Пересипський міст\" та \"Старосінна пл. — 11-та ст. Люстдорфської дороги\".",
-    "alternativeStations": ["st_paustovskoho", "st_peresyp", "st_starosinna"]
-  },
-  {
-    "id": "em_3",
-    "title": "Неналежне паркування на Старосінній площі (Колія №1)",
-    "cause": "Приватне авто заблокувало виїзд з колії №1",
-    "affectedRouteIds": ["T3", "T7"],
-    "affectedStationIds": ["st_starosinna"],
-    "detourDescription": "Автоматичне перенаправлення траєкторії на резервну Колію №4 Старосінньої площі.",
-    "alternativeStations": ["st_starosinna"]
-  }
+ODESSA_ROUTES = [
+    {
+        "id": "7",
+        "number": "7",
+        "name": "вул. Паустовського — 11-та ст. Люстдорфської дороги",
+        "type": "TRAM",
+        "status": "ACTIVE",
+        "length_km": 33.2,
+        "default_speed_kmh": 16.5,
+        "color": "#2563EB",
+        "description": "Магістральний маршрут прямого сполучення «Північ-Південь» через Пересипський міст та Старосінну площу"
+    },
+    {
+        "id": "18",
+        "number": "18",
+        "name": "Куликове поле — 16-та ст. Великого Фонтану",
+        "type": "TRAM",
+        "status": "ACTIVE",
+        "length_km": 11.8,
+        "default_speed_kmh": 15.0,
+        "color": "#DC2626",
+        "description": "Основна магістраль Великого Фонтану (ізольована лінія Фонтанської дороги; єдине проміжне кільце — 11 ст. Фонтану)"
+    },
+    {
+        "id": "17",
+        "number": "17",
+        "name": "Куликове поле — 11-та ст. Великого Фонтану",
+        "type": "TRAM",
+        "status": "ACTIVE",
+        "length_km": 8.8,
+        "default_speed_kmh": 15.2,
+        "color": "#F59E0B",
+        "description": "Скорочений маршрут лінії Фонтану до кільця 11 ст. Великого Фонтану (Ванний провулок)"
+    },
+    {
+        "id": "5",
+        "number": "5",
+        "name": "Аркадія — Центральний Автовокзал",
+        "type": "TRAM",
+        "status": "ACTIVE",
+        "length_km": 14.2,
+        "default_speed_kmh": 14.0,
+        "color": "#16A34A",
+        "description": "Зв'язок Аркадії, Французького бульвару, Привозу та Автовокзалу (з прямим розворотом на кільці «Парк Шевченка» маршруту №28)"
+    },
+    {
+        "id": "28",
+        "number": "28",
+        "name": "Парк Шевченка — вул. Пастера",
+        "type": "TRAM",
+        "status": "ACTIVE",
+        "length_km": 8.4,
+        "default_speed_kmh": 13.5,
+        "color": "#9333EA",
+        "description": "Кільцевий центральний маршрут через вул. Леонтовича та Тираспольську площу"
+    },
+    {
+        "id": "8",
+        "number": "8",
+        "name": "Залізничний вокзал — вул. Інглезі",
+        "type": "TROLLEYBUS",
+        "status": "ACTIVE",
+        "length_km": 9.6,
+        "default_speed_kmh": 16.0,
+        "color": "#EA580C",
+        "description": "Тролейбусна лінія через вул. Космонавтів та Адміральський проспект"
+    },
+    {
+        "id": "9",
+        "number": "9",
+        "name": "вул. Інглезі — вул. Рішельєвська / Грецька",
+        "type": "TROLLEYBUS",
+        "status": "ACTIVE",
+        "length_km": 12.0,
+        "default_speed_kmh": 15.5,
+        "color": "#0891B2",
+        "description": "Тролейбусне сполучення спального району Черемушки з історичним центром міста"
+    },
+    {
+        "id": "Tr7",
+        "number": "7",
+        "name": "вул. Архітекторська — вул. Новосельського",
+        "type": "TROLLEYBUS",
+        "status": "ACTIVE",
+        "length_km": 15.4,
+        "default_speed_kmh": 15.0,
+        "color": "#4F46E5",
+        "description": "Магістральний тролейбус Київського району (Таїрова) до Центру"
+    },
+    {
+        "id": "10",
+        "number": "10",
+        "name": "вул. Інглезі — Пересипський міст",
+        "type": "TROLLEYBUS",
+        "status": "ACTIVE",
+        "length_km": 13.8,
+        "default_speed_kmh": 15.2,
+        "color": "#D97706",
+        "description": "Швидкісний тролейбусний діагональний маршрут Черемушки — Пересип"
+    }
 ]
 
-DEPOTS = [
-  {
-    "id": "depot_tram_1",
-    "name": "Трамвайне депо №1",
-    "type": "tram",
-    "address": "вул. Водопровідна, 1",
-    "lat": 46.4678,
-    "lng": 30.7311,
-    "prepTimeMin": 10
-  },
-  {
-    "id": "depot_tram_2",
-    "name": "Трамвайне депо №2",
-    "type": "tram",
-    "address": "вул. Академіка Воробйова, 1",
-    "lat": 46.4952,
-    "lng": 30.7183,
-    "prepTimeMin": 10
-  },
-  {
-    "id": "depot_trolley_1",
-    "name": "Тролейбусне депо №1",
-    "type": "trolleybus",
-    "address": "вул. Інглезі, 2",
-    "lat": 46.4281,
-    "lng": 30.7042,
-    "prepTimeMin": 19
-  }
+# Ключові станції та зупинки Одеси з реальними GPS координатами
+ODESSA_STATIONS = [
+    # Трамваї 18 та 17 (Лінія Фонтану)
+    {"id": "st_kulykove", "name": "Куликове поле (Кінцева)", "type": "HUB", "lat": 46.4668, "lng": 30.7441, "is_dispatch_station": True, "break_capacity": 3},
+    {"id": "st_4_fontan", "name": "4-та станція В. Фонтану", "type": "STOP", "lat": 46.4520, "lng": 30.7485, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_5_fontan", "name": "5-та станція В. Фонтану", "type": "STOP", "lat": 46.4465, "lng": 30.7502, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_6_fontan", "name": "6-та станція В. Фонтану", "type": "STOP", "lat": 46.4402, "lng": 30.7521, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_7_fontan", "name": "7-ма станція В. Фонтану", "type": "STOP", "lat": 46.4345, "lng": 30.7540, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_8_fontan", "name": "8-ма станція В. Фонтану", "type": "STOP", "lat": 46.4290, "lng": 30.7558, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_9_fontan", "name": "9-та станція В. Фонтану", "type": "STOP", "lat": 46.4230, "lng": 30.7570, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_11_fontan", "name": "11-та станція В. Фонтану (Кільце)", "type": "HUB", "lat": 46.4150, "lng": 30.7585, "is_dispatch_station": True, "break_capacity": 2},
+    {"id": "st_16_fontan", "name": "16-та станція В. Фонтану (Золотий Берег)", "type": "HUB", "lat": 46.3885, "lng": 30.7520, "is_dispatch_station": True, "break_capacity": 3},
+    
+    # Трамвай 7 & Вузли
+    {"id": "st_paustovskoho", "name": "вул. Паустовського (Кінцева)", "type": "HUB", "lat": 46.5925, "lng": 30.8010, "is_dispatch_station": True, "break_capacity": 4},
+    {"id": "st_moloda_gvardiya", "name": "Молода Гвардія", "type": "STOP", "lat": 46.5540, "lng": 30.7720, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_luzanivka", "name": "Лузанівка (Кільце)", "type": "HUB", "lat": 46.5450, "lng": 30.7620, "is_dispatch_station": True, "break_capacity": 3},
+    {"id": "st_peresyp", "name": "Пересипський міст (Херсонський сквер)", "type": "HUB", "lat": 46.4975, "lng": 30.7245, "is_dispatch_station": True, "break_capacity": 3},
+    {"id": "st_starosinna", "name": "Старосінна площа (Головний Хаб)", "type": "HUB", "lat": 46.4685, "lng": 30.7380, "is_dispatch_station": True, "break_capacity": 4},
+    {"id": "st_lustdorf_11", "name": "11-та станція Люстдорфської дороги", "type": "HUB", "lat": 46.3980, "lng": 30.7180, "is_dispatch_station": True, "break_capacity": 3},
+    
+    # Трамвай 5 & 28
+    {"id": "st_arkadia", "name": "Аркадія (Кільце)", "type": "HUB", "lat": 46.4295, "lng": 30.7660, "is_dispatch_station": True, "break_capacity": 3},
+    {"id": "st_muzkomediya", "name": "Театр Музкомедії (Поворот на Парк Шевченка)", "type": "STOP", "lat": 46.4720, "lng": 30.7510, "is_dispatch_station": False, "break_capacity": 0},
+    {"id": "st_autovokzal", "name": "Центральний Автовокзал", "type": "HUB", "lat": 46.4780, "lng": 30.7085, "is_dispatch_station": True, "break_capacity": 2},
+    {"id": "st_oleksiivska", "name": "Олексіївська площа", "type": "HUB", "lat": 46.4670, "lng": 30.7150, "is_dispatch_station": True, "break_capacity": 2},
+    {"id": "st_tyraspolska", "name": "Тираспольська площа", "type": "HUB", "lat": 46.4815, "lng": 30.7320, "is_dispatch_station": True, "break_capacity": 2},
+    {"id": "st_shevchenko_park", "name": "Парк ім. Т. Шевченка (Кільце)", "type": "HUB", "lat": 46.4830, "lng": 30.7550, "is_dispatch_station": True, "break_capacity": 2},
+    {"id": "st_pastera", "name": "вул. Пастера (Міська лікарня)", "type": "HUB", "lat": 46.4950, "lng": 30.7220, "is_dispatch_station": True, "break_capacity": 2},
 ]
 
-HUBS = [
-  {
-    "id": "hub_starosinna",
-    "name": "Старосінна площа",
-    "locationDescription": "Головне трамвайне кільце біля Залізничного вокзалу (4 паралельні колії)",
-    "availableTracksCount": 4,
-    "minHeadwayMin": 2,
-    "routesConnecting": ["T3", "T7", "T10"],
-    "channels": [
-      { "trackId": "tr_1", "name": "Колія №1 (Люстдорфський напрямок)", "maxCapacity": 3, "directionVector": "South" },
-      { "trackId": "tr_2", "name": "Колія №2 (Центральний напрямок)", "maxCapacity": 3, "directionVector": "North" },
-      { "trackId": "tr_3", "name": "Колія №3 (Відстій / Обіди водіїв)", "maxCapacity": 2, "directionVector": "Idle" },
-      { "trackId": "tr_4", "name": "Колія №4 (Обхідна колія)", "maxCapacity": 2, "directionVector": "Pass" }
-    ]
-  },
-  {
-    "id": "hub_tiraspol",
-    "name": "Тираспольська площа",
-    "locationDescription": "Кільцевий вузол перетину вулиць Преображенська та Тираспольська",
-    "availableTracksCount": 3,
-    "minHeadwayMin": 3,
-    "routesConnecting": ["T3", "T10"],
-    "channels": [
-      { "trackId": "tr_t1", "name": "Колія №1 (Головне кільце)", "maxCapacity": 2, "directionVector": "Loop" },
-      { "trackId": "tr_t2", "name": "Колія №2 (Західний об'їзд)", "maxCapacity": 2, "directionVector": "West" }
-    ]
-  },
-  {
-    "id": "hub_lustdorf_11th",
-    "name": "11-та ст. Люстдорфської дороги",
-    "locationDescription": "Кінцева станція та обгонова колія південного радіуса",
-    "availableTracksCount": 2,
-    "minHeadwayMin": 2,
-    "routesConnecting": ["T3", "T7"],
-    "channels": [
-      { "trackId": "tr_l1", "name": "Колія №1 (Висаджувально-посадкова)", "maxCapacity": 2, "directionVector": "Terminal" },
-      { "trackId": "tr_l2", "name": "Колія №2 (Запасна / Обіди)", "maxCapacity": 2, "directionVector": "Idle" }
-    ]
-  }
-]
-
-ROUTE_DEPOT_CONFIGS = [
-  {
-    "id": "cfg_1",
-    "routeId": "Tr3",
-    "primaryDepotId": "depot_trolley_1",
-    "secondaryDepotId": None,
-    "defaultOutboundTime": "05:00",
-    "defaultInboundTime": "23:00"
-  }
-]
-
-BREAK_LOCATIONS = [
-  {
-    "id": "brk_1",
-    "routeId": "T3",
-    "locationId": "st_starosinna",
-    "locationName": "Старосінна площа",
-    "locationType": "terminal",
-    "maxCapacityVehicles": 4,
-    "durationMin": 15
-  },
-  {
-    "id": "brk_3",
-    "routeId": "T3",
-    "locationId": "st_lustdorf_11th",
-    "locationName": "Кінцева станція «11-та ст. Люстдорфської дороги»",
-    "locationType": "opposite_terminal",
-    "maxCapacityVehicles": 2,
-    "durationMin": 30
-  }
+# Маршрутна прив'язка зупинок для Трамвая №18
+ROUTE_18_STOPS = [
+    "st_kulykove", "st_4_fontan", "st_5_fontan", "st_6_fontan", 
+    "st_7_fontan", "st_8_fontan", "st_9_fontan", "st_11_fontan", "st_16_fontan"
 ]
 
 async def seed_data():
-    print("Initializing Database Tables...")
+    print("Ініціалізація структури бази даних...")
     await init_db()
     
-    print("Seeding mock configuration data...")
+    print("Наповнення еталонними маршрутами та зупинками Одеси...")
     async with AsyncSessionLocal() as db:
-        # Emergency Templates
-        for item in EMERGENCY_TEMPLATES:
-            exists = await db.execute(select(EmergencyTemplateModel).filter_by(id=item["id"]))
+        # 1. Станції
+        for st in ODESSA_STATIONS:
+            exists = await db.execute(select(StationModel).filter_by(id=st["id"]))
             if not exists.scalars().first():
-                db.add(EmergencyTemplateModel(**item))
-                
-        # Hubs
-        for item in HUBS:
-            exists = await db.execute(select(HubNodeModel).filter_by(id=item["id"]))
-            if not exists.scalars().first():
-                db.add(HubNodeModel(**item))
-                
-        # Depots
-        for item in DEPOTS:
-            exists = await db.execute(select(DepotModel).filter_by(id=item["id"]))
-            if not exists.scalars().first():
-                db.add(DepotModel(**item))
-                
-        # Route Depot Configs
-        for item in ROUTE_DEPOT_CONFIGS:
-            exists = await db.execute(select(RouteDepotConfigModel).filter_by(id=item["id"]))
-            if not exists.scalars().first():
-                db.add(RouteDepotConfigModel(**item))
-                
-        # Break Locations
-        for item in BREAK_LOCATIONS:
-            exists = await db.execute(select(BreakLocationConfigModel).filter_by(id=item["id"]))
-            if not exists.scalars().first():
-                db.add(BreakLocationConfigModel(**item))
-                
+                db.add(StationModel(**st))
         await db.commit()
-    print("Seed complete.")
+
+        # 2. Маршрути
+        for r in ODESSA_ROUTES:
+            exists = await db.execute(select(RouteModel).filter_by(id=r["id"]))
+            if not exists.scalars().first():
+                db.add(RouteModel(**r))
+        await db.commit()
+
+        # 3. Прив'язка зупинок для Маршруту 18 (Прямий та зворотний напрямки)
+        for idx, st_id in enumerate(ROUTE_18_STOPS, start=1):
+            exists_0 = await db.execute(
+                select(RouteStation).filter_by(route_id="18", direction_id=0, stop_id=st_id)
+            )
+            if not exists_0.scalars().first():
+                db.add(RouteStation(route_id="18", direction_id=0, stop_id=st_id, stop_sequence=idx))
+                
+        rev_18_stops = list(reversed(ROUTE_18_STOPS))
+        for idx, st_id in enumerate(rev_18_stops, start=1):
+            exists_1 = await db.execute(
+                select(RouteStation).filter_by(route_id="18", direction_id=1, stop_id=st_id)
+            )
+            if not exists_1.scalars().first():
+                db.add(RouteStation(route_id="18", direction_id=1, stop_id=st_id, stop_sequence=idx))
+
+        await db.commit()
+    print("✅ Наповнення бази даних Одеси успішно завершено!")
 
 if __name__ == "__main__":
     asyncio.run(seed_data())
