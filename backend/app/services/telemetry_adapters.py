@@ -4,6 +4,7 @@ import httpx
 import json
 import os
 import csv
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -91,37 +92,67 @@ class GtfsRealtimeAdapter(BaseTelemetryAdapter):
 
 class WialonAdapter(BaseTelemetryAdapter):
     """
-    Адаптер телеметрії Wialon Remote API (готовий до активації за токеном).
+    Адаптер телеметрії Wialon Remote API (підтримує як постійний API Token, так і логін/пароль).
     """
     def __init__(self):
         self.host = settings.WIALON_HOST
         self.token = settings.WIALON_TOKEN
+        self.user = getattr(settings, "WIALON_USER", "Monitor OD")
+        self.password = getattr(settings, "WIALON_PASSWORD", "qiBqar-fuzde0-fakhir")
         self.eid: Optional[str] = None
         self._lock = asyncio.Lock()
 
     async def authenticate(self, client: httpx.AsyncClient) -> bool:
-        if not self.token or self.token == "YOUR_WIALON_TOKEN_HERE":
-            return False
-        params = {
-            "svc": "token/login",
-            "params": f'{{"token":"{self.token}"}}'
-        }
-        try:
-            resp = await client.post(self.host, params=params, timeout=10.0)
-            data = resp.json()
-            if "eid" in data:
-                self.eid = data["eid"]
-                logger.info(f"⚡ [Wialon] Сесію відкрито (eid: {self.eid[:8]}...)")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Wialon auth error: {e}")
-            return False
+        # Спосіб 1: Авторизація за постійним API Токеном (найбільш стабільний спосіб Wialon)
+        if self.token and len(self.token) > 20:
+            params = {
+                "svc": "token/login",
+                "params": json.dumps({"token": self.token})
+            }
+            try:
+                resp = await client.post(self.host, data=params, timeout=10.0)
+                data = resp.json()
+                if "eid" in data:
+                    self.eid = data["eid"]
+                    logger.info(f"⚡ [WIALON] Сесію відкрито за токеном (eid: {self.eid[:8]}...)")
+                    return True
+                else:
+                    logger.warning(f"⚠️ [WIALON] Помилка авторизації токена: {data}")
+            except Exception as e:
+                logger.error(f"❌ [WIALON] Помилка з'єднання при авторизації токена: {e}")
+
+        # Спосіб 2: Пряма авторизація за Логіном та Паролем (core/login)
+        if self.user and self.password:
+            params = {
+                "svc": "core/login",
+                "params": json.dumps({
+                    "user": self.user,
+                    "password": self.password,
+                    "appName": "ARM_OMET_DISPATCHER"
+                })
+            }
+            try:
+                resp = await client.post(self.host, data=params, timeout=10.0)
+                data = resp.json()
+                if "eid" in data:
+                    self.eid = data["eid"]
+                    logger.info(f"⚡ [WIALON] Сесію відкрито для користувача '{self.user}' (eid: {self.eid[:8]}...)")
+                    return True
+                else:
+                    err_code = data.get("error")
+                    err_reason = data.get("reason", "")
+                    if err_code == 7:
+                        logger.warning("⚠️ [WIALON] Невірний логін або пароль (error: 7). Рекомендується згенерувати API Token в кабінеті Wialon.")
+                    elif err_code == 1003:
+                        logger.warning("⚠️ [WIALON] Тимчасовий ліміт невдалих спроб входу (error: 1003). Рекомендується використати API Token.")
+                    else:
+                        logger.warning(f"⚠️ [WIALON] core/login повернув помилку {err_code}: {err_reason}")
+            except Exception as e:
+                logger.error(f"❌ [WIALON] Помилка з'єднання при core/login: {e}")
+
+        return False
 
     async def fetch_vehicles(self) -> List[Dict[str, Any]]:
-        if not self.token or self.token == "YOUR_WIALON_TOKEN_HERE":
-            return []
-
         async with httpx.AsyncClient() as client:
             async with self._lock:
                 if not self.eid:
@@ -137,7 +168,7 @@ class WialonAdapter(BaseTelemetryAdapter):
                     "sortType": "sys_name"
                 },
                 "force": 1,
-                "flags": 1025,
+                "flags": 1025, # Базові властивості + остання GPS-позиція (pos)
                 "from": 0,
                 "to": 0
             }
@@ -150,34 +181,99 @@ class WialonAdapter(BaseTelemetryAdapter):
             try:
                 resp = await client.post(self.host, data=req_params, timeout=10.0)
                 data = resp.json()
-                if "error" in data and data["error"] == 1:
-                    await self.authenticate(client)
-                    req_params["sid"] = self.eid
+                if "error" in data and data["error"] in [1, 2]: # Invalid session, re-auth
+                    async with self._lock:
+                        await self.authenticate(client)
+                        req_params["sid"] = self.eid
                     resp = await client.post(self.host, data=req_params, timeout=10.0)
                     data = resp.json()
 
                 units = data.get("items", [])
                 telemetry_list = []
+                now_sec = int(datetime.now(timezone.utc).timestamp())
+                
                 for u in units:
                     pos = u.get("pos")
                     if not pos:
                         continue
-                    speed = float(pos.get("s", 0))
+                    
+                    pos_time = int(pos.get("t", 0))
+                    # Відсікаємо неактивні бортотримачі (старші 2 годин)
+                    if (now_sec - pos_time) > 7200:
+                        continue
+
+                    lat = float(pos.get("y", 0.0))
+                    lng = float(pos.get("x", 0.0))
+                    speed = float(pos.get("s", 0.0))
+
+                    # Анти-РЕБ фільтр
                     if speed > settings.MAX_VALID_SPEED_KMH:
                         continue
+                    # Повна межа міста Одеси (від Люстдорфа до Паустовського)
+                    if not (46.30 <= lat <= 46.65 and 30.60 <= lng <= 30.85):
+                        continue
+
+                    unit_name = str(u.get("nm", "")).strip()
+                    nm_lower = unit_name.lower()
+                    
+                    # Класифікація та збереження точного 4-значного формату номера
+                    if any(k in unit_name.upper() for k in ["ГАЗ", "КАМАЗ", "РЕВІЗОР", "РЕВИЗОР", "ВИШКА", "ВАЗ", "УАЗ", "ТРАКТОР", "СЛУЖБ"]):
+                        v_id = unit_name
+                        disp_num = unit_name.split()[0] if unit_name.split() else unit_name
+                        v_type = "SERVICE"
+                        is_service = True
+                    elif "- trol" in nm_lower or "trol" in nm_lower:
+                        digits = re.sub(r'[^0-9]', '', unit_name)
+                        disp_num = digits.zfill(4) if (digits and len(digits) <= 4) else (digits or unit_name)
+                        v_id = unit_name
+                        v_type = "TROLLEYBUS"
+                        is_service = False
+                    elif "- tram" in nm_lower or "tram" in nm_lower:
+                        digits = re.sub(r'[^0-9]', '', unit_name)
+                        disp_num = digits.zfill(4) if (digits and len(digits) <= 4) else (digits or unit_name)
+                        v_id = unit_name
+                        v_type = "TRAM"
+                        is_service = False
+                    else:
+                        digits = re.sub(r'[^0-9]', '', unit_name)
+                        if digits:
+                            disp_num = digits.zfill(4) if len(digits) <= 4 else digits
+                            num = int(digits)
+                            # Трамваї Одеси: 2900-3400, 7100-7200, 5000+
+                            if (2900 <= num <= 3400) or (7100 <= num <= 7200) or (num >= 5000):
+                                v_type = "TRAM"
+                            # Тролейбуси Одеси: 0001-0050, 0600-0899, 2000-2099, 4001-4099
+                            elif (num <= 50) or (600 <= num <= 899) or (2000 <= num <= 2099) or (4000 <= num <= 4099):
+                                v_type = "TROLLEYBUS"
+                            else:
+                                v_type = "TRAM"
+                            v_id = unit_name
+                            is_service = False
+                        else:
+                            v_id = unit_name
+                            disp_num = unit_name
+                            v_type = "SERVICE"
+                            is_service = True
+
                     telemetry_list.append({
-                        "vehicle_id": str(u.get("nm", "")).strip(),
-                        "lat": round(float(pos.get("y", 0.0)), 6),
-                        "lng": round(float(pos.get("x", 0.0)), 6),
+                        "vehicle_id": v_id,
+                        "display_name": disp_num,
+                        "vehicle_type": v_type,
+                        "is_service": is_service,
+                        "lat": round(lat, 6),
+                        "lng": round(lng, 6),
                         "speed": round(speed, 1),
                         "heading": int(pos.get("c", 0)),
                         "source": "WIALON",
-                        "status": "active" if speed > 0 else "idle",
-                        "last_updated": int(pos.get("t", 0)) * 1000
+                        "status": "active" if speed > 1.0 else ("depot" if is_service else "idle"),
+                        "last_updated": pos_time * 1000
                     })
+                
+                if telemetry_list:
+                    logger.info(f"🛰️ [WIALON] Оброблено та нормалізовано {len(telemetry_list)} активних ТЗ Одеси")
                 return telemetry_list
             except Exception as e:
-                logger.error(f"Wialon search error: {e}")
+                logger.error(f"❌ [WIALON] Помилка отримання даних Wialon: {e}")
                 return []
 
 

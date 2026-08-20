@@ -8,7 +8,7 @@ router = APIRouter()
 class DelayCascadeRequest(BaseModel):
     block_id: str
     start_time: int  # minutes from midnight
-    delay_minutes: int
+    delay_minutes: float
     schedule_data: List[Dict[str, Any]]
     ambient_temp_c: Optional[float] = 20.0
 
@@ -137,3 +137,107 @@ async def get_route_shape(
         raise HTTPException(status_code=404, detail="Геометрію маршруту не знайдено")
         
     return shape.geometry
+
+@router.get("/{route_id}/stops", summary="Отримання послідовності зупинок маршруту")
+async def get_route_stops(
+    route_id: str,
+    direction_id: int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Повертає точну впорядковану послідовність зупинок маршруту з бази даних PostgreSQL.
+    """
+    from app.models.models import RouteStation, StationModel
+    query = (
+        select(RouteStation, StationModel)
+        .join(StationModel, RouteStation.stop_id == StationModel.id)
+        .where((RouteStation.route_id == route_id) & (RouteStation.direction_id == direction_id))
+        .order_by(RouteStation.stop_sequence)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    if not rows:
+        # Спробуємо знайти без direction_id або для протилежного
+        query_fallback = (
+            select(RouteStation, StationModel)
+            .join(StationModel, RouteStation.stop_id == StationModel.id)
+            .where(RouteStation.route_id == route_id)
+            .order_by(RouteStation.stop_sequence)
+        )
+        res_fallback = await db.execute(query_fallback)
+        rows = res_fallback.all()
+
+    stops = []
+    for r_st, st in rows:
+        stops.append({
+            "stop_sequence": r_st.stop_sequence,
+            "stop_id": st.id,
+            "name": st.name,
+            "lat": st.lat,
+            "lng": st.lng or st.lon,
+            "type": st.type,
+            "is_dispatch_station": bool(st.is_dispatch_station),
+            "break_capacity": st.break_capacity or 0
+        })
+
+    return {
+        "route_id": route_id,
+        "direction_id": direction_id,
+        "stops_count": len(stops),
+        "stops": stops
+    }
+
+class RouteCreate(BaseModel):
+    id: str
+    number: str
+    name: str
+    type: str = "TRAM"
+    length_km: float = 10.5
+    default_speed_kmh: float = 14.5
+    color: Optional[str] = None
+
+class RouteUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    length_km: Optional[float] = None
+    default_speed_kmh: Optional[float] = None
+    color: Optional[str] = None
+    status: Optional[str] = None
+
+@router.post("", summary="Створення нового маршруту")
+@router.post("/", summary="Створення нового маршруту")
+async def create_route(payload: RouteCreate, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(RouteModel).where(RouteModel.id == payload.id))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"Маршрут з ID {payload.id} вже існує")
+
+    new_route = RouteModel(
+        id=payload.id,
+        number=payload.number,
+        name=payload.name,
+        type=payload.type.upper(),
+        length_km=payload.length_km,
+        default_speed_kmh=payload.default_speed_kmh,
+        color=payload.color or ("#2563eb" if payload.type.upper() == "TRAM" else "#059669"),
+        status="ACTIVE"
+    )
+    db.add(new_route)
+    await db.commit()
+    await db.refresh(new_route)
+    return {"status": "success", "route": payload.model_dump()}
+
+@router.put("/{route_id}", summary="Оновлення маршруту")
+async def update_route(route_id: str, payload: RouteUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RouteModel).where(RouteModel.id == route_id))
+    route = result.scalar_one_or_none()
+    if not route:
+        raise HTTPException(status_code=404, detail=f"Маршрут {route_id} не знайдено")
+
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        if v is not None:
+            setattr(route, k, v)
+
+    await db.commit()
+    await db.refresh(route)
+    return {"status": "success", "message": f"Маршрут {route_id} оновлено"}

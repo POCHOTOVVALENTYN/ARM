@@ -116,51 +116,64 @@ function createVehicleSVGIcon(
   code: string, 
   bearing: number, 
   skin: VehicleSkin,
-  zoom: number
+  zoom: number,
+  vehicleNumber?: string
 ): L.DivIcon {
-  const size = zoom >= 16 ? 26 : zoom >= 14 ? 22 : 18;
-  const half = size / 2;
+  const circleSize = zoom >= 16 ? 26 : zoom >= 14 ? 22 : 19;
+  const arrowSize = zoom >= 16 ? 16 : zoom >= 14 ? 14 : 12;
 
-  let outerStyle = '';
+  let circleStyle = '';
+  let arrowColor = '#4F46E5'; // Site primary blue/indigo
+
   if (skin === 'halo') {
-    outerStyle = `border: 2px solid #FFFFFF; background-color: #0284C7; box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.4), 0 2px 8px rgba(0,0,0,0.3);`;
+    circleStyle = 'background: #FFFFFF; border: 2px solid #C7D2FE; box-shadow: 0 0 10px rgba(79, 70, 229, 0.6);';
+    arrowColor = '#4F46E5';
   } else if (skin === 'dual-tone') {
-    outerStyle = `border: 2px solid #000; background: linear-gradient(135deg, ${color} 50%, #1E293B 50%); shadow: 0 2px 6px rgba(0,0,0,0.3);`;
+    circleStyle = 'background: #EEF2FF; border: 2px solid #818CF8; box-shadow: 0 2px 6px rgba(0,0,0,0.15);';
+    arrowColor = '#2563EB';
   } else if (skin === 'muted') {
-    outerStyle = `border: 1.5px solid #475569; background-color: ${color}; opacity: 0.85; shadow: 0 1px 4px rgba(0,0,0,0.2);`;
+    circleStyle = 'background: #1E293B; border: 1.5px solid #475569; box-shadow: 0 1px 4px rgba(0,0,0,0.2);';
+    arrowColor = '#E2E8F0';
   } else {
-    // Balanced default
-    outerStyle = `border: 2px solid #FFFFFF; background-color: ${color}; box-shadow: 0 3px 6px rgba(0,0,0,0.3);`;
+    // Balanced default (matches uploaded image)
+    circleStyle = 'background: #FFFFFF; border: 2px solid #C7D2FE; box-shadow: 0 2px 6px rgba(0,0,0,0.12);';
+    arrowColor = '#4F46E5';
   }
 
+  const numberHtml = vehicleNumber 
+    ? `<div style="margin-top: 2px; padding: 1px 4px; background: rgba(15, 23, 42, 0.9); color: #FFFFFF; font-family: monospace; font-size: 8px; font-weight: 800; border-radius: 4px; border: 1px solid rgba(51, 65, 85, 0.8); line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+        ${vehicleNumber}
+       </div>`
+    : '';
+
   const svgContent = `
-    <div style="
-      width: ${size}px; 
-      height: ${size}px; 
-      border-radius: 50%; 
-      ${outerStyle}
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      transform: rotate(${Math.round(bearing)}deg);
-      transition: transform 0.1s linear;
-      cursor: pointer;
-    ">
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; user-select: none;">
+      <!-- Круглий білий диск зі стрілочкою в кольорі сайту -->
       <div style="
-        width: 0; 
-        height: 0; 
-        border-left: 4px solid transparent; 
-        border-right: 4px solid transparent; 
-        border-bottom: 7px solid #FFFFFF;
-      "></div>
+        width: ${circleSize}px; 
+        height: ${circleSize}px; 
+        border-radius: 50%; 
+        ${circleStyle}
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        transform: rotate(${Math.round(bearing)}deg);
+        transition: transform 0.15s ease-out;
+      ">
+        <svg width="${arrowSize}" height="${arrowSize}" viewBox="0 0 24 24" fill="none" stroke="${arrowColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2.5L19.5 20.5L12 16.5L4.5 20.5L12 2.5Z"/>
+        </svg>
+      </div>
+      <!-- Бортовий номер позаду стрілочки -->
+      ${numberHtml}
     </div>
   `;
 
   return L.divIcon({
     className: 'vehicle-marker-icon',
     html: svgContent,
-    iconSize: [size, size],
-    iconAnchor: [half, half]
+    iconSize: [circleSize + 12, circleSize + 18],
+    iconAnchor: [(circleSize + 12) / 2, circleSize / 2]
   });
 }
 
@@ -568,7 +581,7 @@ export const SimulationMapView: React.FC = () => {
       `;
 
       if (!marker) {
-        const icon = createVehicleSVGIcon(matchedRoute.color, matchedRoute.code, bearing, skin, zoom);
+        const icon = createVehicleSVGIcon(matchedRoute.color, matchedRoute.code, bearing, skin, zoom, vehicleNumber);
         marker = L.marker([lat, lon], { icon, zIndexOffset: 1000, interactive: true }).addTo(map);
 
         (marker as any).vehicleData = liveVehicleData;
@@ -589,7 +602,7 @@ export const SimulationMapView: React.FC = () => {
       } else {
         (marker as any).vehicleData = liveVehicleData;
         marker.setLatLng([lat, lon]);
-        marker.setIcon(createVehicleSVGIcon(matchedRoute.color, matchedRoute.code, bearing, skin, zoom));
+        marker.setIcon(createVehicleSVGIcon(matchedRoute.color, matchedRoute.code, bearing, skin, zoom, vehicleNumber));
         marker.setPopupContent(popupHtml);
       }
 

@@ -206,6 +206,28 @@ async def delete_route_depot_config(
         await invalidate_cache("settings:route_depots")
     return {"status": "ok"}
 
+DEFAULT_ODESSA_BREAK_LOCATIONS = [
+    {"id": "brk_7_1", "routeId": "7", "locationId": "dp_paustov", "locationName": "ДП «вул. Паустовського» (Кінцева А)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_7_2", "routeId": "7", "locationId": "dp_luzan", "locationName": "ДП «Лузанівка» (КП-2)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_18_1", "routeId": "18", "locationId": "dp_kulyk", "locationName": "ДП «Куликове поле» (Кінцева А)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_18_2", "routeId": "18", "locationId": "dp_fontan16", "locationName": "ДП «16-та ст. Великого Фонтану» (Кінцева Б)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
+    {"id": "brk_28_1", "routeId": "28", "locationId": "dp_pastera", "locationName": "ДП «вул. Пастера» (Кінцева А)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
+    {"id": "brk_28_2", "routeId": "28", "locationId": "dp_park_shevch", "locationName": "ДП «Парк ім. Т. Шевченка» (Кінцева Б)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
+    {"id": "brk_5_1", "routeId": "5", "locationId": "dp_arkadia", "locationName": "ДП «Аркадія» (Кінцева А / Кільце)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_5_2", "routeId": "5", "locationId": "dp_autovokzal", "locationName": "ДП «Центральний Автовокзал» (Кінцева Б)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
+    {"id": "brk_10_1", "routeId": "10", "locationId": "dp_rabina", "locationName": "ДП «вул. Іцхака Рабіна (вул. Інглезі)»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_10_2", "routeId": "10", "locationId": "dp_tiraspol", "locationName": "ДП «Тираспольська площа»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
+    {"id": "brk_15_1", "routeId": "15", "locationId": "dp_sloboda", "locationName": "ДП «Слобідський ринок»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
+    {"id": "brk_20_1", "routeId": "20", "locationId": "dp_kherson_sq", "locationName": "ДП «Херсонський сквер»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
+    {"id": "brk_3_1", "routeId": "3", "locationId": "dp_zastava1", "locationName": "ДП «ст. Застава-1»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
+    {"id": "brk_1_1", "routeId": "1", "locationId": "dp_peresyp", "locationName": "ДП «вул. Чорноморського козацтва (Пересип)»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
+    {"id": "brk_26_1", "routeId": "26", "locationId": "dp_starosinna", "locationName": "ДП «Старосінна площа» (Головний Хаб)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 4, "durationMin": 45},
+    {"id": "brk_tr8_1", "routeId": "8", "locationId": "dp_vokzal", "locationName": "ДП «Залізничний вокзал»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_tr7_1", "routeId": "7-Tr", "locationId": "dp_arhitektor", "locationName": "ДП «вул. Архітекторська»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_tr9_1", "routeId": "9", "locationId": "dp_inglezi", "locationName": "ДП «вул. Інглезі»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
+    {"id": "brk_tr12_1", "routeId": "12", "locationId": "dp_airport", "locationName": "ДП «вул. Центральний Аеропорт»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40}
+]
+
 # --- BREAK LOCATIONS ---
 @router.get("/break-locations", response_model=List[Dict[str, Any]])
 async def get_break_locations(db: AsyncSession = Depends(get_db)):
@@ -215,6 +237,16 @@ async def get_break_locations(db: AsyncSession = Depends(get_db)):
 
     result = await db.execute(select(BreakLocationConfigModel))
     locations = result.scalars().all()
+
+    if not locations:
+        # Автоматичне наповнення реальними диспетчерськими пунктами обідів
+        for item in DEFAULT_ODESSA_BREAK_LOCATIONS:
+            m = BreakLocationConfigModel(**item)
+            db.add(m)
+        await db.commit()
+        result = await db.execute(select(BreakLocationConfigModel))
+        locations = result.scalars().all()
+
     data = [
         {
             "id": loc.id, "routeId": loc.routeId, "locationId": loc.locationId,
@@ -251,3 +283,24 @@ async def delete_break_location(
         await db.commit()
         await invalidate_cache("settings:break_locations")
     return {"status": "ok"}
+
+# --- GTFS DATA IMPORT & SYNC ---
+@router.post("/gtfs/sync-local")
+async def sync_gtfs_data(
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_dispatcher)
+):
+    """
+    Імпорт та синхронізація реальних статичних даних GTFS (Одеса) у PostgreSQL.
+    """
+    try:
+        from scripts.migrate_gtfs import parse_gtfs
+        await parse_gtfs()
+        await invalidate_cache("routes:all")
+        await invalidate_cache("stations:all")
+        return {
+            "status": "success",
+            "message": "Реальні дані GTFS (638 зупинок, 20 маршрутів) успішно синхронізовано з PostgreSQL!"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Помилка синхронізації GTFS: {str(e)}")

@@ -2,11 +2,14 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { settingsApi, SystemConfigDTO } from '../services/settingsApi';
 
+export type VehicleMarkerStyle = 'halo' | 'dualtone' | 'muted' | 'balanced';
+
 export interface SettingsState {
   mapTileUrl: string;
   mapAttribution: string;
   enterpriseLogoUrl: string | null;
   theme: 'light' | 'dark' | 'system';
+  markerStyle: VehicleMarkerStyle;
   isLoading: boolean;
 
   // Асинхронні екшени
@@ -17,6 +20,7 @@ export interface SettingsState {
   setMapTileUrl: (url: string, attribution: string) => void;
   setEnterpriseLogo: (url: string | null) => void;
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setMarkerStyle: (style: VehicleMarkerStyle) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -27,6 +31,7 @@ export const useSettingsStore = create<SettingsState>()(
       mapAttribution: '&copy; OpenStreetMap contributors',
       enterpriseLogoUrl: null,
       theme: 'light',
+      markerStyle: 'balanced',
       isLoading: false,
 
       fetchSettings: async (silent = false) => {
@@ -74,6 +79,7 @@ export const useSettingsStore = create<SettingsState>()(
       setMapTileUrl: (url, attribution) => set({ mapTileUrl: url, mapAttribution: attribution }),
       setEnterpriseLogo: (url) => set({ enterpriseLogoUrl: url }),
       setTheme: (theme) => set({ theme }),
+      setMarkerStyle: (markerStyle) => set({ markerStyle }),
     }),
     {
       name: 'omet-settings',

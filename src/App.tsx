@@ -8,8 +8,13 @@ import { DispatcherTab } from './components/tabs/DispatcherTab';
 import { NetworkSettingsTab } from './components/tabs/NetworkSettingsTab';
 import { DutyBuilderView } from './components/views/DutyBuilderView';
 import { TripGridView } from './components/views/TripGridView';
+import { PlanningWorkspaceView } from './components/views/PlanningWorkspaceView';
+import { DriverScheduleBookView } from './components/views/DriverScheduleBookView';
+import { DriverTerminalView } from './components/views/DriverTerminalView';
 import { ValidatorView } from './components/views/ValidatorView';
 import { LiveMapView } from './components/views/LiveMapView';
+import { DispatcherLiveView } from './components/views/DispatcherLiveView';
+import { OperationalGanttView } from './components/views/OperationalGanttView';
 import { SimulationMapView } from './components/views/SimulationMapView';
 import { OperationalScheduleGenerator } from './components/views/OperationalScheduleGenerator';
 import { MareyDiagramTab } from './components/tabs/MareyDiagramTab';
@@ -27,6 +32,7 @@ import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
 import { useAuthStore } from './store/useAuthStore';
 import { useSettingsStore } from './store/useSettingsStore';
+import { useTelemetryStore } from './store/useTelemetryStore';
 import { authApi } from './services/authApi';
 import { SuperuserRoute } from './components/SuperuserRoute';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -35,8 +41,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
 
 export default function App() {
-  // Активуємо WebSocket підключення при старті додатку,
-  // воно запрацює тільки після isInitialized === true
+  // Активуємо WebSocket підключення при старті додатку
   useWebSocket('ws://localhost:8000/ws');
 
   const { token, isAuthenticated, setUser, logout } = useAuthStore();
@@ -94,56 +99,33 @@ export default function App() {
 
   // Fetch initial configuration on mount
   useEffect(() => {
-    if (isAuthenticated) {
-      if (!isInitialized) {
-        fetchInitialData();
-      }
-      if (!isConfigLoaded) {
-        fetchConfigs();
-      }
+    if (token) {
+      fetchConfigs();
+      fetchInitialData();
     }
-  }, [isAuthenticated, isInitialized, fetchInitialData, isConfigLoaded, fetchConfigs]);
+  }, [token, fetchConfigs, fetchInitialData]);
 
   const handleApplySlack = (slackMin: number, tripId: string) => {
-    applySlackToNode(tripId, 'st_starosinna', slackMin);
+    applySlackToNode(slackMin, tripId);
   };
 
-  const handleTruncateTrip = () => {
-    alert('Оперативне скорочення рейсу виконано (ТЗ повернено через внутрішнє кільце)');
-  };
+  const handleTruncateTrip = () => {};
 
-  const handleReserveVehicle = () => {
-    setPath('/dispatch/hot-reserve');
-  };
+  const handleReserveVehicle = () => {};
 
   if (isVerifyingSession) {
     return (
       <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-600 font-medium font-sans">Перевірка сесії диспетчера...</p>
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-600 font-medium">Перевірка авторизації...</p>
         </div>
       </div>
     );
   }
 
-  // If path is a driver view, render it directly without standard layout
-  if (currentPath.startsWith('/driver/')) {
-    const vehicleId = currentPath.split('/')[2];
-    return <SmartWaybillView vehicleId={vehicleId || '0000'} />;
-  }
-
-  // If not authenticated or on /login, render Login view directly
-  if (!isAuthenticated || currentPath === '/login') {
-    return (
-      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased">
-        <GlobalLoader />
-        <Toaster position="top-right" richColors />
-        <main className="flex-1 flex items-center justify-center p-4">
-          <AuthLoginView />
-        </main>
-      </div>
-    );
+  if (!isAuthenticated && currentPath !== '/login' && !currentPath.startsWith('/driver/')) {
+    return <AuthLoginView />;
   }
 
   if (!isInitialized || !isConfigLoaded) {
@@ -166,7 +148,7 @@ export default function App() {
         {/* Primary Navigation & Header */}
         <Header onOpenReport={() => setIsReportOpen(true)} />
 
-      {/* Main Content Workspace mapping 17 URLs/Views */}
+      {/* Main Content Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <ErrorBoundary>
           {/* / or /analytics/dashboard */}
@@ -179,14 +161,14 @@ export default function App() {
             <AnalyticsReportView />
           )}
 
-          {/* /admin - Admin Panel (Superuser Only) */}
+          {/* /admin - Admin Panel */}
           {currentPath === '/admin' && (
             <SuperuserRoute>
-              <AdminView initialTab="config" />
+              <AdminView initialTab="users" />
             </SuperuserRoute>
           )}
 
-          {/* /export/gtfs - GTFS Open Data Tab inside Admin (Superuser Only) */}
+          {/* /export/gtfs */}
           {currentPath === '/export/gtfs' && (
             <SuperuserRoute>
               <AdminView initialTab="gtfs" />
@@ -196,11 +178,17 @@ export default function App() {
           {/* /login */}
           {currentPath === '/login' && <AuthLoginView />}
 
-          {/* Dispatcher Views */}
-          {currentPath === '/dispatch/marey' && <MareyDiagramTab />}
+          {/* 2. Dispatcher Views */}
+          {currentPath === '/dispatch/gantt' && <OperationalGanttView />}
 
-          {(currentPath === '/dispatch/gantt' ||
-            currentPath === '/dispatch/slack') && (
+          {(currentPath === '/dispatch/map' || currentPath === '/dispatch/live') && (
+            <DispatcherLiveView />
+          )}
+
+          {(currentPath === '/dispatch/slack' ||
+            currentPath === '/dispatch/marey' ||
+            currentPath === '/dispatch/hot-reserve' ||
+            currentPath === '/dispatch/detours') && (
             <DispatcherTab
               routes={routes}
               blocks={draftBlocks}
@@ -212,59 +200,41 @@ export default function App() {
             />
           )}
 
-          {/* Live Map View */}
-          {currentPath === '/dispatch/map' && <LiveMapView />}
-
           {/* Operational Schedule Generator */}
           {currentPath === '/dispatch/generator' && <OperationalScheduleGenerator />}
 
-          {/* Dispatcher Extras */}
-          {currentPath === '/dispatch/hot-reserve' && <HotReserveView />}
-          {currentPath === '/dispatch/detours' && <EmergencyDetoursTab />}
-
-          {/* Planning Views */}
-          {currentPath === '/planning/duties' && <DutyBuilderView />}
-          {currentPath === '/planning/trips' && <TripGridView />}
-          {currentPath === '/planning/validate' && <ValidatorView />}
-          {(currentPath === '/planning/simulation' || currentPath === '/dispatch/simulation') && (
-            <SimulationMapView />
+          {/* 3. Unified Planning Workspace */}
+          {(currentPath === '/planning/workspace' ||
+            currentPath === '/planning/duties' ||
+            currentPath === '/planning/trips' ||
+            currentPath === '/planning/validate' ||
+            currentPath === '/planning/simulation' ||
+            currentPath === '/dispatch/simulation') && (
+            <PlanningWorkspaceView />
           )}
+
+          {/* Planning Archive */}
           {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
 
-          {/* Network Settings Views (Superuser Only) */}
+          {/* 4. Network Directory / Settings Views */}
           {(currentPath.startsWith('/settings/') || currentPath === '/settings') && (
-            <SuperuserRoute>
-              <NetworkSettingsTab />
-            </SuperuserRoute>
+            <NetworkSettingsTab />
           )}
 
-          {/* Crew Views */}
-          {currentPath === '/crew/roster' && <CrewRosterTab duties={draftDuties} />}
+          {/* 5. Crew & Driver Views */}
           {currentPath === '/crew/assignment' && <CrewAssignmentView />}
+          {currentPath === '/crew/schedule-book' && <DriverScheduleBookView />}
+          {currentPath === '/driver' && <DriverTerminalView />}
+          {currentPath === '/crew/roster' && <CrewRosterTab duties={draftDuties} />}
           {currentPath === '/crew/waybill' && <SmartWaybillView />}
         </ErrorBoundary>
       </main>
 
-      {/* Analytical Report Modal */}
-      <AnalyticalReportModal
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-      />
-
-      {/* Footer */}
-      <footer className="bg-white border-t-2 border-gray-900 py-4 px-4 sm:px-6 lg:px-8 text-xs text-gray-600 mt-auto font-mono">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-2">
-          <p>© 2026 КП «Одесміськелектротранс». АРМ «Розклади» v2.4. Всі права захищено.</p>
-          <div className="flex items-center space-x-4">
-            <span>Рівень 1 (Статика)</span>
-            <span>•</span>
-            <span>Рівень 2 (Динамічне Диспетчерування)</span>
-            <span>•</span>
-            <span>GTFS / GTFS-RT Compliant</span>
-          </div>
-        </div>
-      </footer>
+      {/* Global Analytics Report Modal */}
+      {isReportOpen && (
+        <AnalyticalReportModal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)} />
+      )}
     </div>
-  </ErrorBoundary>
-);
+    </ErrorBoundary>
+  );
 }

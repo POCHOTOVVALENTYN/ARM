@@ -10,8 +10,10 @@ class Settings(BaseSettings):
     DEFAULT_SAFETY_HEADWAY: int = 2  # 2 хв буфер між вагонами
     
     # Wialon Settings
-    WIALON_HOST: str = "https://hst-api.wialon.com/wialon/ajax.html"
-    WIALON_TOKEN: str = "YOUR_WIALON_TOKEN_HERE" # Замініть на реальний токен
+    WIALON_HOST: str = "https://hst-api.wialon.eu/wialon/ajax.html"
+    WIALON_TOKEN: str = "9777076e141aeb12ca0154759bea4a7e1F6F8A7E4C3A54A318391BCDA4FE2F0342132072"
+    WIALON_USER: str = "Monitor OD"
+    WIALON_PASSWORD: str = "qiBqar-fuzde0-fakhir"
     POLLING_INTERVAL_SEC: int = 10
     
     # Anti-EW (Анти-РЕБ) Settings

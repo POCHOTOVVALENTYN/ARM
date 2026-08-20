@@ -177,32 +177,25 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       label: 'Аналітика',
       icon: LayoutDashboard,
       items: [
-        { label: 'Головний Дашборд', path: '/', icon: LayoutDashboard },
-        { label: 'Звітність та OTP (On-Time)', path: '/analytics', icon: FileSpreadsheet },
+        { label: 'Головний Дашборд KPI', path: '/', icon: LayoutDashboard },
+        { label: 'Звітність та Регулярність (OTP)', path: '/analytics', icon: FileSpreadsheet },
       ],
     },
     {
       label: 'Диспетчерська',
       icon: Activity,
       items: [
-        { label: 'Графік Марея (D3 / Canvas)', path: '/dispatch/marey', icon: Activity },
+        { label: 'Карта Руху (Wialon Live GPS)', path: '/dispatch/map', icon: MapPin },
         { label: 'Діаграма Ґантта Змін', path: '/dispatch/gantt', icon: Clock },
-        { label: 'Конструктор графіків (Оперативні розклади)', path: '/dispatch/generator', icon: RefreshCw },
-        { label: 'Карта Руху (Live Map)', path: '/dispatch/map', icon: MapPin },
-        { label: 'Менеджер Відтяжок (Slack)', path: '/dispatch/slack', icon: Zap },
-        { label: 'Майстер Гарячого Резерву', path: '/dispatch/hot-reserve', icon: Zap },
-        { label: 'Оперативні перемикання (Об\'їзди)', path: '/dispatch/detours', icon: ShieldAlert },
+        { label: 'Оперативні розклади (Генератор)', path: '/dispatch/generator', icon: RefreshCw },
       ],
     },
     {
       label: 'Планування',
       icon: Layers,
       items: [
-        { label: 'Конструктор Нарядів', path: '/planning/duties', icon: Bus },
-        { label: 'Сітка статичних нарядів (Сітка рейсів)', path: '/planning/trips', icon: TableIcon },
-        { label: 'Валідатор КЗпП та Вузлів', path: '/planning/validate', icon: ShieldAlert },
-        { label: 'Карта Симуляції GTFS (Leaflet)', path: '/planning/simulation', icon: Radio },
-        { label: 'Архів Нарядів (Archive)', path: '/planning/archive', icon: Archive },
+        { label: 'Розклади та Наряди (Робочий стіл)', path: '/planning/workspace', icon: TableIcon },
+        { label: 'Архів розкладів та нарядів', path: '/planning/archive', icon: Archive },
       ],
     },
     {
@@ -210,19 +203,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Settings,
       superuserOnly: true,
       items: [
-        { label: 'Реєстр Маршрутів (Route Master)', path: '/settings/routes', icon: Settings },
-        { label: 'Вузли та Колії (Hubs)', path: '/settings/intersections', icon: MapPin },
-        { label: 'Депо та Пробіги', path: '/settings/depots', icon: Bus },
-        { label: 'Точки Обіду Водіїв', path: '/settings/breaks', icon: Clock },
+        { label: 'Реєстр Зупинок та КП', path: '/settings/stops', icon: MapPin },
+        { label: 'Реєстр Маршрутів (Паспорти)', path: '/settings/routes', icon: Settings },
+        { label: 'Колійні Вузли та Стрілки', path: '/settings/intersections', icon: Layers },
+        { label: 'Депо та Нульові рейси', path: '/settings/depots', icon: Bus },
+        { label: 'Пункти та Їдальні Обіду', path: '/settings/breaks', icon: Clock },
       ],
     },
     {
-      label: 'Персонал',
+      label: 'Персонал та Водії',
       icon: Users,
       items: [
-        { label: 'Табель та Книжки Водіїв', path: '/crew/roster', icon: Users },
-        { label: 'Призначення Екіпажів (Рознарядка)', path: '/crew/assignment', icon: UserCheck },
-        { label: 'Книжка водія (Шляховий лист)', path: '/crew/waybill', icon: FileText },
+        { label: 'Добова рознарядка (Призначення)', path: '/crew/assignment', icon: UserCheck },
+        { label: 'Розклад рейсів (Книжка водія)', path: '/crew/schedule-book', icon: BookOpen },
+        { label: 'Бортовий термінал водія', path: '/driver', icon: Radio },
       ],
     },
     {
@@ -230,8 +224,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Lock,
       superuserOnly: true,
       items: [
-        { label: 'Панель Керування & Користувачі', path: '/admin', icon: Lock },
-        { label: 'Експорт/Імпорт Open Data & GTFS', path: '/export/gtfs', icon: Download },
+        { label: 'Панель керування & Центр даних', path: '/admin', icon: Lock },
       ],
     },
   ];

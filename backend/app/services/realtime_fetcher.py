@@ -32,7 +32,8 @@ async def fetch_and_process_realtime_data():
                 for veh in processed_data:
                     await check_and_trigger_incident(redis, veh)
 
-                # 4. Пакетне збереження в Redis Hash
+                # 4. Пакетне збереження в Redis Hash (з очищенням застарілих бортів)
+                await redis.delete("telemetry:vehicles")
                 pipeline = redis.pipeline()
                 for v in processed_data:
                     pipeline.hset("telemetry:vehicles", v["vehicle_id"], json.dumps(v))

@@ -1,23 +1,51 @@
 import React, { useState } from 'react';
-import { Lock, Download, Upload, Trash2, Zap, FileText, CheckCircle2, Radio, Database, Settings, Users, Plus, Shield, Check, X } from 'lucide-react';
+import { 
+  Lock, 
+  Download, 
+  Upload, 
+  Trash2, 
+  Zap, 
+  FileText, 
+  CheckCircle2, 
+  Radio, 
+  Database, 
+  Settings, 
+  Users, 
+  Plus, 
+  Shield, 
+  Check, 
+  X,
+  Bus,
+  MapPin,
+  Coffee,
+  Layers,
+  FileSpreadsheet
+} from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../utils/apiClient';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useRouteStore } from '../../store/useRouteStore';
-import { AdminTab } from "../tabs/AdminTab";
 import { GtfsIntegrationTab } from '../tabs/GtfsIntegrationTab';
+import { AdminDepotsManager } from '../admin/AdminDepotsManager';
+import { AdminDriversManager } from '../admin/AdminDriversManager';
+import { AdminStopsManager } from '../admin/AdminStopsManager';
+import { AdminHubsManager } from '../admin/AdminHubsManager';
+import { AdminBreakLocationsManager } from '../admin/AdminBreakLocationsManager';
+import { AdminDutyTypesManager } from '../admin/AdminDutyTypesManager';
 import { ConfirmActionModal, ConfirmModalConfig } from '../ConfirmActionModal';
 import { toast } from 'sonner';
 
+type AdminTabKey = 'users' | 'vehicles' | 'drivers' | 'stops' | 'infra' | 'duty_types' | 'gtfs' | 'backup';
+
 interface AdminViewProps {
-  initialTab?: 'config' | 'gtfs' | 'database' | 'users';
+  initialTab?: AdminTabKey;
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) => {
   const queryClient = useQueryClient();
   const { liveBlocks, draftBlocks, discardDraft } = useScheduleStore();
   const { routes } = useRouteStore();
-  const [activeTab, setActiveTab] = useState<'config' | 'gtfs' | 'database' | 'users'>(initialTab);
+  const [activeTab, setActiveTab] = useState<AdminTabKey>(initialTab);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [modalConfig, setModalConfig] = useState<ConfirmModalConfig | null>(null);
 
@@ -146,10 +174,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
           </div>
           <div>
             <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center space-x-2">
-              <span>Панель адміністрування та доступу (RBAC)</span>
+              <span>Панель адміністрування та керування даними</span>
             </h1>
             <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
-              Керування диспетчерами, базами даних, конфігурацією депо та експортом GTFS
+              КП «Одесміськелектротранс» • Центр Master Data, користувачів та топології
             </p>
           </div>
         </div>
@@ -158,47 +186,98 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
         <div className="flex flex-wrap bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold shrink-0 gap-1">
           <button
             onClick={() => setActiveTab('users')}
-            className={`px-4 py-2.5 rounded-xl flex items-center space-x-2 transition-all cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
               activeTab === 'users'
-                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Users className="w-4 h-4 text-blue-600" />
-            <span>Користувачі та Ролі</span>
+            <Users className="w-3.5 h-3.5 text-blue-600" />
+            <span>Користувачі</span>
           </button>
+
           <button
-            onClick={() => setActiveTab('database')}
-            className={`px-4 py-2.5 rounded-xl flex items-center space-x-2 transition-all cursor-pointer ${
-              activeTab === 'database'
-                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700'
+            onClick={() => setActiveTab('vehicles')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'vehicles'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Database className="w-4 h-4 text-indigo-600" />
-            <span>База Даних</span>
+            <Bus className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Рухомий склад</span>
           </button>
+
           <button
-            onClick={() => setActiveTab('config')}
-            className={`px-4 py-2.5 rounded-xl flex items-center space-x-2 transition-all cursor-pointer ${
-              activeTab === 'config'
-                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700'
+            onClick={() => setActiveTab('drivers')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'drivers'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Settings className="w-4 h-4 text-indigo-600" />
-            <span>Система & Резервування</span>
+            <Users className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Водії</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('stops')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'stops'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Зупинки та КП</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('infra')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'infra'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-amber-600" />
+            <span>Вузли та Обіди</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('duty_types')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'duty_types'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-blue-600" />
+            <span>Типи нарядів</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('gtfs')}
-            className={`px-4 py-2.5 rounded-xl flex items-center space-x-2 transition-all cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
               activeTab === 'gtfs'
-                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Radio className="w-4 h-4 text-indigo-600" />
-            <span>Open Data & GTFS</span>
+            <Radio className="w-3.5 h-3.5 text-indigo-600" />
+            <span>GTFS Open Data</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('backup')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'backup'
+                ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700 font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5 text-slate-600" />
+            <span>Резервування</span>
           </button>
         </div>
       </div>
@@ -213,7 +292,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
                 <span>Реєстр диспетчерів та користувачів системи</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Керування правами доступу, ролями (SUPERUSER, PLANNER, DISPATCHER, OBSERVER) та обліковими записами
+                Керування правами доступу, ролями (SUPERUSER, CENTRAL_DISPATCHER, LINE_DISPATCHER, PLANNER, DRIVER, OBSERVER)
               </p>
             </div>
 
@@ -222,7 +301,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
               className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow-xs flex items-center space-x-1.5 cursor-pointer transition-all shrink-0"
             >
               <Plus className="w-4 h-4" />
-              <span>Додати диспетчера / користувача</span>
+              <span>Додати користувача</span>
             </button>
           </div>
 
@@ -250,33 +329,26 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
                   users.map((u: any) => (
                     <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                       <td className="p-3.5 font-mono text-slate-400">#{u.id}</td>
-                      <td className="p-3.5 font-mono font-bold text-slate-900 dark:text-white">{u.username}</td>
-                      <td className="p-3.5 font-bold text-slate-800 dark:text-slate-200">{u.full_name || '—'}</td>
+                      <td className="p-3.5 font-black text-slate-900 dark:text-white font-mono">{u.username}</td>
+                      <td className="p-3.5 font-bold text-slate-700 dark:text-slate-200">{u.full_name || '—'}</td>
                       <td className="p-3.5">
-                        <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase ${
-                          u.role === 'SUPERUSER' 
-                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200' 
-                            : u.role === 'PLANNER'
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200'
-                            : 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200'
-                        }`}>
-                          {u.role || 'DISPATCHER'}
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          {u.role}
                         </span>
                       </td>
                       <td className="p-3.5">
-                        {u.is_active ? (
-                          <span className="flex items-center text-emerald-600 dark:text-emerald-400 font-bold">
-                            <CheckCircle2 size={14} className="mr-1" /> Активний
+                        <span className="flex items-center space-x-1 text-emerald-600 font-bold">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Активний</span>
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        {u.is_superuser ? (
+                          <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-black text-[10px]">
+                            SUPERUSER
                           </span>
                         ) : (
-                          <span className="text-rose-600 font-bold">Деактивовано</span>
-                        )}
-                      </td>
-                      <td className="p-3.5 font-mono">
-                        {u.is_superuser ? (
-                          <span className="text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded border border-purple-200">Superuser</span>
-                        ) : (
-                          <span className="text-slate-400">Ні</span>
+                          <span className="text-slate-400 font-medium">Звичайні права</span>
                         )}
                       </td>
                     </tr>
@@ -288,18 +360,31 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
         </div>
       )}
 
-      {/* 2. Вкладка GTFS Open Data */}
-      {activeTab === 'gtfs' && (
-        <GtfsIntegrationTab routes={routes} blocks={liveBlocks} />
+      {/* 2. Вкладка РУХОМИЙ СКЛАД (Вагони за депо) */}
+      {activeTab === 'vehicles' && <AdminDepotsManager />}
+
+      {/* 3. Вкладка ВОДІЇ ТА ПЕРСОНАЛ */}
+      {activeTab === 'drivers' && <AdminDriversManager />}
+
+      {/* 4. Вкладка ЗУПИНКИ ТА КП */}
+      {activeTab === 'stops' && <AdminStopsManager />}
+
+      {/* 5. Вкладка ВУЗЛИ, СТРІЛКИ ТА ОБІДИ */}
+      {activeTab === 'infra' && (
+        <div className="space-y-6">
+          <AdminHubsManager />
+          <AdminBreakLocationsManager />
+        </div>
       )}
 
-      {/* 3. Вкладка База даних */}
-      {activeTab === 'database' && (
-        <AdminTab />
-      )}
+      {/* 6. Вкладка ТИПИ НАРЯДІВ */}
+      {activeTab === 'duty_types' && <AdminDutyTypesManager />}
 
-      {/* 4. Вкладка Система & Резервування */}
-      {activeTab === 'config' && (
+      {/* 7. Вкладка GTFS OPEN DATA */}
+      {activeTab === 'gtfs' && <GtfsIntegrationTab routes={routes} blocks={liveBlocks} />}
+
+      {/* 7. Вкладка РЕЗЕРВУВАННЯ БД */}
+      {activeTab === 'backup' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6 flex flex-col justify-between">
             <div className="space-y-5">
@@ -428,10 +513,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
                   onChange={e => setNewRole(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
                 >
-                  <option value="DISPATCHER">Диспетчер (DISPATCHER)</option>
-                  <option value="LINE_DISPATCHER">Лінійний диспетчер (LINE_DISPATCHER)</option>
-                  <option value="PLANNER">Інженер-плановик (PLANNER)</option>
                   <option value="SUPERUSER">Адміністратор (SUPERUSER)</option>
+                  <option value="CENTRAL_DISPATCHER">Центральний Головний Диспетчер (CENTRAL_DISPATCHER)</option>
+                  <option value="LINE_DISPATCHER">Лінійний диспетчер КП (LINE_DISPATCHER)</option>
+                  <option value="PLANNER">Інженер-плановик розкладів (PLANNER)</option>
+                  <option value="DRIVER">Водій (DRIVER)</option>
                   <option value="OBSERVER">Спостерігач (OBSERVER)</option>
                 </select>
               </div>
@@ -464,3 +550,4 @@ export const AdminView: React.FC<AdminViewProps> = ({ initialTab = 'users' }) =>
 };
 
 export default AdminView;
+

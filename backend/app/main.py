@@ -16,6 +16,8 @@ from app.api.settings import router as settings_router
 from app.api.emergencies import router as emergencies_router
 from app.api.schedules import router as new_schedules_router
 from app.api.auth import router as auth_router
+from app.api.duty_types import router as duty_types_router
+from app.api.shifts import router as shifts_router
 from app.api.analytics import router as analytics_router
 from app.api.depots import router as depots_router
 from app.api.waybills import router as waybills_router
@@ -86,6 +88,10 @@ app.include_router(logs_router, prefix="")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api")
 
+# Довідник типів нарядів
+app.include_router(duty_types_router, prefix="/api/v1")
+app.include_router(duty_types_router, prefix="/api")
+
 # Двосторонній зв'язок Диспетчер <-> Водій
 app.include_router(driver_comm_router, prefix="/api/v1")
 app.include_router(driver_comm_router, prefix="/api")
@@ -100,8 +106,11 @@ app.include_router(new_schedules_router, prefix="/api")
 app.include_router(solver_router, prefix="/api/v1/routes", tags=["Routes"])
 app.include_router(solver_router, prefix="/api/routes", tags=["Routes"])
 app.include_router(solver_router, prefix="/api/v1/solver", tags=["Transit Solver"])
+app.include_router(solver_router, prefix="/api/solver", tags=["Transit Solver"])
 
-# Електронні путівки (Smart Waybill) та Кадри
+# Електронні путівки (Smart Waybill), Кадри та Зміни Водіїв (Run Cutting)
+app.include_router(shifts_router, prefix="/api/v1")
+app.include_router(shifts_router, prefix="/api")
 app.include_router(waybills_router, prefix="/api/v1")
 app.include_router(waybills_router, prefix="/api")
 app.include_router(drivers_router, prefix="/api/v1")

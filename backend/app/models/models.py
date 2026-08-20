@@ -67,6 +67,17 @@ class RouteModel(Base):
     lengthDir2Km = Column(Float, nullable=True)
     length_km = Column(Float, default=10.5, nullable=True)
     default_speed_kmh = Column(Float, default=14.5, nullable=True)
+    
+    # Інженерні нормативи маршруту Служби Руху
+    round_trip_min = Column(Integer, default=84, nullable=True) # Повний час обороту (туди + назад + відстої)
+    t_dir0_min = Column(Integer, default=36, nullable=True) # Час рейсу в прямому напрямку
+    t_dir1_min = Column(Integer, default=36, nullable=True) # Час рейсу у зворотному напрямку
+    layover_min = Column(Integer, default=6, nullable=True) # Нормативний відстій на кінцевій
+    depot_pullout_min = Column(Integer, default=15, nullable=True) # Нульовий виїзд з депо
+    depot_pullin_min = Column(Integer, default=15, nullable=True) # Нульовий заїзд у депо
+    standard_break_min = Column(Integer, default=15, nullable=True) # 15 хв для трамваїв, 20 хв для тролейбусів
+    designated_break_hub = Column(String, default="ДП «вул. Паустовського»", nullable=True)
+
     stations = Column(JSON, nullable=True)
     allStations = Column(JSON, nullable=True)
     segments = Column(JSON, nullable=True)
@@ -75,6 +86,18 @@ class RouteModel(Base):
     color = Column(String, nullable=True)
 
 Route = RouteModel
+
+class DutyTypeModel(Base):
+    """Довідник типів нарядів (Двозмінний, Однозмінний, Розривний, Піковий, Черговий)"""
+    __tablename__ = "duty_types"
+
+    id = Column(String, primary_key=True, index=True) # DOUBLE, SINGLE, SPLIT, PEAK, NIGHT
+    name = Column(String, nullable=False) # Напр. "Двозмінний", "Однозмінний"
+    code = Column(String, nullable=False) # Напр. "ДВ", "ОД", "РОЗ", "ПІК", "ЧЕР"
+    description = Column(String, nullable=True)
+    max_shift_hours = Column(Float, default=8.0) # Максимальна тривалість зміни водія (КЗпП)
+    color = Column(String, default="#3b82f6") # Hex колір для бейджів та діаграми Ганта
+    is_active = Column(Boolean, default=True)
 
 class ControlPoint(Base):
     """Диспетчерські пункти та ключові вузли (Hubs)"""
@@ -179,6 +202,16 @@ class SystemConfig(Base):
     map_attribution = Column(String, default="&copy; OpenStreetMap contributors")
     enterprise_logo_url = Column(String, nullable=True)
     theme = Column(String, default="light")
+
+    # Технологічні нормативи підприємства (КП «Одесміськелектротранс»)
+    prep_time_tram_min = Column(Integer, default=10, nullable=False) # 10 хв огляд трамвая
+    prep_time_trolleybus_min = Column(Integer, default=19, nullable=False) # 19 хв огляд тролейбуса
+    lunch_window_start_hours = Column(Float, default=4.0, nullable=False) # Обід від 4-ї години
+    lunch_window_end_hours = Column(Float, default=6.0, nullable=False) # Обід до 6-ї години
+    interline_min_headway_min = Column(Float, default=2.0, nullable=False) # Синхронізація «Зв'язок» мін. 2 хв
+    interline_max_headway_min = Column(Float, default=3.0, nullable=False) # Синхронізація «Зв'язок» макс. 3 хв
+    min_intershift_rest_hours = Column(Float, default=12.0, nullable=False) # Міжзмінний відпочинок >= 12 год
+    max_single_shift_hours = Column(Float, default=8.0, nullable=False) # Макс. тривалість зміни <= 8 год
 
 class ActiveDetour(Base):
     """Журнал оперативних перемикань (об'їздів)"""

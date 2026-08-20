@@ -16,7 +16,7 @@ from app.models.models import EtaLog, RouteStation, StationModel, RouteModel
 from app.services.schedule_engine import ScheduleEnginePipeline
 from app.repositories.schedule_repo import ScheduleRepository
 from app.services.telemetry_worker import cache_active_schedule_in_redis
-from app.services.transit_solver import generate_optimized_schedule, parse_time_str, minutes_to_time
+from app.services.transit_solver import transit_solver, generate_optimized_schedule, parse_time_str, minutes_to_time
 from app.api.websocket import ws_manager
 
 router = APIRouter(prefix="/schedules", tags=["Schedules & Transit Solver"])
@@ -453,3 +453,154 @@ async def update_trip_time(
     })
 
     return {"message": "Час рейсу успішно оновлено", "trip_id": trip_id}
+
+# --- СТАТИЧНИЙ РОЗРАХУНОК СЛУЖБИ РУХУ (STATIC SCHEDULE ENGINE) ---
+
+class StaticCalculationRequest(BaseModel):
+    route_id: str
+    vehicles_count: int = 14
+    day_type: str = "WORKDAY"
+    start_time: Optional[str] = "05:30"
+    end_time: Optional[str] = "23:30"
+    duty_types_sequence: Optional[List[str]] = None
+
+@router.post("/calculate-static", summary="Інженерний розрахунок статичного графіка служби руху")
+async def calculate_static_schedule(
+    payload: StaticCalculationRequest,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Автоматично завантажує зафіксовані нормативи маршруту з PostgreSQL
+    (T_оборот, час рейсу, відстої, норматив обіду 15/20хв, закріплений ДП)
+    та розраховує повну статичну сітку нарядів (колонки та діаграму Ганта).
+    """
+    # 1. Завантажуємо маршрут та нормативи
+    r_res = await db.execute(select(RouteModel).where(RouteModel.id == payload.route_id))
+    route = r_res.scalar_one_or_none()
+
+    if not route:
+        # Fallback параметри якщо маршрут новий
+        r_name = f"Маршрут №{payload.route_id}"
+        r_type = "TRAM"
+        round_trip_min = 84
+        t_dir0_min = 36
+        t_dir1_min = 36
+        layover_min = 6
+        depot_pullout_min = 15
+        depot_pullin_min = 15
+        standard_break_min = 15
+        designated_break_hub = "ДП «вул. Паустовського»"
+    else:
+        r_name = route.name or f"Маршрут №{route.number or route.id}"
+        r_type = (route.type or "TRAM").upper()
+        round_trip_min = route.round_trip_min or 84
+        t_dir0_min = route.t_dir0_min or 36
+        t_dir1_min = route.t_dir1_min or 36
+        layover_min = route.layover_min or 6
+        depot_pullout_min = route.depot_pullout_min or 15
+        depot_pullin_min = route.depot_pullin_min or 15
+        standard_break_min = route.standard_break_min or (15 if r_type == "TRAM" else 20)
+        designated_break_hub = route.designated_break_hub or "ДП «вул. Паустовського»"
+
+    # 2. Завантажуємо реальні зупинки маршруту
+    st_res = await db.execute(
+        select(StationModel.id, StationModel.name, StationModel.is_dispatch_station)
+        .join(RouteStation, RouteStation.stop_id == StationModel.id)
+        .where((RouteStation.route_id == payload.route_id) & (RouteStation.direction_id == 0))
+        .order_by(RouteStation.stop_sequence.asc())
+    )
+    stops = [{"id": s[0], "name": s[1], "is_dispatch_station": bool(s[2])} for s in st_res.all()]
+
+    # 3. Виконуємо інженерний розрахунок
+    result = transit_solver.calculate_static_schedule_from_norms(
+        route_id=payload.route_id,
+        route_name=r_name,
+        route_type=r_type,
+        vehicles_count=payload.vehicles_count,
+        start_time_str=payload.start_time or "05:30",
+        end_time_str=payload.end_time or "23:30",
+        round_trip_min=round_trip_min,
+        t_dir0_min=t_dir0_min,
+        t_dir1_min=t_dir1_min,
+        layover_min=layover_min,
+        depot_pullout_min=depot_pullout_min,
+        depot_pullin_min=depot_pullin_min,
+        standard_break_min=standard_break_min,
+        designated_break_hub=designated_break_hub,
+        stops_list=stops,
+        duty_types_sequence=payload.duty_types_sequence
+    )
+
+    return result
+
+@router.post("/commit-static", summary="Затвердження еталонного статичного графіка")
+async def commit_static_schedule(
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    dispatcher = Depends(get_current_dispatcher)
+):
+    """
+    Зберігає розрахований статичний графік як «Еталонний розклад» у PostgreSQL
+    та публікує подію для Диспетчерської через WebSocket та Redis.
+    """
+    kpi = payload.get("kpi", {})
+    route_id = kpi.get("route_id", "7")
+    today = date.today()
+
+    # 1. Створюємо розклад
+    new_schedule = Schedule(
+        route_id=route_id,
+        active_date=today,
+        status=ScheduleStatus.ACTIVE,
+        version_name=f"Еталонний розклад #{route_id} ({kpi.get('vehicles_count', 14)} нарядів, H={kpi.get('headway_min', 6.0)}хв)"
+    )
+    db.add(new_schedule)
+    await db.flush()
+
+    # 2. Архівуємо попередні
+    await db.execute(
+        update(Schedule)
+        .where((Schedule.route_id == route_id) & (Schedule.id != new_schedule.id))
+        .values(status=ScheduleStatus.ARCHIVED)
+    )
+
+    # 3. Зберігаємо наряди
+    columns = payload.get("columns", [])
+    for col in columns:
+        dtype_str = str(col.get("duty_type", "DOUBLE")).upper()
+        dtype_enum = DutyType.DOUBLE
+        if "SINGLE" in dtype_str:
+            dtype_enum = DutyType.SINGLE
+        elif "SPLIT" in dtype_str:
+            dtype_enum = DutyType.SPLIT
+        elif "PEAK" in dtype_str:
+            dtype_enum = DutyType.PEAK
+
+        new_duty = StaticDuty(
+            schedule_id=new_schedule.id,
+            route_id=route_id,
+            duty_number=str(col.get("duty_id", f"{route_id}-{col.get('duty_number', 1):02d}")),
+            service_id=ServiceDay.WORKDAY,
+            duty_type=dtype_enum
+        )
+        db.add(new_duty)
+
+    await db.commit()
+
+    # 4. Сповіщаємо диспетчерів про новий еталонний розклад
+    await ws_manager.broadcast({
+        "type": "STATIC_SCHEDULE_ACTIVATED",
+        "payload": {
+            "schedule_id": new_schedule.id,
+            "route_id": route_id,
+            "version_name": new_schedule.version_name,
+            "headway_min": kpi.get("headway_min", 6.0),
+            "vehicles_count": kpi.get("vehicles_count", 14)
+        }
+    })
+
+    return {
+        "status": "success",
+        "schedule_id": new_schedule.id,
+        "message": f"Еталонний статичний розклад для маршруту №{route_id} успішно затверджено в PostgreSQL!"
+    }

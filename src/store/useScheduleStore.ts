@@ -6,6 +6,7 @@ import { immer } from 'zustand/middleware/immer';
 import apiClient from '../utils/apiClient';
 import { VehicleBlock, TransportType, DriverDuty, Trip, Route } from '../types';
 import { useRouteStore } from './useRouteStore';
+import { useStationStore } from './useStationStore';
 
 export interface TelemetryData {
   [vehicle_id: string]: {
@@ -268,13 +269,28 @@ export const useScheduleStore = create<ScheduleState>()(
     isInitialized: false,
 
     fetchInitialData: async () => {
+      if (get().isInitialized) return;
+      set((draft) => { draft.isInitialized = true; });
       try {
         const response = await apiClient.get('/schedule/init');
         const rList = response.data.routes && response.data.routes.length > 0 ? response.data.routes : ODESSA_DEFAULT_ROUTES;
-        const sList = response.data.stops || [];
+        const sList = response.data.stops || response.data.stations || [];
 
         // Синхронізуємо useRouteStore з завантаженими маршрутами!
         useRouteStore.getState().setInitialRoutes(rList);
+
+        // Синхронізуємо useStationStore з реальними 638 GTFS зупинками Одеси!
+        if (sList && sList.length > 0) {
+          const formattedStations = sList.map((s: any) => ({
+            id: String(s.id),
+            name: s.name,
+            code: s.name ? s.name.substring(0, 3).toUpperCase() : `ЗП${s.id}`,
+            isTerminal: Boolean(s.is_dispatch_station || s.type === 'TERMINAL'),
+            lat: Number(s.lat) || 46.468,
+            lng: Number(s.lng || s.lon) || 30.741,
+          }));
+          useStationStore.getState().setStations(formattedStations);
+        }
 
         set((draft) => {
           draft.routes = rList;
@@ -282,14 +298,12 @@ export const useScheduleStore = create<ScheduleState>()(
           draft.liveBlocks = response.data.blocks || [];
           draft.liveDuties = response.data.driver_duties || [];
           draft.liveSchedule = { current_blocks: response.data.blocks || [] };
-          draft.isInitialized = true;
         });
       } catch (error) {
         console.error('Критична помилка ініціалізації розкладу', error);
         useRouteStore.getState().setInitialRoutes(ODESSA_DEFAULT_ROUTES);
         set((draft) => { 
           draft.routes = ODESSA_DEFAULT_ROUTES;
-          draft.isInitialized = true; 
         });
       }
     },
@@ -393,6 +407,20 @@ export const useScheduleStore = create<ScheduleState>()(
         state.draftDuties = duties;
         state.liveSchedule = { current_blocks: blocks };
       });
+    },
+
+    isGtfsActive: true,
+    loadGtfsData: async () => {
+      set((state) => { state.isProcessingTransaction = true; });
+      try {
+        await apiClient.post('/api/v1/settings/gtfs/sync-local');
+        set((state) => { state.isInitialized = false; });
+        await get().fetchInitialData();
+      } catch (error) {
+        console.error("GTFS Sync error:", error);
+      } finally {
+        set((state) => { state.isProcessingTransaction = false; });
+      }
     },
 
     updateTripDeparture: async (blockId: string, tripId: string, startTime: number, delayMinutes: number) => {
