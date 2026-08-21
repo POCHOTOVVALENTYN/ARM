@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useScheduleStore, UserRole, ThemeMode } from '../store/useScheduleStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { ConfirmActionModal, ConfirmModalConfig } from './ConfirmActionModal';
 import { HistoryLogModal } from './HistoryLogModal';
@@ -156,8 +157,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
 
   const headerRef = useRef<HTMLDivElement>(null);
 
+  const isNight = theme === 'night-dispatch' || theme === 'dark';
+
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
+    const effectiveTheme = theme || 'omet-clean';
+    document.documentElement.setAttribute('data-theme', effectiveTheme);
+    document.body.setAttribute('data-theme', effectiveTheme);
+    if (effectiveTheme === 'night-dispatch' || effectiveTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+    }
   }, [theme]);
 
   // Close dropdowns when clicking outside
@@ -185,7 +197,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       label: 'Диспетчерська',
       icon: Activity,
       items: [
-        { label: 'Карта Руху (Wialon Live GPS)', path: '/dispatch/map', icon: MapPin },
+        { label: 'Карта Руху (Wialon Live GIS)', path: '/dispatch/map', icon: MapPin },
+        { label: 'CAD/AVL Матриця та Відхилення', path: '/dispatch/matrix', icon: TableIcon },
         { label: 'Діаграма Ґантта Змін', path: '/dispatch/gantt', icon: Clock },
         { label: 'Оперативні розклади (Генератор)', path: '/dispatch/generator', icon: RefreshCw },
       ],
@@ -234,10 +247,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
   return (
     <header ref={headerRef} className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 sticky top-0 z-50 shadow-xs font-sans">
       {/* Top Application Header Banner */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3 border-b border-slate-200/80 dark:border-slate-800/80">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80">
         {/* Brand & System Identifier */}
         <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => setPath('/')}>
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-600/25 group-hover:scale-105 transition-transform shrink-0">
+          <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-600/20 group-hover:scale-105 transition-transform shrink-0">
             <Radio className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -245,14 +258,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
               <h1 className="text-base font-black text-slate-900 dark:text-slate-100 tracking-tight leading-none">
                 КП «ОМЕТ»
               </h1>
-              <span className="text-[10px] font-extrabold text-blue-700 bg-white px-2 py-0.5 rounded-md border border-blue-200 shadow-2xs uppercase tracking-wider">
+              <span className="text-[10px] font-extrabold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-800 shadow-2xs uppercase tracking-wider">
                 СЛУЖБА РУХУ
               </span>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium font-sans mt-0.5 flex items-center space-x-1.5">
               <span>АРМ «Розклади»</span>
               <span className="inline-block w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600"></span>
-              <span className="font-mono text-[10px] font-bold text-blue-700 bg-white px-1.5 py-0.2 rounded border border-blue-200 shadow-2xs">v2.5</span>
+              <span className="font-mono text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.2 rounded border border-blue-200 dark:border-blue-800 shadow-2xs">v2.5</span>
             </p>
           </div>
         </div>
@@ -262,23 +275,39 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
           {/* Quick Theme Switcher Button */}
           <button
             onClick={() => {
-              const nextTheme = theme === 'night-dispatch' ? 'omet-clean' : 'night-dispatch';
+              const nextTheme = isNight ? 'omet-clean' : 'night-dispatch';
+              localStorage.setItem('omet_theme', nextTheme);
               setTheme(nextTheme);
-              document.documentElement.setAttribute('data-theme', nextTheme);
-              document.body.setAttribute('data-theme', nextTheme);
+              useSettingsStore.getState().setTheme(nextTheme === 'night-dispatch' ? 'dark' : 'light');
+
+              const root = document.documentElement;
+              root.classList.remove('light', 'dark');
+              document.body.classList.remove('light', 'dark');
+
+              if (nextTheme === 'night-dispatch') {
+                root.classList.add('dark');
+                document.body.classList.add('dark');
+                document.documentElement.setAttribute('data-theme', 'night-dispatch');
+                document.body.setAttribute('data-theme', 'night-dispatch');
+              } else {
+                root.classList.remove('dark');
+                document.body.classList.remove('dark');
+                document.documentElement.setAttribute('data-theme', 'omet-clean');
+                document.body.setAttribute('data-theme', 'omet-clean');
+              }
             }}
-            className="flex items-center space-x-1.5 bg-white hover:bg-blue-50/80 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-xl font-extrabold cursor-pointer transition-all shadow-2xs"
-            title="Швидке перемикання теми"
+            className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 hover:bg-blue-50/80 dark:hover:bg-slate-700 text-slate-700 dark:text-blue-300 border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:text-blue-700 px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
+            title="Швидке перемикання теми (Світла / Нічна)"
           >
-            {theme === 'night-dispatch' ? (
+            {isNight ? (
               <>
-                <Sun className="w-3.5 h-3.5 text-amber-500 animate-spin-slow" />
-                <span>Світла</span>
+                <Sun className="w-3.5 h-3.5 text-amber-400 animate-spin-slow" />
+                <span>Світла тема</span>
               </>
             ) : (
               <>
-                <Moon className="w-3.5 h-3.5 text-blue-700" />
-                <span>Темна</span>
+                <Moon className="w-3.5 h-3.5 text-blue-600" />
+                <span>Нічна тема</span>
               </>
             )}
           </button>
@@ -286,12 +315,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
           {/* User Account / Role Pill Button */}
           <button
             onClick={() => setPath('/login')}
-            className="flex items-center space-x-1.5 bg-white hover:bg-blue-50/80 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
+            className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 hover:bg-blue-50/80 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:text-blue-700 px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
             title="Обліковий запис користувача"
           >
-            <Lock className="w-3.5 h-3.5 text-blue-700" />
+            <Lock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             <span>{authUser?.full_name || authUser?.username || user.name}</span>
-            <span className="text-[10px] bg-blue-50 text-blue-800 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 uppercase">
+            <span className="text-[10px] bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 dark:border-blue-800 uppercase">
               {authUser?.is_superuser ? 'Admin' : (authUser ? 'Dispatcher' : userRole)}
             </span>
           </button>
@@ -303,16 +332,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
                 logout();
                 setPath('/login');
               }}
-              className="flex items-center space-x-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
+              className="flex items-center space-x-1 bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900 px-2.5 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
               title="Вийти з системи"
             >
-              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <LogOut className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
               <span>Вихід</span>
             </button>
           )}
 
           {/* History & Draft Tools */}
-          <div className="flex items-center space-x-1 bg-white border border-blue-200 rounded-xl p-1 shadow-2xs">
+          <div className="flex items-center space-x-1 bg-slate-100/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shadow-2xs">
             {isDraftModified && (
               <span className="bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded-lg text-[10px] animate-pulse uppercase tracking-wider shrink-0">
                 Чернетка
@@ -326,11 +355,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
               title="Скасувати останню дію"
               className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all ${
                 historyStack.length > 0
-                  ? 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs cursor-pointer active:scale-95'
-                  : 'bg-slate-50 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50'
+                  ? 'bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-300 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95'
+                  : 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-800 cursor-not-allowed opacity-50'
               }`}
             >
-              <RotateCcw className="w-3.5 h-3.5 text-blue-700" />
+              <RotateCcw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Скасувати ({historyStack.length})</span>
             </button>
 
@@ -341,11 +370,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
               title="Повернути скасовану дію"
               className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all ${
                 redoStack.length > 0
-                  ? 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs cursor-pointer active:scale-95'
-                  : 'bg-slate-50 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50'
+                  ? 'bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-300 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95'
+                  : 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-800 cursor-not-allowed opacity-50'
               }`}
             >
-              <RotateCw className="w-3.5 h-3.5 text-blue-700" />
+              <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Повернути ({redoStack.length})</span>
             </button>
 
@@ -353,9 +382,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
             <button
               onClick={() => setIsHistoryModalOpen(true)}
               title="Історія редагувань"
-              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs cursor-pointer transition-all"
+              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-300 dark:border-slate-700 shadow-2xs cursor-pointer transition-all"
             >
-              <History className="w-3.5 h-3.5 text-blue-700" />
+              <History className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Історія</span>
             </button>
 
@@ -363,9 +392,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
             <button
               onClick={onOpenReport}
               title="Швидкий аналітичний звіт та OTP"
-              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 shadow-2xs cursor-pointer transition-all"
+              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-blue-50 dark:bg-blue-950/80 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shadow-2xs cursor-pointer transition-all"
             >
-              <Activity className="w-3.5 h-3.5 text-blue-700" />
+              <Activity className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Звіт OTP</span>
             </button>
 
@@ -395,14 +424,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
           {conflicts.length > 0 ? (
             <div
               onClick={() => setPath('/planning/validate')}
-              className="flex items-center space-x-1.5 bg-white border border-rose-300 px-3 py-1.5 rounded-xl text-rose-700 font-extrabold cursor-pointer hover:bg-rose-50 transition-colors shadow-2xs"
+              className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 border border-rose-300 dark:border-rose-800 px-3 py-1.5 rounded-xl text-rose-700 dark:text-rose-400 font-extrabold cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shadow-2xs"
             >
-              <ShieldAlert className="w-4 h-4 text-rose-600" />
+              <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400" />
               <span>Конфліктів: {conflicts.length}</span>
             </div>
           ) : (
-            <div className="flex items-center space-x-1.5 bg-white border border-emerald-300 px-3 py-1.5 rounded-xl text-emerald-700 font-extrabold shadow-2xs">
-              <ShieldAlert className="w-4 h-4 text-emerald-600" />
+            <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-800 px-3 py-1.5 rounded-xl text-emerald-700 dark:text-emerald-400 font-extrabold shadow-2xs">
+              <ShieldAlert className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               <span>Без конфліктів</span>
             </div>
           )}
@@ -410,16 +439,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
           {/* Solid White / Blue Border Action Button */}
           <button
             onClick={onOpenReport}
-            className="flex items-center space-x-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 font-extrabold px-4 py-1.5 rounded-xl shadow-2xs transition-all text-xs cursor-pointer active:scale-95"
+            className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-400 dark:border-slate-700 font-extrabold px-4 py-1.5 rounded-xl shadow-2xs transition-all text-xs cursor-pointer active:scale-95"
           >
-            <FileText className="w-4 h-4 text-blue-700" />
+            <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             <span>Звіт ТЗ</span>
           </button>
         </div>
       </div>
 
       {/* Navigation Bar */}
-      <div className="bg-white dark:bg-slate-900 border-t border-blue-100 dark:border-slate-800 shadow-[0_8px_30px_rgba(37,99,235,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] px-4 sm:px-6 lg:px-8 relative z-30">
+      <div className="bg-slate-50/95 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 shadow-2xs px-4 sm:px-6 lg:px-8 relative z-30">
         <nav className="max-w-7xl mx-auto flex items-center space-x-2 py-2 text-xs font-bold flex-wrap">
           {visibleNavGroups.map((group, idx) => {
             const GroupIcon = group.icon;
@@ -435,11 +464,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
                   }}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap cursor-pointer shadow-2xs ${
                     isActive
-                      ? 'bg-blue-600 text-white border-2 border-blue-600 font-extrabold shadow-xs'
-                      : 'bg-white text-blue-700 hover:text-blue-900 border border-blue-400 hover:border-blue-600 hover:bg-blue-50/80 font-bold'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold border-2 border-blue-600 shadow-md shadow-blue-600/20'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-blue-700 dark:hover:text-white border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-slate-600 hover:bg-blue-50/80 dark:hover:bg-slate-700 font-bold'
                   }`}
                 >
-                  <GroupIcon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-blue-600'}`} />
+                  <GroupIcon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
                   <span>{group.label}</span>
                 </button>
               );
@@ -455,21 +484,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
                   onMouseEnter={() => setOpenGroupIdx(idx)}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap cursor-pointer shadow-2xs ${
                     hasActiveChild
-                      ? 'bg-blue-600 text-white border-2 border-blue-600 font-extrabold shadow-xs'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold border-2 border-blue-600 shadow-md shadow-blue-600/20'
                       : isOpen
-                      ? 'bg-blue-50 text-blue-700 border-2 border-blue-500 font-extrabold'
-                      : 'bg-white text-blue-700 hover:text-blue-900 border border-blue-400 hover:border-blue-600 hover:bg-blue-50/80 font-bold'
+                      ? 'bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-300 border-2 border-blue-400 dark:border-blue-700 font-extrabold'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-blue-700 dark:hover:text-white border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-slate-600 hover:bg-blue-50/80 dark:hover:bg-slate-700 font-bold'
                   }`}
                 >
-                  <GroupIcon className={`w-4 h-4 ${hasActiveChild ? 'text-white' : 'text-blue-600'}`} />
+                  <GroupIcon className={`w-4 h-4 ${hasActiveChild ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
                   <span>{group.label}</span>
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${hasActiveChild ? 'text-white' : 'text-blue-600'} ${isOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${hasActiveChild ? 'text-white' : 'text-blue-600 dark:text-blue-400'} ${isOpen ? 'rotate-180' : ''}`} />
                 </button>
 
                 {isOpen && (
                   <div
                     onMouseLeave={() => setOpenGroupIdx(null)}
-                    className="absolute left-0 top-full mt-1.5 z-50 min-w-64 bg-white border-2 border-blue-200 rounded-2xl shadow-[0_12px_32px_rgba(37,99,235,0.18)] p-2 space-y-1"
+                    className="absolute left-0 top-full mt-1.5 z-50 min-w-64 bg-white dark:bg-slate-900 border-2 border-blue-200 dark:border-slate-800 rounded-2xl shadow-[0_12px_32px_rgba(37,99,235,0.18)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.8)] p-2 space-y-1"
                   >
                     {group.items?.map((sub, sIdx) => {
                       const SubIcon = sub.icon;
@@ -483,11 +512,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
                           }}
                           className={`w-full text-left px-3.5 py-2.5 rounded-xl font-bold flex items-center space-x-2.5 transition-all cursor-pointer text-xs ${
                             isSubActive
-                              ? 'bg-blue-50 text-blue-700 border border-blue-300 shadow-2xs font-extrabold'
-                              : 'bg-white text-slate-800 hover:bg-blue-50/80 hover:text-blue-900 border border-transparent hover:border-blue-200'
+                              ? 'bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-slate-700 shadow-2xs font-extrabold'
+                              : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 hover:bg-blue-50/80 dark:hover:bg-slate-800 hover:text-blue-900 dark:hover:text-white border border-transparent hover:border-blue-200 dark:hover:border-slate-700'
                           }`}
                         >
-                          <SubIcon className={`w-4 h-4 shrink-0 ${isSubActive ? 'text-blue-700' : 'text-blue-600'}`} />
+                          <SubIcon className={`w-4 h-4 shrink-0 ${isSubActive ? 'text-blue-700 dark:text-blue-400' : 'text-blue-600 dark:text-blue-400'}`} />
                           <span className="truncate">{sub.label}</span>
                         </button>
                       );
@@ -511,3 +540,5 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
     </header>
   );
 };
+
+export default Header;

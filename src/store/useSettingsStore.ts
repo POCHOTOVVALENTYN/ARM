@@ -25,12 +25,12 @@ export interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
-      // За замовчуванням використовуємо класичний OSM
+    (set, get) => ({
+      // За замовчуванням використовуємо класичний OSM та світлу тему
       mapTileUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       mapAttribution: '&copy; OpenStreetMap contributors',
       enterpriseLogoUrl: null,
-      theme: 'light',
+      theme: (localStorage.getItem('omet_theme') === 'night-dispatch' ? 'dark' : 'light'),
       markerStyle: 'balanced',
       isLoading: false,
 
@@ -38,11 +38,16 @@ export const useSettingsStore = create<SettingsState>()(
         if (!silent) set({ isLoading: true });
         try {
           const data = await settingsApi.getSettings();
+          const localSavedTheme = localStorage.getItem('omet_theme');
+          const effectiveTheme = localSavedTheme 
+            ? (localSavedTheme === 'night-dispatch' ? 'dark' : 'light')
+            : ((data.theme as any) === 'night-dispatch' || data.theme === 'dark' ? 'dark' : 'light');
+
           set({
             mapTileUrl: data.map_tile_url || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
             mapAttribution: data.map_attribution || '&copy; OpenStreetMap contributors',
             enterpriseLogoUrl: data.enterprise_logo_url,
-            theme: (data.theme as 'light' | 'dark' | 'system') || 'light',
+            theme: effectiveTheme,
           });
         } catch (error) {
           console.error("Помилка завантаження системних налаштувань:", error);
@@ -54,22 +59,21 @@ export const useSettingsStore = create<SettingsState>()(
       saveSettings: async (newSettings) => {
         set({ isLoading: true });
         try {
-          const payload: Partial<SystemConfigDTO> = {};
-          if (newSettings.mapTileUrl !== undefined) payload.map_tile_url = newSettings.mapTileUrl;
-          if (newSettings.mapAttribution !== undefined) payload.map_attribution = newSettings.mapAttribution;
-          if (newSettings.enterpriseLogoUrl !== undefined) payload.enterprise_logo_url = newSettings.enterpriseLogoUrl;
-          if (newSettings.theme !== undefined) payload.theme = newSettings.theme;
+          if (newSettings.theme) {
+            const mappedTheme = newSettings.theme === 'dark' ? 'night-dispatch' : 'omet-clean';
+            localStorage.setItem('omet_theme', mappedTheme);
+          }
 
-          const data = await settingsApi.updateSettings(payload);
-          
-          set({
-            mapTileUrl: data.map_tile_url,
-            mapAttribution: data.map_attribution,
-            enterpriseLogoUrl: data.enterprise_logo_url,
-            theme: (data.theme as 'light' | 'dark' | 'system') || 'light',
+          await settingsApi.updateSettings({
+            map_tile_url: newSettings.mapTileUrl ?? get().mapTileUrl,
+            map_attribution: newSettings.mapAttribution ?? get().mapAttribution,
+            enterprise_logo_url: newSettings.enterpriseLogoUrl ?? get().enterpriseLogoUrl,
+            theme: newSettings.theme ?? get().theme,
           });
+
+          set((state) => ({ ...state, ...newSettings }));
         } catch (error) {
-          console.error("Помилка збереження системних налаштувань:", error);
+          console.error("Помилка збереження налаштувань:", error);
           throw error;
         } finally {
           set({ isLoading: false });
@@ -78,11 +82,21 @@ export const useSettingsStore = create<SettingsState>()(
 
       setMapTileUrl: (url, attribution) => set({ mapTileUrl: url, mapAttribution: attribution }),
       setEnterpriseLogo: (url) => set({ enterpriseLogoUrl: url }),
-      setTheme: (theme) => set({ theme }),
-      setMarkerStyle: (markerStyle) => set({ markerStyle }),
+      setTheme: (theme) => {
+        const mappedTheme = theme === 'dark' ? 'night-dispatch' : 'omet-clean';
+        localStorage.setItem('omet_theme', mappedTheme);
+        set({ theme });
+      },
+      setMarkerStyle: (style) => set({ markerStyle: style }),
     }),
     {
-      name: 'omet-settings',
+      name: 'omet-settings-storage',
+      partialize: (state) => ({
+        mapTileUrl: state.mapTileUrl,
+        mapAttribution: state.mapAttribution,
+        theme: state.theme,
+        markerStyle: state.markerStyle,
+      }),
     }
   )
 );

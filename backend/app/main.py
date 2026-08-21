@@ -23,6 +23,7 @@ from app.api.depots import router as depots_router
 from app.api.waybills import router as waybills_router
 from app.api.driver_communication import router as driver_comm_router
 from app.api.telemetry import router as telemetry_router
+from app.api.easyway import router as easyway_router
 from app.services.realtime_fetcher import fetch_and_process_realtime_data
 from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
@@ -30,6 +31,8 @@ from app.core.config import settings
 from app.db.init_admin import seed_initial_admin
 from app.core.logging_config import setup_logging, get_logger
 from app.core.logging_middleware import DetailedRequestLoggingMiddleware, logs_router
+
+from app.services.air_raid_worker import run_air_raid_monitor
 
 # Ініціалізація розширеного кольорового логування
 setup_logging(log_level="INFO")
@@ -45,20 +48,25 @@ async def lifespan(app: FastAPI):
     await init_db()
     await seed_initial_admin()
 
-    # 3. Запускаємо бойовий збір телеметрії (Wialon / GTFS-RT ОМР / Симуляція, 10с)
+    # 3. Запускаємо бойовий збір телеметрії (EasyWay / Wialon / GTFS-RT)
     telemetry_task = asyncio.create_task(fetch_and_process_realtime_data())
     logger.info("📡 Фоновий сервіс телеметрії GTFS-RT успішно запущено")
     
+    # 4. Запускаємо автоматичний моніторинг повітряної тривоги
+    air_raid_task = asyncio.create_task(run_air_raid_monitor())
+    logger.info("🚨 Фоновий сервіс авто-моніторингу тривог успішно запущено")
+
     yield
     
-    # 4. При вимкненні сервера коректно скасовуємо фонову задачу
+    # 5. При вимкненні сервера коректно скасовуємо фонові задачі
     telemetry_task.cancel()
+    air_raid_task.cancel()
     try:
-        await telemetry_task
-    except asyncio.CancelledError:
+        await asyncio.gather(telemetry_task, air_raid_task, return_exceptions=True)
+    except Exception:
         pass
     
-    # 5. Закриваємо з'єднання з Redis
+    # 6. Закриваємо з'єднання з Redis
     await close_redis()
     logger.info("🛑 Сервер успішно зупинено")
 
@@ -96,9 +104,11 @@ app.include_router(duty_types_router, prefix="/api")
 app.include_router(driver_comm_router, prefix="/api/v1")
 app.include_router(driver_comm_router, prefix="/api")
 
-# Жива телеметрія та GPS
+# Жива телеметрія, Wialon та EasyWay API
 app.include_router(telemetry_router, prefix="/api/v1")
 app.include_router(telemetry_router, prefix="/api")
+app.include_router(easyway_router, prefix="/api/v1")
+app.include_router(easyway_router, prefix="/api")
 
 # Розклади та математичне ядро
 app.include_router(new_schedules_router, prefix="/api/v1")

@@ -31,7 +31,7 @@ export const AuthLoginView: React.FC = () => {
 
       setAuth(data.access_token, userData);
       toast.success(`Вітаємо, ${userData.full_name || userData.username}! Успішний вхід.`);
-      setPath('/dispatch/marey');
+      setPath('/dispatch/map');
     } catch (err: any) {
       const detail = err.response?.data?.detail || "Помилка авторизації. Перевірте логін та пароль.";
       setErrorMessage(detail);

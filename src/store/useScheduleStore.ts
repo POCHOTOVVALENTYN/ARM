@@ -260,7 +260,7 @@ export const useScheduleStore = create<ScheduleState>()(
     validationWarnings: [],
     activeDetourId: undefined,
     currentPath: '/',
-    theme: 'system',
+    theme: (typeof window !== 'undefined' ? localStorage.getItem('omet_theme') : null) || 'omet-clean',
     user: { name: 'Головний Диспетчер', role: UserRole.ADMIN, badge: '12345' },
     userRole: 'DISPATCHER',
 
@@ -398,7 +398,12 @@ export const useScheduleStore = create<ScheduleState>()(
     setValidationWarnings: (warnings) => set((state) => { state.validationWarnings = warnings; }),
     setActiveDetour: (id) => set((state) => { state.activeDetourId = id; }),
     setPath: (path) => set((state) => { state.currentPath = path; }),
-    setTheme: (theme) => set((state) => { state.theme = theme; }),
+    setTheme: (theme) => {
+      try {
+        localStorage.setItem('omet_theme', theme);
+      } catch (e) {}
+      set((state) => { state.theme = theme; });
+    },
     setUserRole: (role) => set((state) => { state.userRole = role; }),
 
     setInitialSchedule: (blocks, duties) => {

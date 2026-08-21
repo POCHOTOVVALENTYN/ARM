@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Dict, Any
+from pydantic import BaseModel
 import json
 
 from app.core.database import AsyncSessionLocal
@@ -14,6 +15,23 @@ from app.schemas.settings import (
 )
 
 router = APIRouter(prefix="/settings", tags=["Settings & Fleet Config"])
+
+class TechNormsResponse(BaseModel):
+    tram_prep_min: int = 10
+    trolleybus_prep_min: int = 19
+    min_headway_min: int = 2
+
+@router.get("/norms", response_model=TechNormsResponse)
+async def get_tech_norms():
+    """
+    Отримання нормативів підготовчо-заключного часу (ПЗЧ) та міжрейсових інтервалів КП «ОМЕТ».
+    (10 хв - Трамвай, 19 хв - Тролейбус, 2-3 хв - Мінімальний інтервал на суміщених ділянках)
+    """
+    return TechNormsResponse(
+        tram_prep_min=10,
+        trolleybus_prep_min=19,
+        min_headway_min=2
+    )
 
 # --- SYSTEM CONFIG (SINGLE-ROW TABLE PATTERN + RBAC) ---
 @router.get("", response_model=SystemConfigResponse)
@@ -58,18 +76,14 @@ async def update_settings(
         config = SystemConfig(id=1)
         db.add(config)
     
-    update_data = settings_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        if value is not None:
-            setattr(config, key, value)
+    for field, val in settings_in.model_dump(exclude_unset=True).items():
+        setattr(config, field, val)
         
     await db.commit()
     await db.refresh(config)
-    
     return config
 
-
-# --- DEPOTS ---
+# --- DEPOTS (ДЕПО ТА ТРАНСПОРТНІ ПАРКИ) ---
 @router.get("/depots", response_model=List[Dict[str, Any]])
 async def get_depots(db: AsyncSession = Depends(get_db)):
     cached = await get_cache("settings:depots")
@@ -80,8 +94,15 @@ async def get_depots(db: AsyncSession = Depends(get_db)):
     depots = result.scalars().all()
     data = [
         {
-            "id": d.id, "name": d.name, "type": d.type, "address": d.address,
-            "lat": d.lat, "lng": d.lng, "prepTimeMin": d.prepTimeMin
+            "id": d.id, 
+            "code": getattr(d, "code", d.id), 
+            "name": d.name, 
+            "type": d.type,
+            "address": d.address, 
+            "capacity": getattr(d, "capacity", 100),
+            "prepTimeMin": getattr(d, "prepTimeMin", 15),
+            "lat": d.lat, 
+            "lng": d.lng
         }
         for d in depots
     ]
@@ -114,7 +135,7 @@ async def delete_depot(
         await invalidate_cache("settings:depots")
     return {"status": "ok"}
 
-# --- HUBS ---
+# --- HUB NODES (ТРАНСПОРТНІ ХАБИ ТА ВУЗЛИ) ---
 @router.get("/hubs", response_model=List[Dict[str, Any]])
 async def get_hubs(db: AsyncSession = Depends(get_db)):
     cached = await get_cache("settings:hubs")
@@ -125,9 +146,9 @@ async def get_hubs(db: AsyncSession = Depends(get_db)):
     hubs = result.scalars().all()
     data = [
         {
-            "id": h.id, "name": h.name, "locationDescription": h.locationDescription,
-            "availableTracksCount": h.availableTracksCount, "minHeadwayMin": h.minHeadwayMin,
-            "routesConnecting": h.routesConnecting, "channels": h.channels
+            "id": h.id, "name": h.name, "stationIds": json.loads(h.stationIdsJson or "[]"),
+            "maxCapacity": h.maxCapacity, "isInterlineTransferAllowed": h.isInterlineTransferAllowed,
+            "notes": h.notes
         }
         for h in hubs
     ]
@@ -140,7 +161,11 @@ async def create_hub(
     db: AsyncSession = Depends(get_db),
     admin: Dispatcher = Depends(get_current_active_superuser)
 ):
-    new_hub = HubNodeModel(**hub.model_dump())
+    data = hub.model_dump()
+    station_ids = data.pop("stationIds", [])
+    data["stationIdsJson"] = json.dumps(station_ids)
+    
+    new_hub = HubNodeModel(**data)
     db.add(new_hub)
     await db.commit()
     await invalidate_cache("settings:hubs")
@@ -160,7 +185,8 @@ async def delete_hub(
         await invalidate_cache("settings:hubs")
     return {"status": "ok"}
 
-# --- ROUTE DEPOT CONFIGS ---
+# --- ROUTE DEPOT CONFIGS (ЗВ'ЯЗОК МАРШРУТ-ДЕПО) ---
+@router.get("/route-depots", response_model=List[Dict[str, Any]])
 @router.get("/route-depot-configs", response_model=List[Dict[str, Any]])
 async def get_route_depot_configs(db: AsyncSession = Depends(get_db)):
     cached = await get_cache("settings:route_depots")
@@ -171,64 +197,44 @@ async def get_route_depot_configs(db: AsyncSession = Depends(get_db)):
     configs = result.scalars().all()
     data = [
         {
-            "id": c.id, "routeId": c.routeId, "primaryDepotId": c.primaryDepotId,
-            "secondaryDepotId": c.secondaryDepotId, "defaultOutboundTime": c.defaultOutboundTime,
-            "defaultInboundTime": c.defaultInboundTime
+            "id": c.id, "routeId": c.routeId, "depotId": c.depotId,
+            "zeroTripDurationMin": c.zeroTripDurationMin, "zeroTripDistanceKm": c.zeroTripDistanceKm,
+            "preferredFleetRatio": c.preferredFleetRatio
         }
         for c in configs
     ]
     await set_cache("settings:route_depots", data)
     return data
 
+@router.post("/route-depots", response_model=Dict[str, Any])
 @router.post("/route-depot-configs", response_model=Dict[str, Any])
 async def create_route_depot_config(
-    config: RouteDepotConfigCreate, 
+    cfg: RouteDepotConfigCreate, 
     db: AsyncSession = Depends(get_db),
     admin: Dispatcher = Depends(get_current_active_superuser)
 ):
-    new_config = RouteDepotConfigModel(**config.model_dump())
-    db.add(new_config)
+    new_cfg = RouteDepotConfigModel(**cfg.model_dump())
+    db.add(new_cfg)
     await db.commit()
     await invalidate_cache("settings:route_depots")
-    return config.model_dump()
+    return cfg.model_dump()
 
-@router.delete("/route-depot-configs/{config_id}")
+@router.delete("/route-depots/{cfg_id}")
+@router.delete("/route-depot-configs/{cfg_id}")
 async def delete_route_depot_config(
-    config_id: str, 
+    cfg_id: str, 
     db: AsyncSession = Depends(get_db),
     admin: Dispatcher = Depends(get_current_active_superuser)
 ):
-    result = await db.execute(select(RouteDepotConfigModel).where(RouteDepotConfigModel.id == config_id))
-    config = result.scalar_one_or_none()
-    if config:
-        await db.delete(config)
+    result = await db.execute(select(RouteDepotConfigModel).where(RouteDepotConfigModel.id == cfg_id))
+    cfg = result.scalar_one_or_none()
+    if cfg:
+        await db.delete(cfg)
         await db.commit()
         await invalidate_cache("settings:route_depots")
     return {"status": "ok"}
 
-DEFAULT_ODESSA_BREAK_LOCATIONS = [
-    {"id": "brk_7_1", "routeId": "7", "locationId": "dp_paustov", "locationName": "ДП «вул. Паустовського» (Кінцева А)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_7_2", "routeId": "7", "locationId": "dp_luzan", "locationName": "ДП «Лузанівка» (КП-2)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_18_1", "routeId": "18", "locationId": "dp_kulyk", "locationName": "ДП «Куликове поле» (Кінцева А)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_18_2", "routeId": "18", "locationId": "dp_fontan16", "locationName": "ДП «16-та ст. Великого Фонтану» (Кінцева Б)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
-    {"id": "brk_28_1", "routeId": "28", "locationId": "dp_pastera", "locationName": "ДП «вул. Пастера» (Кінцева А)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
-    {"id": "brk_28_2", "routeId": "28", "locationId": "dp_park_shevch", "locationName": "ДП «Парк ім. Т. Шевченка» (Кінцева Б)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
-    {"id": "brk_5_1", "routeId": "5", "locationId": "dp_arkadia", "locationName": "ДП «Аркадія» (Кінцева А / Кільце)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_5_2", "routeId": "5", "locationId": "dp_autovokzal", "locationName": "ДП «Центральний Автовокзал» (Кінцева Б)", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
-    {"id": "brk_10_1", "routeId": "10", "locationId": "dp_rabina", "locationName": "ДП «вул. Іцхака Рабіна (вул. Інглезі)»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_10_2", "routeId": "10", "locationId": "dp_tiraspol", "locationName": "ДП «Тираспольська площа»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40},
-    {"id": "brk_15_1", "routeId": "15", "locationId": "dp_sloboda", "locationName": "ДП «Слобідський ринок»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
-    {"id": "brk_20_1", "routeId": "20", "locationId": "dp_kherson_sq", "locationName": "ДП «Херсонський сквер»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
-    {"id": "brk_3_1", "routeId": "3", "locationId": "dp_zastava1", "locationName": "ДП «ст. Застава-1»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
-    {"id": "brk_1_1", "routeId": "1", "locationId": "dp_peresyp", "locationName": "ДП «вул. Чорноморського козацтва (Пересип)»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 45},
-    {"id": "brk_26_1", "routeId": "26", "locationId": "dp_starosinna", "locationName": "ДП «Старосінна площа» (Головний Хаб)", "locationType": "Диспетчерський пункт / Їдальня", "maxCapacityVehicles": 4, "durationMin": 45},
-    {"id": "brk_tr8_1", "routeId": "8", "locationId": "dp_vokzal", "locationName": "ДП «Залізничний вокзал»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_tr7_1", "routeId": "7-Tr", "locationId": "dp_arhitektor", "locationName": "ДП «вул. Архітекторська»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_tr9_1", "routeId": "9", "locationId": "dp_inglezi", "locationName": "ДП «вул. Інглезі»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 3, "durationMin": 45},
-    {"id": "brk_tr12_1", "routeId": "12", "locationId": "dp_airport", "locationName": "ДП «вул. Центральний Аеропорт»", "locationType": "Диспетчерський пункт", "maxCapacityVehicles": 2, "durationMin": 40}
-]
-
-# --- BREAK LOCATIONS ---
+# --- BREAK LOCATIONS (ПУНКТИ ХАРЧУВАННЯ ТА ОБІДУ) ---
 @router.get("/break-locations", response_model=List[Dict[str, Any]])
 async def get_break_locations(db: AsyncSession = Depends(get_db)):
     cached = await get_cache("settings:break_locations")
@@ -237,16 +243,6 @@ async def get_break_locations(db: AsyncSession = Depends(get_db)):
 
     result = await db.execute(select(BreakLocationConfigModel))
     locations = result.scalars().all()
-
-    if not locations:
-        # Автоматичне наповнення реальними диспетчерськими пунктами обідів
-        for item in DEFAULT_ODESSA_BREAK_LOCATIONS:
-            m = BreakLocationConfigModel(**item)
-            db.add(m)
-        await db.commit()
-        result = await db.execute(select(BreakLocationConfigModel))
-        locations = result.scalars().all()
-
     data = [
         {
             "id": loc.id, "routeId": loc.routeId, "locationId": loc.locationId,

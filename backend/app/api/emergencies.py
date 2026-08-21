@@ -246,3 +246,65 @@ async def deactivate_detour(
         }
     })
     return {"message": "Транспорт повернуто на плановий маршрут", "id": detour_id}
+
+# --- МОДУЛЬ СПОВІЩЕННЯ ПРО ПОВІТРЯНУ ТРИВОГУ (AIR RAID ALERT) ---
+
+class AirRaidToggleRequest(BaseModel):
+    active: Optional[bool] = None
+    city: Optional[str] = "м. Одеса"
+    message: Optional[str] = "Повітряна тривога в Одесі та Одеській області"
+
+@router.get("/air-raid", summary="Отримати статус повітряної тривоги в Одесі")
+async def get_air_raid_status():
+    """
+    Повертає поточний статус повітряної тривоги для м. Одеса та тривалість тривоги.
+    """
+    try:
+        redis = await get_redis()
+        raw_status = await redis.get("emergency:air_raid_status")
+        if raw_status:
+            import json
+            return json.loads(raw_status)
+    except Exception as e:
+        print(f"Air raid Redis read error: {e}")
+
+    return {
+        "active": False,
+        "city": "м. Одеса",
+        "started_at": None,
+        "duration_seconds": 0,
+        "message": "Відбій тривоги. Обстановка спокійна."
+    }
+
+@router.post("/air-raid/toggle", summary="Увімкнути/Вимкнути сигнал повітряної тривоги (Диспетчерський оверрайд)")
+async def toggle_air_raid(payload: Optional[AirRaidToggleRequest] = None):
+    """
+    Оперативне перемикання або встановлення режиму Повітряної тривоги в Одесі
+    із миттєвим сповіщенням усіх диспетчерів та водіїв через WebSocket.
+    """
+    import json
+    current_status = await get_air_raid_status()
+    new_active = payload.active if (payload and payload.active is not None) else not current_status.get("active", False)
+    
+    now_iso = datetime.utcnow().isoformat() if new_active else None
+
+    status_obj = {
+        "active": new_active,
+        "city": "м. Одеса",
+        "started_at": now_iso,
+        "duration_seconds": 0,
+        "message": "ПОВІТРЯНА ТРИВОГА В М. ОДЕСА" if new_active else "Відбій повітряної тривоги."
+    }
+
+    try:
+        redis = await get_redis()
+        await redis.set("emergency:air_raid_status", json.dumps(status_obj))
+    except Exception as e:
+        print(f"Air raid Redis write error: {e}")
+
+    await ws_manager.broadcast({
+        "type": "AIR_RAID_UPDATE",
+        "payload": status_obj
+    })
+
+    return status_obj

@@ -119,6 +119,49 @@ async def get_all_routes(db: AsyncSession = Depends(get_db)):
         for r in routes
     ]
 
+@router.get("/shapes/all", summary="Отримання геометрій усіх маршрутів міста в обох напрямках")
+async def get_all_route_shapes(db: AsyncSession = Depends(get_db)):
+    """Повертає геометрії всіх маршрутів трамваїв та тролейбусів для обох напрямків."""
+    query = select(RouteShape)
+    result = await db.execute(query)
+    shapes = result.scalars().all()
+    
+    routes_res = await db.execute(select(RouteModel))
+    routes_map = {r.id: r for r in routes_res.scalars().all()}
+    
+    return [
+        {
+            "route_id": s.route_id,
+            "direction_id": s.direction_id,
+            "geometry": s.geometry,
+            "type": routes_map.get(s.route_id).type if routes_map.get(s.route_id) else "TRAM",
+            "color": routes_map.get(s.route_id).color if (routes_map.get(s.route_id) and routes_map.get(s.route_id).color) else ("#2563eb" if (routes_map.get(s.route_id) and routes_map.get(s.route_id).type == "TRAM") else "#059669"),
+            "route_number": routes_map.get(s.route_id).number if routes_map.get(s.route_id) else s.route_id
+        }
+        for s in shapes
+    ]
+
+@router.get("/{route_id}/shapes", summary="Отримання геометрій маршруту для обох напрямків")
+async def get_route_both_shapes(
+    route_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Повертає масиви геометрій для прямого (0) та зворотного (1) напрямків маршруту."""
+    query = select(RouteShape).where(RouteShape.route_id == route_id).order_by(RouteShape.direction_id)
+    result = await db.execute(query)
+    shapes = result.scalars().all()
+    
+    return {
+        "route_id": route_id,
+        "directions": [
+            {
+                "direction_id": s.direction_id,
+                "geometry": s.geometry
+            }
+            for s in shapes
+        ]
+    }
+
 @router.get("/{route_id}/shape")
 async def get_route_shape(
     route_id: str,
@@ -134,44 +177,43 @@ async def get_route_shape(
     shape = result.scalar_one_or_none()
     
     if not shape:
-        raise HTTPException(status_code=404, detail="Геометрію маршруту не знайдено")
+        # Спробуємо будь-який наявний напрямок
+        fallback = await db.execute(select(RouteShape).where(RouteShape.route_id == route_id))
+        shape = fallback.scalar_one_or_none()
+        if not shape:
+            raise HTTPException(status_code=404, detail="Геометрію маршруту не знайдено")
         
     return shape.geometry
 
 @router.get("/{route_id}/stops", summary="Отримання послідовності зупинок маршруту")
 async def get_route_stops(
     route_id: str,
-    direction_id: int = 0,
+    direction_id: Optional[int] = Query(None, description="0=Прямий, 1=Зворотний, None=Обидва напрямки"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Повертає точну впорядковану послідовність зупинок маршруту з бази даних PostgreSQL.
     """
     from app.models.models import RouteStation, StationModel
+    
     query = (
         select(RouteStation, StationModel)
         .join(StationModel, RouteStation.stop_id == StationModel.id)
-        .where((RouteStation.route_id == route_id) & (RouteStation.direction_id == direction_id))
-        .order_by(RouteStation.stop_sequence)
+        .where(RouteStation.route_id == route_id)
     )
+    
+    if direction_id is not None:
+        query = query.where(RouteStation.direction_id == direction_id)
+        
+    query = query.order_by(RouteStation.direction_id, RouteStation.stop_sequence)
     result = await db.execute(query)
     rows = result.all()
-
-    if not rows:
-        # Спробуємо знайти без direction_id або для протилежного
-        query_fallback = (
-            select(RouteStation, StationModel)
-            .join(StationModel, RouteStation.stop_id == StationModel.id)
-            .where(RouteStation.route_id == route_id)
-            .order_by(RouteStation.stop_sequence)
-        )
-        res_fallback = await db.execute(query_fallback)
-        rows = res_fallback.all()
 
     stops = []
     for r_st, st in rows:
         stops.append({
             "stop_sequence": r_st.stop_sequence,
+            "direction_id": r_st.direction_id,
             "stop_id": st.id,
             "name": st.name,
             "lat": st.lat,

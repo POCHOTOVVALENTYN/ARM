@@ -2,315 +2,544 @@ import React, { useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { useTelemetryStore, VehicleTelemetry } from '../../store/useTelemetryStore';
-import { useSettingsStore, VehicleMarkerStyle } from '../../store/useSettingsStore';
+
+export interface DepotZone {
+  id: string;
+  name: string;
+  shortName: string;
+  address: string;
+  type: 'TRAM' | 'TROLLEYBUS';
+  polygon: [number, number][];
+}
+
+// 🏢 Реальні полігони периметрів території 3-х діючих депо КП «Одесміськелектротранс»
+export const ODESSA_ACTIVE_DEPOT_POLYGONS: DepotZone[] = [
+  {
+    id: 'tram-depot-1',
+    name: 'Трамвайне депо № 1',
+    shortName: 'ТД-1',
+    address: 'вул. Водопровідна, 1',
+    type: 'TRAM',
+    polygon: [
+      [46.467172, 30.736911],
+      [46.467037, 30.736597],
+      [46.467202, 30.733894],
+      [46.467372, 30.733572],
+      [46.467900, 30.733588],
+      [46.467952, 30.732654],
+      [46.464874, 30.732343],
+      [46.464830, 30.732805],
+      [46.466075, 30.733132],
+      [46.465931, 30.735481]
+    ]
+  },
+  {
+    id: 'tram-depot-2',
+    name: 'Трамвайне депо № 2 (Слобідка)',
+    shortName: 'ТД-2',
+    address: '1-й Польовий провулок, 1 / вул. Ак. Воробйова',
+    type: 'TRAM',
+    polygon: [
+      [46.49620, 30.70250],
+      [46.49570, 30.70650],
+      [46.49280, 30.70560],
+      [46.49320, 30.70160],
+      [46.49510, 30.70110]
+    ]
+  },
+  {
+    id: 'trolleybus-depot',
+    name: 'Тролейбусне депо',
+    shortName: 'ТрД',
+    address: 'вул. Інглезі, 5 (вул. 25-ї Чапаєвської дивізії)',
+    type: 'TROLLEYBUS',
+    polygon: [
+      [46.41880, 30.70780],
+      [46.41820, 30.71230],
+      [46.41480, 30.71130],
+      [46.41520, 30.70680],
+      [46.41740, 30.70620]
+    ]
+  }
+];
+
+/**
+ * Алгоритм перевірки належності точки полігону (Ray-Casting algorithm).
+ * Визначає, чи знаходиться ТЗ фізично всередині огорожі депо.
+ */
+export const isPointInPolygon = (lat: number, lng: number, polygon: [number, number][]): boolean => {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+
+    const intersect = ((yi > lng) !== (yj > lng))
+      && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+/**
+ * Перевірка: чи знаходиться вагон на території будь-якого з 3-х депо
+ */
+export const isVehicleInAnyDepot = (lat: number, lng: number, status?: string): boolean => {
+  if (status === 'IN_DEPOT' || status === 'depot') return true;
+  if (!lat || !lng || lat === 0 || lng === 0) return false;
+
+  for (const depot of ODESSA_ACTIVE_DEPOT_POLYGONS) {
+    if (isPointInPolygon(lat, lng, depot.polygon)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Канонічне отримання точного номера маршруту для вагона.
+ * Бере безпосередньо дані з EasyWay або GTFS-RT без випадкових змін.
+ */
+export const resolveDisplayRouteNumber = (vehicle: VehicleTelemetry): string => {
+  const raw = vehicle.route_number || vehicle.route_id;
+  if (!raw) return '?';
+  const str = String(raw).trim();
+  if (str === '' || str.toLowerCase() === 'unknown' || str.toLowerCase() === 'none') {
+    return '?';
+  }
+  const clean = str.replace(/^(t|tr)/i, '').trim();
+  // Якщо рядок містить крапку (координата), дефіси (UUID) або задовгий — фільтруємо
+  if (clean.length > 5 || clean.includes('-') || clean.includes('.')) {
+    const digitsOnly = clean.replace(/[^0-9]/g, '');
+    if (digitsOnly.length > 0 && digitsOnly.length <= 3) {
+      return digitsOnly;
+    }
+    return '?';
+  }
+  return clean;
+};
+
+/**
+ * Розрахунок геодезичного азимуту (bearing) між двома координатами для точного спрямування стрілки.
+ */
+export const calculateBearing = (startLat: number, startLng: number, endLat: number, endLng: number): number => {
+  const dLng = (endLng - startLng) * (Math.PI / 180);
+  const lat1 = startLat * (Math.PI / 180);
+  const lat2 = endLat * (Math.PI / 180);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  const brng = (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+  return Math.round(brng);
+};
+
+/**
+ * Функція плавного згладжування руху (Ease Out Cubic).
+ */
+const easeOutCubic = (t: number): number => {
+  return 1 - Math.pow(1 - t, 3);
+};
+
+interface AnimatedVehicleItem {
+  marker: L.Marker;
+  startLat: number;
+  startLng: number;
+  targetLat: number;
+  targetLng: number;
+  currentLat: number;
+  currentLng: number;
+  startHeading: number;
+  targetHeading: number;
+  currentHeading: number;
+  startTime: number;
+  duration: number;
+  lastGpsTime: number;
+  speedKmh: number;
+  isGpsLost: boolean;
+  isStanding: boolean;
+  cleanRouteNum: string;
+  colorClass: string;
+  textColorClass: string;
+  devText: string;
+}
 
 interface TelemetryMarkersProps {
   activeRouteId?: string | null;
   hideServiceVehicles?: boolean;
   hideDepotVehicles?: boolean;
-  stylePreset?: VehicleMarkerStyle;
+  onlyCriticalDelays?: boolean;
 }
 
 export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({ 
   activeRouteId,
   hideServiceVehicles = true,
   hideDepotVehicles = false,
-  stylePreset
+  onlyCriticalDelays = false
 }) => {
   const map = useMap();
-  const markersRef = useRef<{ [vehicleId: string]: L.Marker }>({});
-  const storeMarkerStyle = useSettingsStore((state) => state.markerStyle);
-  const activeStyle = stylePreset || storeMarkerStyle || 'balanced';
+  const animatedVehiclesRef = useRef<{ [vehicleId: string]: AnimatedVehicleItem }>({});
+  const animFrameIdRef = useRef<number | null>(null);
 
+  // 1. Анімаційний 60 FPS цикл для плавного переміщення маркерів між GPS-точками
+  useEffect(() => {
+    let lastFrameTime = performance.now();
+
+    const animateFrame = () => {
+      const now = performance.now();
+      const deltaSec = Math.min(0.1, Math.max(0.001, (now - lastFrameTime) / 1000));
+      lastFrameTime = now;
+
+      const animated = animatedVehiclesRef.current;
+
+      for (const id in animated) {
+        const item = animated[id];
+        const hasPosDelta = item.startLat !== item.targetLat || item.startLng !== item.targetLng;
+        const hasHeadingDelta = item.startHeading !== item.targetHeading;
+
+        if (hasPosDelta || hasHeadingDelta) {
+          const elapsed = now - item.startTime;
+          const progress = Math.min(1.0, Math.max(0.0, elapsed / item.duration));
+          const eased = easeOutCubic(progress);
+
+          // Плавна інтерполяція координат (Фаза 1: рух до відомої GPS точки)
+          if (hasPosDelta) {
+            item.currentLat = item.startLat + (item.targetLat - item.startLat) * eased;
+            item.currentLng = item.startLng + (item.targetLng - item.startLng) * eased;
+            item.marker.setLatLng([item.currentLat, item.currentLng]);
+          }
+
+          // Плавна інтерполяція повороту стрілки (найкоротший кутовий шлях)
+          if (hasHeadingDelta) {
+            const diffHeading = ((item.targetHeading - item.startHeading + 540) % 360) - 180;
+            item.currentHeading = (item.startHeading + diffHeading * eased + 360) % 360;
+
+            const el = item.marker.getElement();
+            if (el) {
+              const arrow = el.querySelector('.vehicle-arrow-container') as HTMLElement | null;
+              if (arrow) {
+                arrow.style.transform = `rotate(${Math.round(item.currentHeading)}deg)`;
+              }
+            }
+          }
+
+          // Завершення фази переходу до точки
+          if (progress >= 1.0) {
+            item.startLat = item.targetLat;
+            item.startLng = item.targetLng;
+            item.startHeading = item.targetHeading;
+            item.currentLat = item.targetLat;
+            item.currentLng = item.targetLng;
+            item.currentHeading = item.targetHeading;
+          }
+        } else {
+          // Фаза 2: Неперервне кінематичне ковзання (Dead Reckoning) між оновленнями GPS
+          // Якщо вагон у русі (> 2 км/год), не на стоянці та не втратив GPS — продовжуємо плавний рух вздовж курсу
+          const timeSinceGps = now - item.lastGpsTime;
+          if (item.speedKmh > 2 && !item.isStanding && !item.isGpsLost && timeSinceGps < 35000) {
+            // Швидкість у м/с із коефіцієнтом плавності 0.70
+            const speedMs = (item.speedKmh * 1000 / 3600) * 0.70;
+            const distMeters = speedMs * deltaSec;
+            const headingRad = (item.currentHeading * Math.PI) / 180;
+
+            // 1м в Одесі ≈ 0.00000899° lat, 0.00001306° lng
+            const dLat = distMeters * Math.cos(headingRad) * 0.00000899;
+            const dLng = distMeters * Math.sin(headingRad) * 0.00001306;
+
+            item.currentLat += dLat;
+            item.currentLng += dLng;
+            item.startLat = item.currentLat;
+            item.targetLat = item.currentLat;
+            item.startLng = item.currentLng;
+            item.targetLng = item.currentLng;
+            item.marker.setLatLng([item.currentLat, item.currentLng]);
+          }
+        }
+      }
+
+      animFrameIdRef.current = requestAnimationFrame(animateFrame);
+    };
+
+    animFrameIdRef.current = requestAnimationFrame(animateFrame);
+
+    return () => {
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+      }
+    };
+  }, []);
+
+  // 2. Обробка надходження телеметрії та синхронізація з картою
   useEffect(() => {
     const updateMarkers = () => {
       const state = useTelemetryStore.getState();
-      const currentZoom = map.getZoom();
-
-      // Фільтрація транспорту
       const rawVehicles = Object.values(state.vehicles);
-      const filteredVehicles = rawVehicles.filter((v: VehicleTelemetry & any) => {
-        // 1. Фільтр спецтехніки (аварійні машини, ревізори тощо)
-        if (hideServiceVehicles && (v.is_service || v.vehicle_type === 'SERVICE')) {
+
+      // Фільтрація рухомого складу
+      const filteredVehicles = rawVehicles.filter((v: VehicleTelemetry) => {
+        // 0. Фільтр валідності координат Одеси (відсікаємо сміттєві/тестові/закордонні точки)
+        if (
+          !v.lat || !v.lng ||
+          v.lat < 46.30 || v.lat > 46.65 ||
+          v.lng < 30.60 || v.lng > 30.85
+        ) {
           return false;
         }
 
-        // 2. Фільтр вагонів у депо (швидкість = 0 у межах депо)
-        if (hideDepotVehicles && v.status === 'depot') {
-          return false;
+        // 1. Фільтр спецтехніки
+        if (hideServiceVehicles) {
+          const isService = Boolean(
+            v.is_service || 
+            v.vehicle_type === 'SERVICE' || 
+            String(v.vehicle_id).startsWith('9') ||
+            String(v.vehicle_id).startsWith('С') ||
+            String(v.vehicle_id).startsWith('S') ||
+            String(v.driver_name || '').toLowerCase().includes('служба')
+          );
+          if (isService) return false;
         }
 
-        // 3. Фільтр за маршрутом
+        // 2. Фільтр вагонів у депо: перевірка точного полігону території 3-х депо
+        if (hideDepotVehicles) {
+          const inDepot = isVehicleInAnyDepot(v.lat, v.lng, v.status);
+          if (inDepot) return false;
+        }
+
+        // 3. Фільтр критичних запізнень (> 5 хв)
+        if (onlyCriticalDelays) {
+          if (Math.abs(v.deviation_min || 0) <= 5.0) return false;
+        }
+
+        // 4. Фільтр за обраним маршрутом
         if (!activeRouteId || activeRouteId.toUpperCase() === 'ALL' || activeRouteId === '') {
           return true;
         }
-        return v.route_id === activeRouteId;
+
+        const targetClean = String(activeRouteId).trim().toLowerCase().replace(/^(t|tr)/i, '');
+        const rIdClean = String(v.route_id || '').trim().toLowerCase().replace(/^(t|tr)/i, '');
+        const rNumClean = String(v.route_number || '').trim().toLowerCase().replace(/^(t|tr)/i, '');
+        const dispClean = resolveDisplayRouteNumber(v).toLowerCase();
+
+        return rIdClean === targetClean || rNumClean === targetClean || dispClean === targetClean;
       });
 
       const currentIds = new Set(filteredVehicles.map((v) => v.vehicle_id));
 
-      // Видаляємо маркери, які більше не активні або відфільтровані
-      Object.keys(markersRef.current).forEach((id) => {
+      // Видаляємо маркери з карти, які більше не проходять фільтри
+      Object.keys(animatedVehiclesRef.current).forEach((id) => {
         if (!currentIds.has(id)) {
-          map.removeLayer(markersRef.current[id]);
-          delete markersRef.current[id];
+          map.removeLayer(animatedVehiclesRef.current[id].marker);
+          delete animatedVehiclesRef.current[id];
         }
       });
 
-      // Створюємо або оновлюємо маркери
-      filteredVehicles.forEach((vehicle: VehicleTelemetry & any) => {
-        const latLng: [number, number] = [vehicle.lat, vehicle.lng];
+      // Оновлюємо координати для плавного ковзання або створюємо нові маркери
+      const now = Date.now();
+      const perfNow = performance.now();
+
+      filteredVehicles.forEach((vehicle: VehicleTelemetry) => {
+        // Розрахунок свіжості сигналу
+        const rawTime = vehicle.last_updated || now;
+        const lastUpdatedMs = rawTime < 1e11 ? rawTime * 1000 : rawTime;
+        const ageSec = Math.max(0, Math.floor((now - lastUpdatedMs) / 1000));
+        const isGpsLost = ageSec > 120; // > 2 хв
+        const speedKmh = Math.round(vehicle.speed || 0);
+        const isStanding = speedKmh === 0 && !isGpsLost;
+
+        // Кольорове оформлення кружечка
+        let colorClass = 'bg-emerald-500 ring-emerald-300';
+        let textColorClass = 'text-emerald-600';
+        let devText = (vehicle.deviation_min || 0) > 0 
+          ? `+${(vehicle.deviation_min || 0).toFixed(1)} хв (запізнення)` 
+          : (vehicle.deviation_min || 0) < 0
+          ? `${(vehicle.deviation_min || 0).toFixed(1)} хв (випередження)`
+          : 'В графіку (0.0 хв)';
         
-        // Визначаємо тип транспорту (Трамвай, Тролейбус, Спецтехніка)
-        const isService = vehicle.is_service || vehicle.vehicle_type === 'SERVICE';
-        const isTrolley = !isService && (vehicle.vehicle_type === 'TROLLEYBUS');
-        const isTram = !isService && !isTrolley;
-
-        // Кольори та стилі за типами
-        const typeBg = isService
-          ? 'bg-amber-600 border-amber-800 text-white'
-          : isTram
-            ? 'bg-indigo-600 border-indigo-800 text-white'
-            : 'bg-blue-600 border-blue-800 text-white';
-
-        const typeIconSvg = isService
-          ? `<svg class="w-3 h-3 text-amber-100" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`
-          : isTram
-            ? `<svg class="w-3 h-3 text-indigo-100" fill="currentColor" viewBox="0 0 24 24"><path d="M8 2h8a2 2 0 012 2v12a3 3 0 01-3 3h1a1 1 0 110 2H8a1 1 0 110-2h1a3 3 0 01-3-3V4a2 2 0 012-2zm0 2v4h8V4H8zm0 6v4h8v-4H8zm1.5 6a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm5 0a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM12 1a1 1 0 011 1v0h-2V2a1 1 0 011-1z"/></svg>`
-            : `<svg class="w-3.5 h-3.5 text-blue-100" fill="currentColor" viewBox="0 0 24 24"><path d="M4 8a3 3 0 013-3h10a3 3 0 013 3v8a3 3 0 01-3 3H7a3 3 0 01-3-3V8zm3-1h10a1 1 0 011 1v4H6V8a1 1 0 011-1zm11 7H6v2a1 1 0 001 1h10a1 1 0 001-1v-2zm-10.5 1a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm7 0a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM7 2l3 3m7-3l-3 3"/></svg>`;
-
-        // Кольори та стилі стрілочки за типами та сайтом (синій / блакитний)
-        const arrowColor = isService
-          ? 'text-amber-600 stroke-amber-600'
-          : isTram
-            ? 'text-indigo-600 stroke-indigo-600'
-            : 'text-blue-600 stroke-blue-600';
-
-        const circleBorder = isService
-          ? 'border-amber-300'
-          : isTram
-            ? 'border-indigo-200'
-            : 'border-blue-200';
-
-        const circleBg = isService
-          ? 'bg-amber-50/95'
-          : isTram
-            ? 'bg-indigo-50/95'
-            : 'bg-blue-50/95';
-
-        const typeLabel = isService ? 'Спецтехніка' : isTram ? 'Трамвай' : 'Тролейбус';
-
-        // Статус відхилення від розкладу
-        let statusRing = 'ring-2 ring-indigo-400/40';
-        let statusGlowRgba = isTram ? 'rgba(79,70,229,0.5)' : isTrolley ? 'rgba(37,99,235,0.5)' : 'rgba(217,119,6,0.5)';
-        let statusBadgeBg = 'bg-emerald-600 text-white';
-        let statusText = 'У графіку';
-        const dev = vehicle.deviation_min || 0;
-
-        if (vehicle.status === 'DETOUR') {
-          statusRing = 'ring-2 ring-amber-500 animate-pulse';
-          statusGlowRgba = 'rgba(245,158,11,0.8)';
-          statusBadgeBg = 'bg-amber-600 text-white';
-          statusText = "ОБ'ЇЗД";
-        } else if (dev > 2.0) {
-          statusRing = 'ring-2 ring-rose-500';
-          statusGlowRgba = 'rgba(225,29,72,0.8)';
-          statusBadgeBg = 'bg-rose-600 text-white';
-          statusText = `+${dev} хв`;
-        } else if (dev < -2.0) {
-          statusRing = 'ring-2 ring-blue-500';
-          statusGlowRgba = 'rgba(14,165,233,0.8)';
-          statusBadgeBg = 'bg-blue-600 text-white';
-          statusText = `${dev} хв`;
+        if (isGpsLost) {
+          colorClass = 'bg-slate-400 ring-slate-300';
+          textColorClass = 'text-slate-500';
+          devText = `GPS втрачено (${Math.floor(ageSec / 60)} хв тому)`;
+        } else if (vehicle.status === 'DETOUR' || vehicle.has_active_detour) {
+          colorClass = 'bg-amber-500 ring-amber-300 animate-pulse';
+          textColorClass = 'text-amber-700';
+          devText = "Оперативний об'їзд (Detour)";
+        } else if (isStanding) {
+          colorClass = 'bg-slate-600 ring-slate-400';
+          textColorClass = 'text-slate-600';
+        } else if ((vehicle.deviation_min || 0) > 2.0) {
+          colorClass = 'bg-rose-500 ring-rose-300';
+          textColorClass = 'text-rose-600';
+        } else if ((vehicle.deviation_min || 0) < -2.0) {
+          colorClass = 'bg-blue-500 ring-blue-300';
+          textColorClass = 'text-blue-600';
         }
 
-        // Чіткий 4-значний бортовий номер (розміщується позаду нової стрілочки)
-        const full4DigitNumber = String(vehicle.display_name || vehicle.vehicle_id);
-        const heading = vehicle.heading || 0;
-        const speed = vehicle.speed || 0;
+        const headingDeg = vehicle.heading || 0;
+        const cleanRouteNum = resolveDisplayRouteNumber(vehicle);
 
-        // SVG точної стрілочки навігації (як на фото користувача)
-        const navigationArrowSvg = `
-          <svg class="w-4 h-4 ${arrowColor} transition-transform duration-300 drop-shadow-xs" 
-               style="transform: rotate(${heading}deg); transform-origin: center;" 
-               viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2.5L19.5 20.5L12 16.5L4.5 20.5L12 2.5Z"/>
-          </svg>
-        `;
-
-        let html = '';
-        let iconSize: [number, number] = [36, 46];
-        let iconAnchor: [number, number] = [18, 16];
-
-        // -------------------------------------------------------------
-        // 1. СТИЛЬ: HALO (Кільце-ореол навколо стрілочки)
-        // -------------------------------------------------------------
-        if (activeStyle === 'halo') {
-          iconSize = [40, 50];
-          iconAnchor = [20, 18];
-          html = `
-            <div class="relative group cursor-pointer flex flex-col items-center select-none" style="transform: translate3d(0,0,0);">
-              <!-- Пульсуючий ореол навколо стрілочки вагона -->
-              <div class="absolute top-0 w-8 h-8 rounded-full animate-ping opacity-30" style="background: ${statusGlowRgba};"></div>
-              
-              <!-- Круглий білий диск зі стрілочкою -->
-              <div class="relative w-8 h-8 rounded-full bg-white border-2 ${circleBorder} flex items-center justify-center shadow-lg transition-transform hover:scale-125"
-                   style="box-shadow: 0 0 12px ${statusGlowRgba};">
-                ${navigationArrowSvg}
+        // Чистий маркер: виключно кольоровий кружечок із номером маршруту та стрілкою
+        const html = `
+          <div class="relative flex items-center justify-center cursor-pointer ${isGpsLost ? 'opacity-55' : 'opacity-100'}" style="width: 26px; height: 26px;">
+            ${speedKmh > 0 && !isGpsLost ? `
+              <div class="vehicle-arrow-container absolute -inset-2 flex items-center justify-center pointer-events-none transform" style="transform: rotate(${headingDeg}deg)">
+                <div class="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[8px] border-b-slate-900 -translate-y-4 filter drop-shadow-xs"></div>
               </div>
-
-              <!-- 4-значний номер позаду стрілочки вагона -->
-              <div class="mt-0.5 px-1.5 py-0.2 bg-slate-900/90 text-white text-[9px] font-mono font-black rounded-md shadow border border-slate-700 leading-tight whitespace-nowrap">
-                ${full4DigitNumber}
-              </div>
-            </div>
-          `;
-        }
-        // -------------------------------------------------------------
-        // 2. СТИЛЬ: DUAL-TONE (Двотоновий: коло стрілочки + синій номер)
-        // -------------------------------------------------------------
-        else if (activeStyle === 'dualtone') {
-          iconSize = [40, 50];
-          iconAnchor = [20, 18];
-          html = `
-            <div class="relative group cursor-pointer flex flex-col items-center select-none" style="transform: translate3d(0,0,0);">
-              <!-- Круглий диск зі стрілочкою в кольорі сайту -->
-              <div class="relative w-8 h-8 rounded-full ${circleBg} border-2 ${circleBorder} flex items-center justify-center shadow-md ${statusRing} transition-transform hover:scale-125">
-                ${navigationArrowSvg}
-              </div>
-
-              <!-- Двотоновий бейдж номера позаду стрілочки -->
-              <div class="mt-0.5 px-1.5 py-0.2 ${isTram ? 'bg-indigo-700' : isTrolley ? 'bg-blue-700' : 'bg-amber-700'} text-white text-[9px] font-mono font-black rounded shadow border border-white/40 leading-tight whitespace-nowrap">
-                ${full4DigitNumber}
-              </div>
-            </div>
-          `;
-        }
-        // -------------------------------------------------------------
-        // 3. СТИЛЬ: MUTED (Спокійний тон / Пастельний мінімалізм)
-        // -------------------------------------------------------------
-        else if (activeStyle === 'muted') {
-          iconSize = [36, 46];
-          iconAnchor = [18, 16];
-          html = `
-            <div class="relative group cursor-pointer flex flex-col items-center select-none" style="transform: translate3d(0,0,0);">
-              <!-- Матовий спокійний диск зі стрілочкою -->
-              <div class="relative w-7 h-7 rounded-full bg-slate-800/90 border border-slate-600 flex items-center justify-center shadow-sm backdrop-blur-xs transition-transform hover:scale-125">
-                <svg class="w-3.5 h-3.5 text-slate-200" 
-                     style="transform: rotate(${heading}deg); transform-origin: center;" 
-                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 2.5L19.5 20.5L12 16.5L4.5 20.5L12 2.5Z"/>
-                </svg>
-              </div>
-
-              <!-- Спокійний номер позаду стрілочки -->
-              <div class="mt-0.5 px-1 py-0.1 bg-slate-800 text-slate-300 text-[8px] font-mono font-bold rounded shadow-xs border border-slate-700 leading-tight whitespace-nowrap">
-                ${full4DigitNumber}
-              </div>
-            </div>
-          `;
-        }
-        // -------------------------------------------------------------
-        // 4. СТИЛЬ: BALANCED (За замовчуванням - точна відповідність фото)
-        // -------------------------------------------------------------
-        else {
-          iconSize = [36, 48];
-          iconAnchor = [18, 16];
-          html = `
-            <div class="relative group cursor-pointer flex flex-col items-center select-none" style="transform: translate3d(0,0,0);">
-              <!-- Круглий білий диск зі стрілочкою в кольорі сайту (синій/блакитний) -->
-              <div class="relative w-7 h-7 rounded-full bg-white/95 border-2 ${circleBorder} flex items-center justify-center shadow-md ${statusRing} transition-transform hover:scale-125">
-                ${navigationArrowSvg}
-              </div>
-
-              <!-- 4-значний бортовий номер позаду стрілочки вагона -->
-              <div class="mt-0.5 px-1.5 py-0.2 bg-slate-900/90 text-white text-[9px] font-mono font-black rounded-md shadow border border-slate-700 leading-tight whitespace-nowrap">
-                ${full4DigitNumber}
-              </div>
-            </div>
-          `;
-        }
-
-        const icon = L.divIcon({
-          html: html,
-          className: 'custom-transit-marker',
-          iconSize: iconSize,
-          iconAnchor: iconAnchor,
-          popupAnchor: [0, -iconAnchor[1] - 4],
-        });
-
-        // Інформаційний спливаючий Popup картки вагона
-        const popupContent = `
-          <div class="p-3 font-sans min-w-[230px]">
-            <div class="flex items-center justify-between border-b pb-2 mb-2">
-              <div class="flex items-center space-x-2">
-                <span class="p-1.5 rounded-lg ${typeBg} text-white">${typeIconSvg}</span>
-                <div>
-                  <span class="block font-black text-slate-900 text-sm">Борт №${full4DigitNumber}</span>
-                  <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">${typeLabel} КП «ОМЕТ»</span>
-                </div>
-              </div>
-              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${statusBadgeBg}">
-                ${statusText}
+            ` : ''}
+            <div class="w-6 h-6 rounded-full border-2 border-white shadow-md ${colorClass} ring-2 flex items-center justify-center z-10 overflow-hidden" style="width: 24px; height: 24px; min-width: 24px; min-height: 24px;">
+              <span class="font-mono font-black text-[11px] text-white tracking-tighter leading-none select-none drop-shadow-xs text-center truncate max-w-[20px]">
+                ${cleanRouteNum}
               </span>
             </div>
+          </div>
+        `;
 
-            <div class="space-y-1.5 text-xs text-slate-600">
-              <div class="flex justify-between">
-                <span>Маршрут:</span>
-                <strong class="text-slate-900">${vehicle.route_id ? `№${vehicle.route_id}` : 'Не призначено'}</strong>
+        const customIcon = L.divIcon({
+          html,
+          className: 'custom-vehicle-marker',
+          iconSize: [26, 26],
+          iconAnchor: [13, 13],
+          popupAnchor: [0, -16]
+        });
+
+        // Інформація для попапа
+        const motionStatusText = isStanding 
+          ? `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[11px]">⏸️ Стоянка на лінії (0 км/год)</span>`
+          : `<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[11px]">🟢 У русі (${speedKmh} км/год)</span>`;
+
+        const gpsSignalBadge = isGpsLost
+          ? `<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold text-[10px]">⚠️ Втрата сигналу (${Math.floor(ageSec / 60)} хв)</span>`
+          : `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold text-[10px]">Оновлено ${ageSec}с тому</span>`;
+
+        const popupContent = `
+          <div class="font-sans text-xs p-1.5 space-y-2 min-w-[210px]">
+            <div class="flex items-center justify-between border-b border-slate-200 pb-1.5">
+              <div>
+                <span class="font-black text-slate-900 text-sm font-mono">Борт №${vehicle.vehicle_id}</span>
+                <span class="text-[10px] text-slate-400 block">${vehicle.vehicle_type === 'TROLLEYBUS' ? 'Тролейбус' : 'Трамвай'}</span>
               </div>
-              <div class="flex justify-between">
-                <span>Швидкість руху:</span>
-                <strong class="${speed > 0 ? 'text-emerald-600' : 'text-slate-500'} font-mono">${speed} км/год</strong>
+              <span class="px-2.5 py-1 rounded-full bg-blue-600 text-white font-black text-xs shadow-xs">
+                Маршрут №${cleanRouteNum}
+              </span>
+            </div>
+            
+            <div class="space-y-1.5 text-slate-700">
+              <div class="flex justify-between items-center">
+                <span class="text-slate-500 font-medium">Стан:</span>
+                ${motionStatusText}
               </div>
-              <div class="flex justify-between">
-                <span>Курс / Напрямок:</span>
-                <span class="font-mono text-slate-700">${heading}°</span>
+              <div class="flex justify-between items-center">
+                <span class="text-slate-500 font-medium">GPS зв'язок:</span>
+                ${gpsSignalBadge}
               </div>
-              <div class="flex justify-between">
-                <span>Джерело GPS:</span>
-                <span class="font-semibold text-indigo-600">${vehicle.source || 'Wialon Live'}</span>
+              <div class="flex justify-between items-center">
+                <span class="text-slate-500 font-medium">Джерело:</span>
+                <span class="font-mono text-[10px] font-bold text-blue-600">${vehicle.source || 'EasyWay'}</span>
               </div>
-              <div class="flex justify-between">
-                <span>Координати:</span>
-                <span class="font-mono text-[10px] text-slate-500">${vehicle.lat.toFixed(5)}, ${vehicle.lng.toFixed(5)}</span>
+              <div class="flex justify-between items-center">
+                <span class="text-slate-500 font-medium">Зупинка / лінія:</span>
+                <span class="font-semibold text-slate-800 truncate max-w-[120px]">${vehicle.current_station || 'На лінії'}</span>
+              </div>
+              <div class="flex justify-between items-center pt-1.5 border-t border-slate-100 font-bold">
+                <span class="text-slate-500 font-medium">Графік:</span>
+                <span class="${textColorClass}">${devText}</span>
               </div>
             </div>
           </div>
         `;
 
-        if (markersRef.current[vehicle.vehicle_id]) {
-          const marker = markersRef.current[vehicle.vehicle_id];
-          marker.setLatLng(latLng);
-          marker.setIcon(icon);
-          marker.setPopupContent(popupContent);
+        if (animatedVehiclesRef.current[vehicle.vehicle_id]) {
+          const item = animatedVehiclesRef.current[vehicle.vehicle_id];
+          
+          // Перевірка відстані для захисту від телепортації (Anti-Jitter)
+          const latDiff = Math.abs(item.currentLat - vehicle.lat);
+          const lngDiff = Math.abs(item.currentLng - vehicle.lng);
+          const isTeleport = latDiff > 0.005 || lngDiff > 0.007; // > 500-600 м
+          const isPosChanged = Math.abs(item.targetLat - vehicle.lat) > 0.00001 || Math.abs(item.targetLng - vehicle.lng) > 0.00001;
+
+          if (isTeleport) {
+            item.startLat = vehicle.lat;
+            item.startLng = vehicle.lng;
+            item.targetLat = vehicle.lat;
+            item.targetLng = vehicle.lng;
+            item.currentLat = vehicle.lat;
+            item.currentLng = vehicle.lng;
+            item.marker.setLatLng([vehicle.lat, vehicle.lng]);
+            item.lastGpsTime = perfNow;
+          } else if (isPosChanged) {
+            // Нова GPS-точка: розраховуємо точний азимут руху вздовж колій
+            const computedBearing = (speedKmh > 1 && (latDiff > 0.00005 || lngDiff > 0.00005))
+              ? calculateBearing(item.currentLat, item.currentLng, vehicle.lat, vehicle.lng)
+              : (headingDeg || item.currentHeading);
+
+            // Плавний плавний рух до нової точки
+            item.startLat = item.currentLat;
+            item.startLng = item.currentLng;
+            item.targetLat = vehicle.lat;
+            item.targetLng = vehicle.lng;
+            item.startHeading = item.currentHeading;
+            item.targetHeading = computedBearing;
+            item.startTime = perfNow;
+            item.duration = 4500; // 4.5 секунди для ідеальної безшовності між пінгами
+            item.lastGpsTime = perfNow;
+          }
+
+          item.speedKmh = speedKmh;
+          item.isGpsLost = isGpsLost;
+          item.isStanding = isStanding;
+          item.cleanRouteNum = cleanRouteNum;
+          item.colorClass = colorClass;
+          item.textColorClass = textColorClass;
+          item.devText = devText;
+          item.marker.setIcon(customIcon);
+          item.marker.setPopupContent(popupContent);
         } else {
-          const marker = L.marker(latLng, { icon }).addTo(map);
-          marker.bindPopup(popupContent, { maxWidth: 300 });
-          markersRef.current[vehicle.vehicle_id] = marker;
+          // Створення нового маркера
+          const marker = L.marker([vehicle.lat, vehicle.lng], { icon: customIcon }).addTo(map);
+          marker.bindPopup(popupContent);
+
+          animatedVehiclesRef.current[vehicle.vehicle_id] = {
+            marker,
+            startLat: vehicle.lat,
+            startLng: vehicle.lng,
+            targetLat: vehicle.lat,
+            targetLng: vehicle.lng,
+            currentLat: vehicle.lat,
+            currentLng: vehicle.lng,
+            startHeading: headingDeg,
+            targetHeading: headingDeg,
+            currentHeading: headingDeg,
+            startTime: perfNow,
+            duration: 4500,
+            lastGpsTime: perfNow,
+            speedKmh,
+            isGpsLost,
+            isStanding,
+            cleanRouteNum,
+            colorClass,
+            textColorClass,
+            devText
+          };
         }
       });
     };
 
-    // Підписуємося на оновлення координат зі стору
-    const unsubscribe = useTelemetryStore.subscribe(updateMarkers);
-    
-    // Також оновлюємо маркери при зміні зуму карти
-    map.on('zoomend', updateMarkers);
-    
-    // Первинний рендер
     updateMarkers();
+
+    // ⚡ Реактивна підписка на будь-які зміни в сторі (WS або HTTP) з 0ms затримкою
+    const unsubscribe = useTelemetryStore.subscribe(() => {
+      updateMarkers();
+    });
+
+    // Фолбек-таймер для оновлення віку сигналу / годинника
+    const interval = setInterval(updateMarkers, 3000);
 
     return () => {
       unsubscribe();
-      map.off('zoomend', updateMarkers);
-      Object.values(markersRef.current).forEach((marker) => {
-        if (marker) map.removeLayer(marker as L.Layer);
+      clearInterval(interval);
+      // Очищення маркерів при розмонтуванні
+      Object.values(animatedVehiclesRef.current).forEach((item) => {
+        map.removeLayer(item.marker);
       });
-      markersRef.current = {};
+      animatedVehiclesRef.current = {};
     };
-  }, [activeRouteId, hideServiceVehicles, hideDepotVehicles, map]);
+  }, [map, activeRouteId, hideServiceVehicles, hideDepotVehicles, onlyCriticalDelays]);
 
   return null;
 };

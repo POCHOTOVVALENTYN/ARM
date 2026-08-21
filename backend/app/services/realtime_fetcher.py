@@ -52,4 +52,4 @@ async def fetch_and_process_realtime_data():
         except Exception as e:
             logger.error(f"❌ Помилка в циклі телеметрії: {e}", exc_info=True)
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)

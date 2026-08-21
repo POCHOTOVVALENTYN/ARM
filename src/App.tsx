@@ -55,186 +55,136 @@ export default function App() {
   const { routes } = useRouteStore();
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
 
+  const scheduleTheme = useScheduleStore((state) => state.theme);
   const settingsTheme = useSettingsStore((state) => state.theme);
 
   // Глобально застосовуємо клас теми до тегу <html> та <body>
   useEffect(() => {
+    const isDark = scheduleTheme === 'night-dispatch' || scheduleTheme === 'dark';
+
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
-    
-    if (settingsTheme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      root.classList.add(systemTheme);
-      document.body.setAttribute('data-theme', systemTheme);
-      root.setAttribute('data-theme', systemTheme);
+    document.body.classList.remove('light', 'dark');
+
+    if (isDark) {
+      root.classList.add('dark');
+      document.body.classList.add('dark');
+      document.body.setAttribute('data-theme', 'night-dispatch');
+      root.setAttribute('data-theme', 'night-dispatch');
     } else {
-      root.classList.add(settingsTheme);
-      document.body.setAttribute('data-theme', settingsTheme);
-      root.setAttribute('data-theme', settingsTheme);
+      root.classList.remove('dark');
+      document.body.classList.remove('dark');
+      document.body.setAttribute('data-theme', 'omet-clean');
+      root.setAttribute('data-theme', 'omet-clean');
     }
-  }, [settingsTheme]);
+  }, [scheduleTheme, settingsTheme]);
 
   // Session verification on mount
   useEffect(() => {
     const verifyAuth = async () => {
       if (token) {
         try {
-          const userData = await authApi.getMe();
-          setUser(userData);
-        } catch (err) {
-          console.error("Session expired or invalid:", err);
+          const me = await authApi.getMe();
+          setUser(me);
+        } catch (error) {
+          console.error('Сесія застаріла, авторизуйтесь знову:', error);
           logout();
-          setPath('/login');
-        }
-      } else {
-        if (currentPath !== '/login' && !currentPath.startsWith('/driver/')) {
-          setPath('/login');
         }
       }
       setIsVerifyingSession(false);
     };
 
     verifyAuth();
-  }, [token, setUser, logout, setPath]);
+  }, [token, setUser, logout]);
 
-  // Fetch initial configuration on mount
+  // Fetch static GTFS data & system configs once session is valid
   useEffect(() => {
-    if (token) {
-      fetchConfigs();
+    if (isAuthenticated) {
       fetchInitialData();
+      fetchConfigs();
     }
-  }, [token, fetchConfigs, fetchInitialData]);
-
-  const handleApplySlack = (slackMin: number, tripId: string) => {
-    applySlackToNode(slackMin, tripId);
-  };
-
-  const handleTruncateTrip = () => {};
-
-  const handleReserveVehicle = () => {};
+  }, [isAuthenticated, fetchInitialData, fetchConfigs]);
 
   if (isVerifyingSession) {
-    return (
-      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-600 font-medium">Перевірка авторизації...</p>
-        </div>
-      </div>
-    );
+    return <GlobalLoader message="Перевірка сесії авторизації КП «ОМЕТ»..." />;
   }
 
-  if (!isAuthenticated && currentPath !== '/login' && !currentPath.startsWith('/driver/')) {
-    return <AuthLoginView />;
-  }
-
-  if (!isInitialized || !isConfigLoaded) {
+  if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-600 font-medium">Завантаження даних АРМ...</p>
-        </div>
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 font-sans flex items-center justify-center p-4">
+        <AuthLoginView />
+        <Toaster position="top-right" richColors />
       </div>
     );
   }
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-[var(--app-bg,#EEF2F6)] text-[var(--text-main,#1E293B)] flex flex-col font-sans antialiased selection:bg-indigo-200 selection:text-indigo-900 transition-colors duration-200">
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex flex-col antialiased">
         <GlobalLoader />
-        <Toaster position="top-right" richColors />
         
-        {/* Primary Navigation & Header */}
+        {/* Header Navigation */}
         <Header onOpenReport={() => setIsReportOpen(true)} />
 
-      {/* Main Content Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <ErrorBoundary>
-          {/* / or /analytics/dashboard */}
-          {(currentPath === '/' || currentPath === '/analytics/dashboard') && (
-            <ExecutiveDashboardView />
+        {/* Main Content View Routing */}
+        <main className={currentPath === '/dispatch/map' ? "flex-1 w-full h-[calc(100vh-125px)] flex flex-col overflow-hidden" : "flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6"}>
+          {currentPath === '/' && <ExecutiveDashboardView />}
+          {currentPath === '/analytics' && <AnalyticsReportView />}
+          {currentPath === '/dispatch/map' && <LiveMapView />}
+          {currentPath === '/dispatch/marey' && <MareyDiagramTab />}
+          {currentPath === '/dispatch/matrix' && <DispatcherLiveView />}
+          {currentPath === '/dispatch/gantt' && <OperationalGanttView />}
+          {currentPath === '/dispatch/generator' && <OperationalScheduleGenerator />}
+          {currentPath === '/planning/workspace' && <PlanningWorkspaceView />}
+          {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
+          
+          {/* Superuser Admin Section */}
+          {currentPath === '/settings/stops' && (
+            <SuperuserRoute>
+              <NetworkSettingsTab initialSubTab="stops" />
+            </SuperuserRoute>
           )}
-
-          {/* /analytics or /analytics/reports */}
-          {(currentPath === '/analytics' || currentPath === '/analytics/reports') && (
-            <AnalyticsReportView />
+          {currentPath === '/settings/routes' && (
+            <SuperuserRoute>
+              <NetworkSettingsTab initialSubTab="routes" />
+            </SuperuserRoute>
           )}
-
-          {/* /admin - Admin Panel */}
+          {currentPath === '/settings/intersections' && (
+            <SuperuserRoute>
+              <NetworkSettingsTab initialSubTab="intersections" />
+            </SuperuserRoute>
+          )}
+          {currentPath === '/settings/depots' && (
+            <SuperuserRoute>
+              <NetworkSettingsTab initialSubTab="depots" />
+            </SuperuserRoute>
+          )}
+          {currentPath === '/settings/breaks' && (
+            <SuperuserRoute>
+              <NetworkSettingsTab initialSubTab="breaks" />
+            </SuperuserRoute>
+          )}
           {currentPath === '/admin' && (
             <SuperuserRoute>
-              <AdminView initialTab="users" />
+              <AdminView />
             </SuperuserRoute>
           )}
 
-          {/* /export/gtfs */}
-          {currentPath === '/export/gtfs' && (
-            <SuperuserRoute>
-              <AdminView initialTab="gtfs" />
-            </SuperuserRoute>
-          )}
-
-          {/* /login */}
-          {currentPath === '/login' && <AuthLoginView />}
-
-          {/* 2. Dispatcher Views */}
-          {currentPath === '/dispatch/gantt' && <OperationalGanttView />}
-
-          {(currentPath === '/dispatch/map' || currentPath === '/dispatch/live') && (
-            <DispatcherLiveView />
-          )}
-
-          {(currentPath === '/dispatch/slack' ||
-            currentPath === '/dispatch/marey' ||
-            currentPath === '/dispatch/hot-reserve' ||
-            currentPath === '/dispatch/detours') && (
-            <DispatcherTab
-              routes={routes}
-              blocks={draftBlocks}
-              duties={draftDuties}
-              conflicts={conflicts}
-              onApplySlack={handleApplySlack}
-              onTruncateTrip={handleTruncateTrip}
-              onReserveVehicle={handleReserveVehicle}
-            />
-          )}
-
-          {/* Operational Schedule Generator */}
-          {currentPath === '/dispatch/generator' && <OperationalScheduleGenerator />}
-
-          {/* 3. Unified Planning Workspace */}
-          {(currentPath === '/planning/workspace' ||
-            currentPath === '/planning/duties' ||
-            currentPath === '/planning/trips' ||
-            currentPath === '/planning/validate' ||
-            currentPath === '/planning/simulation' ||
-            currentPath === '/dispatch/simulation') && (
-            <PlanningWorkspaceView />
-          )}
-
-          {/* Planning Archive */}
-          {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
-
-          {/* 4. Network Directory / Settings Views */}
-          {(currentPath.startsWith('/settings/') || currentPath === '/settings') && (
-            <NetworkSettingsTab />
-          )}
-
-          {/* 5. Crew & Driver Views */}
+          {/* Personnel & Drivers Section */}
           {currentPath === '/crew/assignment' && <CrewAssignmentView />}
           {currentPath === '/crew/schedule-book' && <DriverScheduleBookView />}
           {currentPath === '/driver' && <DriverTerminalView />}
-          {currentPath === '/crew/roster' && <CrewRosterTab duties={draftDuties} />}
-          {currentPath === '/crew/waybill' && <SmartWaybillView />}
-        </ErrorBoundary>
-      </main>
+          {currentPath === '/login' && <AuthLoginView />}
+        </main>
 
-      {/* Global Analytics Report Modal */}
-      {isReportOpen && (
-        <AnalyticalReportModal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)} />
-      )}
-    </div>
+        {/* Analytics OTP Report Modal */}
+        <AnalyticalReportModal
+          isOpen={isReportOpen}
+          onClose={() => setIsReportOpen(false)}
+        />
+
+        <Toaster position="top-right" richColors />
+      </div>
     </ErrorBoundary>
   );
 }

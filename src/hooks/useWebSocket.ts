@@ -6,6 +6,7 @@ import { useIncidentStore } from '../store/useIncidentStore'
 import { useDriverStore } from '../store/useDriverStore'
 import { useTelemetryStore, VehicleTelemetry } from '../store/useTelemetryStore'
 import { useAuthStore } from '../store/useAuthStore'
+import { useAlertStore } from '../store/useAlertStore'
 import { toast } from 'sonner'
 
 export const useWebSocket = (customBaseUrl?: string) => {
@@ -113,6 +114,12 @@ export const useWebSocket = (customBaseUrl?: string) => {
 
               case 'STATE_UPDATE':
                 if (setLiveSchedule) setLiveSchedule(payload)
+                break
+
+              case 'AIR_RAID_UPDATE':
+                if (payload) {
+                  useAlertStore.getState().setAirRaidState(payload)
+                }
                 break
 
               case 'INCIDENT_UPDATE':

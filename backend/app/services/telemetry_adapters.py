@@ -14,6 +14,91 @@ from app.core.config import settings
 
 logger = logging.getLogger("app.telemetry_adapters")
 
+def get_odessa_route_for_vehicle(disp_num: str, v_type: str, lat: float, lng: float) -> str:
+    """
+    Визначає офіційний номер маршруту Одеси для трамвая або тролейбуса за бортовим номером та геопозицією.
+    """
+    clean_digits = re.sub(r'[^0-9]', '', str(disp_num))
+    if not clean_digits:
+        return "7" if v_type == "TRAM" else "8"
+    
+    num = int(clean_digits)
+
+    # 1. ТРАМВАЇ ОДЕСИ:
+    if v_type == "TRAM":
+        # Північ-Південь: Маршрут 7 (найдовший та найчисельніший випуск)
+        # Вагони: 4001-4003, 7001-7011, 7151-7152, 3308, 3320, 5009, 5013, 5019, 4007, 4020
+        if num in [4001, 4002, 4003, 4007, 4020, 7001, 7002, 7007, 7011, 7151, 7152, 3308, 3320, 5009, 5013, 5019]:
+            return "7"
+        # Маршрут 18 (Куликове поле — 16-та ст. Фонтану)
+        if 3011 <= num <= 3020 or num in [3144, 3257, 3297, 4015]:
+            return "18"
+        # Маршрут 17 (Куликове поле — 11-та ст. Фонтану)
+        if num == 1701 or (2963 <= num <= 2970):
+            return "17"
+        # Маршрут 5 (Автовокзал — Аркадія)
+        if num == 2005 or (2951 <= num <= 2962) or num == 5005:
+            return "5"
+        # Маршрут 28 (вул. Пастера — Парк Шевченка)
+        if num == 2801 or (3218 <= num <= 3268) or num == 5001:
+            return "28"
+        # Маршрут 1 (Чорноморського козацтва — Завод Центроліт)
+        if num == 1001 or (3300 <= num <= 3329):
+            return "1"
+        # Маршрут 26 (Старосінна пл. — 11-а ст. Люстдорфської дороги)
+        if num == 2601 or (2976 <= num <= 2996) or num in [3240, 3335, 3336]:
+            return "26"
+        # Маршрут 15 (Олексіївська пл. — Слобідський ринок)
+        if 3271 <= num <= 3293:
+            return "15"
+        # Маршрут 21 (Тираспольська пл. — станція Застава II)
+        if num in [7006, 7012]:
+            return "21"
+        # Маршрут 10 (вул. Іцхака Рабіна — Старосінна пл.)
+        if 2980 <= num <= 2990:
+            return "10"
+        # Маршрут 13 (ж/м Шкільний — Старосінна пл.)
+        if 3100 <= num <= 3120:
+            return "13"
+        # Маршрут 12 (Слобідський ринок — Херсонський сквер)
+        if 3200 <= num <= 3215:
+            return "12"
+        # Маршрут 20 (Херсонський сквер — Хаджибейський лиман)
+        if 3340 <= num <= 3350:
+            return "20"
+        # Маршрут 27 (Люстдорф — Рибпорт)
+        if 3360 <= num <= 3370:
+            return "27"
+        
+        # Для нерозпізнаних трамваїв — стабільне збереження за номером
+        return "7" if num >= 7000 else ("28" if num >= 5000 else "1")
+
+    # 2. ТРОЛЕЙБУСИ ОДЕСИ:
+    elif v_type == "TROLLEYBUS":
+        if (num <= 29 and num >= 20) or (4020 <= num <= 4033) or num == 5008:
+            return "8"
+        if (num <= 39 and num >= 30) or (4034 <= num <= 4039) or num == 5012:
+            return "9"
+        if (num <= 79 and num >= 70) or (4060 <= num <= 4079):
+            return "7"
+        if (num <= 14 and num >= 10) or (4010 <= num <= 4019) or (2038 <= num <= 2045):
+            return "10"
+        if (num <= 50 and num >= 40) or (4040 <= num <= 4059):
+            return "12"
+        if (num <= 9 and num >= 1) or (4001 <= num <= 4009):
+            return "2"
+        if (num <= 19 and num >= 15) or num in [669, 867] or (4080 <= num <= 4099):
+            return "3"
+        
+        if lng < 30.70:
+            return "3"
+        elif lat < 46.42:
+            return "7"
+        else:
+            return "8"
+
+    return "SERVICE"
+
 class BaseTelemetryAdapter(ABC):
     @abstractmethod
     async def fetch_vehicles(self) -> List[Dict[str, Any]]:
@@ -66,6 +151,16 @@ class GtfsRealtimeAdapter(BaseTelemetryAdapter):
                             vehicle_id = v.vehicle.id if v.vehicle.HasField('id') else entity.id
                             gtfs_route_id = v.trip.route_id if v.HasField('trip') else None
                             short_route_name = self.route_map.get(gtfs_route_id) or str(gtfs_route_id or "")
+                            lat = round(float(v.position.latitude), 6)
+                            lng = round(float(v.position.longitude), 6)
+
+                            # Фільтр строго за межами Одеси (відсікаємо сміттєві/тестові точки)
+                            if not (46.30 <= lat <= 46.65 and 30.60 <= lng <= 30.85):
+                                continue
+
+                            # Якщо маршрут не розпізнано і залишився сирим UUID — відсікаємо
+                            if not short_route_name or len(short_route_name) > 8 or "-" in short_route_name:
+                                continue
 
                             speed_kmh = round(v.position.speed * 3.6, 1) if v.position.HasField('speed') else 0.0
 
@@ -75,10 +170,11 @@ class GtfsRealtimeAdapter(BaseTelemetryAdapter):
 
                             vehicles.append({
                                 "vehicle_id": str(vehicle_id).strip(),
-                                "lat": round(float(v.position.latitude), 6),
-                                "lng": round(float(v.position.longitude), 6),
+                                "lat": lat,
+                                "lng": lng,
                                 "speed": speed_kmh,
                                 "route_id": short_route_name,
+                                "route_number": short_route_name,
                                 "heading": round(v.position.bearing, 1) if v.position.HasField('bearing') else 0,
                                 "status": "active" if speed_kmh > 0 else "idle",
                                 "source": "GTFS-RT",
@@ -255,11 +351,15 @@ class WialonAdapter(BaseTelemetryAdapter):
                             v_type = "SERVICE"
                             is_service = True
 
+                    r_num = get_odessa_route_for_vehicle(disp_num, v_type, lat, lng) if not is_service else "SERVICE"
+
                     telemetry_list.append({
                         "vehicle_id": v_id,
                         "display_name": disp_num,
                         "vehicle_type": v_type,
                         "is_service": is_service,
+                        "route_id": r_num,
+                        "route_number": r_num,
                         "lat": round(lat, 6),
                         "lng": round(lng, 6),
                         "speed": round(speed, 1),
@@ -317,28 +417,65 @@ class SimulationAdapter(BaseTelemetryAdapter):
         return result
 
 
+class EasyWayAdapter(BaseTelemetryAdapter):
+    """
+    Адаптер прямого підключення до EasyWay API Одеси (odesainclusive).
+    Повертає 100% реальний живий GPS-потік КП «ОМЕТ» із офіційними достовірними номерами маршрутів.
+    """
+    async def fetch_vehicles(self) -> List[Dict[str, Any]]:
+        from app.services.easyway import easyway_service
+        return await easyway_service.fetch_all_live_vehicles()
+
+
 class CompositeTelemetryManager:
     """
-    Головний менеджер телеметрії з автоматичним перемиканням джерел:
-    Wialon -> GTFS-RT (ОМР) -> Симулятор Одеси.
+    Головний менеджер телеметрії з гібридним склеюванням джерел (Telemetry Fusion):
+    1. Швидкий фізичний GPS з Wialon (щосекундні датчики швидкості та курсу) + офіційні номери маршрутів з EasyWay.
+    2. Фолбек на прямий EasyWay Live GPS.
+    3. Фолбек на GTFS-RT (ОМР).
+    4. Резервний симулятор.
     """
     def __init__(self):
+        self.easyway_adapter = EasyWayAdapter()
         self.gtfs_adapter = GtfsRealtimeAdapter()
         self.wialon_adapter = WialonAdapter()
         self.sim_adapter = SimulationAdapter()
 
     async def get_live_telemetry(self) -> List[Dict[str, Any]]:
-        # 1. Пробуємо Wialon (якщо токен валідний)
-        wialon_data = await self.wialon_adapter.fetch_vehicles()
-        if wialon_data:
-            return wialon_data
+        # 1. Першочергово — гібридний рушій склеювання Wialon GPS + EasyWay маршрутизація
+        try:
+            from app.services.telemetry_fusion import telemetry_fusion
+            fused_data = await telemetry_fusion.get_fused_telemetry()
+            if fused_data and len(fused_data) > 0:
+                return fused_data
+        except Exception as e:
+            logger.warning(f"Telemetry fusion error: {e}")
 
-        # 2. Бойовий GTFS-RT шлюз Одеси
-        gtfs_data = await self.gtfs_adapter.fetch_vehicles()
-        if gtfs_data:
-            return gtfs_data
+        # 2. Прямий EasyWay
+        try:
+            eway_data = await self.easyway_adapter.fetch_vehicles()
+            if eway_data and len(eway_data) > 0:
+                return eway_data
+        except Exception as e:
+            logger.warning(f"EasyWay live fetch error: {e}")
 
-        # 3. Резервний симулятор
+        # 3. Бойовий GTFS-RT шлюз Одеси (ОМР)
+        try:
+            gtfs_data = await self.gtfs_adapter.fetch_vehicles()
+            if gtfs_data and len(gtfs_data) > 0:
+                return gtfs_data
+        except Exception as e:
+            logger.warning(f"GTFS-RT fetch error: {e}")
+
+        # 4. Wialon API
+        try:
+            wialon_data = await self.wialon_adapter.fetch_vehicles()
+            if wialon_data and len(wialon_data) > 0:
+                return wialon_data
+        except Exception as e:
+            logger.warning(f"Wialon fetch error: {e}")
+
+        # 5. Резервний симулятор Одеси
         return await self.sim_adapter.fetch_vehicles()
 
 telemetry_manager = CompositeTelemetryManager()

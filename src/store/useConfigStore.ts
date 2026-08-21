@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import apiClient from '../utils/apiClient';
 import { useUIStore } from './useUIStore';
-import { toast } from 'sonner';
 
 export interface EmergencyTemplate {
   id: string;
@@ -88,31 +87,27 @@ export const useConfigStore = create<ConfigState>()(
       setLoading(true);
       
       try {
-        const [
-          templatesRes,
-          hubsRes,
-          depotsRes,
-          configsRes,
-          breaksRes
-        ] = await Promise.all([
+        const results = await Promise.allSettled([
           apiClient.get('/v1/emergencies/templates'),
           apiClient.get('/v1/settings/hubs'),
           apiClient.get('/v1/settings/depots'),
-          apiClient.get('/v1/settings/route-depot-configs'),
+          apiClient.get('/v1/settings/route-depots'),
           apiClient.get('/v1/settings/break-locations')
         ]);
+
+        const getVal = (res: PromiseSettledResult<any>) =>
+          res.status === 'fulfilled' && Array.isArray(res.value.data) ? res.value.data : [];
         
         set((state) => {
-          state.emergencyTemplates = templatesRes.data;
-          state.hubs = hubsRes.data;
-          state.depots = depotsRes.data;
-          state.routeDepotConfigs = configsRes.data;
-          state.breakLocations = breaksRes.data;
+          state.emergencyTemplates = getVal(results[0]);
+          state.hubs = getVal(results[1]);
+          state.depots = getVal(results[2]);
+          state.routeDepotConfigs = getVal(results[3]);
+          state.breakLocations = getVal(results[4]);
           state.isLoaded = true;
         });
       } catch (error) {
         console.error('Failed to fetch configs', error);
-        toast.error('Помилка завантаження конфігурацій');
         set((state) => { state.isLoaded = true; });
       } finally {
         setLoading(false);
@@ -121,59 +116,90 @@ export const useConfigStore = create<ConfigState>()(
     
     addHub: async (hub) => {
       try {
-        await apiClient.post('/v1/settings/hubs', hub);
-        set((state) => { state.hubs.push(hub); });
-        toast.success('Хаб додано');
-      } catch (error) { toast.error('Помилка додавання хабу'); }
+        const res = await apiClient.post('/v1/settings/hubs', hub);
+        set((state) => {
+          state.hubs.push(res.data);
+        });
+      } catch (error) {
+        console.error('Failed to add hub', error);
+      }
     },
+    
     deleteHub: async (id) => {
       try {
         await apiClient.delete(`/v1/settings/hubs/${id}`);
-        set((state) => { state.hubs = state.hubs.filter(h => h.id !== id); });
-        toast.success('Хаб видалено');
-      } catch (error) { toast.error('Помилка видалення хабу'); }
+        set((state) => {
+          state.hubs = state.hubs.filter((h) => h.id !== id);
+        });
+      } catch (error) {
+        console.error('Failed to delete hub', error);
+      }
     },
+    
     addDepot: async (depot) => {
       try {
-        await apiClient.post('/v1/settings/depots', depot);
-        set((state) => { state.depots.push(depot); });
-        toast.success('Депо додано');
-      } catch (error) { toast.error('Помилка додавання депо'); }
+        const res = await apiClient.post('/v1/settings/depots', depot);
+        set((state) => {
+          state.depots.push(res.data);
+        });
+      } catch (error) {
+        console.error('Failed to add depot', error);
+      }
     },
+    
     deleteDepot: async (id) => {
       try {
         await apiClient.delete(`/v1/settings/depots/${id}`);
-        set((state) => { state.depots = state.depots.filter(d => d.id !== id); });
-        toast.success('Депо видалено');
-      } catch (error) { toast.error('Помилка видалення депо'); }
+        set((state) => {
+          state.depots = state.depots.filter((d) => d.id !== id);
+        });
+      } catch (error) {
+        console.error('Failed to delete depot', error);
+      }
     },
+
     addBreakLocation: async (loc) => {
       try {
-        await apiClient.post('/v1/settings/break-locations', loc);
-        set((state) => { state.breakLocations.push(loc); });
-        toast.success('Місце відпочинку додано');
-      } catch (error) { toast.error('Помилка додавання місця відпочинку'); }
+        const res = await apiClient.post('/v1/settings/break-locations', loc);
+        set((state) => {
+          state.breakLocations.push(res.data);
+        });
+      } catch (error) {
+        console.error('Failed to add break location', error);
+      }
     },
+    
     deleteBreakLocation: async (id) => {
       try {
         await apiClient.delete(`/v1/settings/break-locations/${id}`);
-        set((state) => { state.breakLocations = state.breakLocations.filter(b => b.id !== id); });
-        toast.success('Місце відпочинку видалено');
-      } catch (error) { toast.error('Помилка видалення місця відпочинку'); }
+        set((state) => {
+          state.breakLocations = state.breakLocations.filter((b) => b.id !== id);
+        });
+      } catch (error) {
+        console.error('Failed to delete break location', error);
+      }
     },
+
     addEmergencyTemplate: async (template) => {
       try {
-        await apiClient.post('/v1/emergencies/templates', template);
-        set((state) => { state.emergencyTemplates.push(template); });
-        toast.success('Шаблон додано');
-      } catch (error) { toast.error('Помилка додавання шаблону'); }
+        const res = await apiClient.post('/v1/emergencies/templates', template);
+        set((state) => {
+          state.emergencyTemplates.push(res.data);
+        });
+      } catch (error) {
+        console.error('Failed to add emergency template', error);
+      }
     },
+    
     deleteEmergencyTemplate: async (id) => {
       try {
         await apiClient.delete(`/v1/emergencies/templates/${id}`);
-        set((state) => { state.emergencyTemplates = state.emergencyTemplates.filter(t => t.id !== id); });
-        toast.success('Шаблон видалено');
-      } catch (error) { toast.error('Помилка видалення шаблону'); }
+        set((state) => {
+          state.emergencyTemplates = state.emergencyTemplates.filter((t) => t.id !== id);
+        });
+      } catch (error) {
+        console.error('Failed to delete emergency template', error);
+      }
     }
   }))
 );

@@ -39,14 +39,17 @@ import {
   Trash2
 } from 'lucide-react';
 
-export const NetworkSettingsTab: React.FC = () => {
+export const NetworkSettingsTab: React.FC<{ initialSubTab?: string }> = ({ initialSubTab }) => {
   const stations = useStationStore(state => state.stations);
   const { depots: mockDepots, breakLocations: mockBreakLocations } = useConfigStore();
   const { currentPath } = useScheduleStore();
-  let activeSubTab = 'routes';
-  if (currentPath.includes('/intersections')) activeSubTab = 'hubs';
-  else if (currentPath.includes('/depots')) activeSubTab = 'depots';
-  else if (currentPath.includes('/breaks')) activeSubTab = 'breaks';
+  let activeSubTab = initialSubTab || 'routes';
+  if (!initialSubTab) {
+    if (currentPath.includes('/intersections')) activeSubTab = 'hubs';
+    else if (currentPath.includes('/depots')) activeSubTab = 'depots';
+    else if (currentPath.includes('/breaks')) activeSubTab = 'breaks';
+    else if (currentPath.includes('/stops')) activeSubTab = 'stops';
+  }
 
   // Route Store State & Actions
   const {
