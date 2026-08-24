@@ -17,7 +17,10 @@ export const api = axios.create({
 // 1. Інтерцептор ЗАПИТІВ (нормалізація префіксів /api, додавання Bearer токена)
 api.interceptors.request.use(
   (config) => {
-    useUIStore.getState().setLoading(true);
+    // Вмикаємо глобальний лоадер лише якщо це явно вказано (showGlobalLoader: true)
+    if ((config as any).showGlobalLoader) {
+      useUIStore.getState().setLoading(true);
+    }
 
     // Нормалізація подвійного префікса /api (якщо передано /api/v1/..., при базовому baseURL /api)
     if (config.url && config.url.startsWith('/api/')) {
@@ -40,7 +43,9 @@ api.interceptors.request.use(
     return config;
   },
   (error) => {
-    useUIStore.getState().setLoading(false);
+    if ((error.config as any)?.showGlobalLoader) {
+      useUIStore.getState().setLoading(false);
+    }
     logger.api.error('Помилка формування вихідного запиту', error);
     return Promise.reject(error);
   }
@@ -49,7 +54,9 @@ api.interceptors.request.use(
 // 2. Інтерцептор ВІДПОВІДЕЙ (профілювання часу, логування 4xx/5xx та сповіщення)
 api.interceptors.response.use(
   (response) => {
-    useUIStore.getState().setLoading(false);
+    if ((response.config as any)?.showGlobalLoader) {
+      useUIStore.getState().setLoading(false);
+    }
     const elapsed = configWithTime(response.config)
       ? Math.round(performance.now() - (response.config as any)._startTime)
       : 0;
@@ -60,7 +67,9 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    useUIStore.getState().setLoading(false);
+    if ((error.config as any)?.showGlobalLoader) {
+      useUIStore.getState().setLoading(false);
+    }
     const elapsed =
       error.config && (error.config as any)._startTime
         ? Math.round(performance.now() - (error.config as any)._startTime)

@@ -180,8 +180,12 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
     }
   };
 
-  // Фільтри та налаштування
-  const [selectedRouteId, setSelectedRouteId] = useState<string>(propActiveRouteId || 'ALL');
+  // Фільтри та множинний вибір маршрутів
+  const [selectedRouteIds, setSelectedRouteIds] = useState<string[]>(
+    propActiveRouteId && propActiveRouteId !== 'ALL' && propActiveRouteId !== 'all' 
+      ? [propActiveRouteId.replace(/^(t|tr)/i, '').trim()] 
+      : []
+  );
   const [routeTypeFilter, setRouteTypeFilter] = useState<'all' | 'tram' | 'trolleybus'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedTileStyleId, setSelectedTileStyleId] = useState<string>('positron');
@@ -235,29 +239,32 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
     return () => clearInterval(interval);
   }, [fetchLiveTelemetry]);
 
-  const isSpecificRoute = selectedRouteId && selectedRouteId !== 'ALL' && selectedRouteId !== 'all';
+  const singleSelectedRouteId = selectedRouteIds.length === 1 ? selectedRouteIds[0] : null;
+  const isSpecificRoute = Boolean(singleSelectedRouteId);
+  const hasMultipleSelected = selectedRouteIds.length > 1;
+  const hasAnyRouteSelected = selectedRouteIds.length > 0;
 
   // 1. Завантажуємо всі геометрії маршрутів для відображення повної мережі міста в обох напрямках
   const { data: allShapes = [] } = useAllRouteShapes(true);
 
-  // 2. Завантажуємо геометрії обох напрямків (0 і 1) для обраного маршруту
-  const { data: bothShapesData } = useRouteBothShapes(isSpecificRoute ? selectedRouteId : null);
+  // 2. Завантажуємо геометрії обох напрямків (0 і 1) для одиночного обраного маршруту
+  const { data: bothShapesData } = useRouteBothShapes(isSpecificRoute ? singleSelectedRouteId : null);
 
-  // 3. Завантажуємо точні зупинки для обраного маршруту з бекенду (для обох або обраного напрямку)
+  // 3. Завантажуємо точні зупинки для одиночного обраного маршруту з бекенду
   const dirParam = directionMode === 'both' ? undefined : directionMode;
-  const { data: routeStopsFromApi = [] } = useRouteStops(isSpecificRoute ? selectedRouteId : null, dirParam);
+  const { data: routeStopsFromApi = [] } = useRouteStops(isSpecificRoute ? singleSelectedRouteId : null, dirParam);
 
   const activeRouteObj = useMemo(() => {
-    if (!isSpecificRoute) return null;
+    if (!singleSelectedRouteId) return null;
     return routes.find((r) => {
-      const cleanId = String(r.id).toLowerCase();
-      const cleanNum = String(r.number || '').toLowerCase();
-      const target = String(selectedRouteId).toLowerCase();
+      const cleanId = String(r.id).toLowerCase().replace(/^(t|tr)/i, '');
+      const cleanNum = String(r.number || '').toLowerCase().replace(/^(t|tr)/i, '');
+      const target = String(singleSelectedRouteId).toLowerCase().replace(/^(t|tr)/i, '');
       return cleanId === target || cleanNum === target;
     });
-  }, [isSpecificRoute, selectedRouteId, routes]);
+  }, [singleSelectedRouteId, routes]);
 
-  // Геометрії обраного маршруту для прямого (0) та зворотного (1) напрямків
+  // Геометрії одиночного обраного маршруту для прямого (0) та зворотного (1) напрямків
   const selectedRoutePolylines = useMemo(() => {
     if (!showTrackShape || !isSpecificRoute) return [];
 
@@ -284,13 +291,57 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
   // Усі точки для розрахунку автоматичного фокусування (bounds)
   const allFocusPoints = useMemo(() => {
     const pts: [number, number][] = [];
-    selectedRoutePolylines.forEach(p => pts.push(...p.positions));
-    routeStopsFromApi.forEach(s => pts.push([s.lat, s.lng]));
+    if (isSpecificRoute) {
+      selectedRoutePolylines.forEach(p => pts.push(...p.positions));
+      routeStopsFromApi.forEach(s => pts.push([s.lat, s.lng]));
+    } else if (hasMultipleSelected) {
+      allShapes.forEach(shape => {
+        const rNum = String(shape.route_number || shape.route_id || '').toLowerCase().replace(/^(t|tr)/i, '');
+        if (selectedRouteIds.includes(rNum)) {
+          (shape.geometry || []).forEach(pt => pts.push([pt.lat, pt.lng]));
+        }
+      });
+    }
     return pts;
-  }, [selectedRoutePolylines, routeStopsFromApi]);
+  }, [isSpecificRoute, hasMultipleSelected, selectedRoutePolylines, routeStopsFromApi, allShapes, selectedRouteIds]);
 
   // Активний тайловий шар
   const activeTileStyle = MAP_STYLES.find(s => s.id === selectedTileStyleId) || MAP_STYLES[0];
+
+  // Точний підрахунок кількості ТЗ (виключаючи депо та спецтехніку)
+  const { vehicleCountByRoute, totalActivePassengerVehicles, tramActiveCount, trolleyActiveCount } = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let totalActive = 0;
+    let tramActive = 0;
+    let trolleyActive = 0;
+
+    Object.values(vehiclesMap).forEach(v => {
+      const inDepot = v.status === 'IN_DEPOT' || v.route_id === 'DEPOT';
+      const isService = v.is_service || v.route_number === 'SERVICE' || v.vehicle_type === 'SERVICE';
+      if (inDepot || isService) return;
+
+      const rNum = String(v.route_number || v.route_id || '').trim().toLowerCase().replace(/^(t|tr)/i, '');
+      if (rNum && rNum !== 'service' && rNum !== 'depot') {
+        const vType = v.vehicle_type === 'TROLLEYBUS' ? 'trolleybus' : 'tram';
+        const typedKey = `${vType}_${rNum}`;
+        counts[typedKey] = (counts[typedKey] || 0) + 1;
+        counts[rNum] = (counts[rNum] || 0) + 1;
+        totalActive += 1;
+        if (v.vehicle_type === 'TROLLEYBUS') {
+          trolleyActive += 1;
+        } else {
+          tramActive += 1;
+        }
+      }
+    });
+
+    return { 
+      vehicleCountByRoute: counts, 
+      totalActivePassengerVehicles: totalActive,
+      tramActiveCount: tramActive,
+      trolleyActiveCount: trolleyActive
+    };
+  }, [vehiclesMap]);
 
   // Фільтрований список маршрутів для бічної панелі
   const filteredRoutesList = useMemo(() => {
@@ -303,19 +354,41 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
     });
   }, [routes, routeTypeFilter, searchQuery]);
 
-  // Підрахунок транспорту за маршрутами
-  const vehicleCountByRoute = useMemo(() => {
-    const counts: Record<string, number> = {};
-    Object.values(vehiclesMap).forEach(v => {
-      const rId = String(v.route_id || v.route_number || '').trim().toLowerCase().replace(/^(t|tr)/i, '');
-      if (rId && rId !== 'service') {
-        counts[rId] = (counts[rId] || 0) + 1;
+  // Підрахунок активних ТЗ для обраних маршрутів
+  const selectedVehiclesCount = useMemo(() => {
+    if (!hasAnyRouteSelected) return totalActivePassengerVehicles;
+    return selectedRouteIds.reduce((sum, rId) => sum + (vehicleCountByRoute[rId] || 0), 0);
+  }, [hasAnyRouteSelected, selectedRouteIds, vehicleCountByRoute, totalActivePassengerVehicles]);
+
+  // Хендлери множинного вибору маршрутів
+  const handleToggleRoute = (rNum: string) => {
+    const clean = rNum.trim().toLowerCase().replace(/^(t|tr)/i, '');
+    setSelectedRouteIds(prev => {
+      const exists = prev.includes(clean);
+      if (exists) {
+        return prev.filter(id => id !== clean);
+      } else {
+        return [...prev, clean];
       }
     });
-    return counts;
-  }, [vehiclesMap]);
+  };
 
-  const totalVehiclesCount = Object.keys(vehiclesMap).length;
+  const handleSelectOnlyRoute = (rNum: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const clean = rNum.trim().toLowerCase().replace(/^(t|tr)/i, '');
+    setSelectedRouteIds([clean]);
+  };
+
+  const handleSelectAllFiltered = () => {
+    const allFilteredNums = filteredRoutesList.map(r => 
+      String(r.number || r.id).trim().toLowerCase().replace(/^(t|tr)/i, '')
+    );
+    setSelectedRouteIds(allFilteredNums);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedRouteIds([]);
+  };
 
   return (
     <div className="relative w-full h-full min-h-[calc(100vh-130px)] flex overflow-hidden font-sans select-none">
@@ -339,21 +412,28 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
 
           <ZoomControl position="bottomright" />
 
-          {/* Автоматичне фокусування на обраному маршруті */}
+          {/* Автоматичне фокусування на обраних маршрутах */}
           <MapBoundsController 
-            selectedRouteId={selectedRouteId} 
+            selectedRouteId={selectedRouteIds.length === 1 ? selectedRouteIds[0] : (hasMultipleSelected ? selectedRouteIds.join(',') : 'ALL')} 
             allPoints={allFocusPoints} 
           />
 
-          {/* 1.1 Відображення ліній усіх маршрутів мережі (фонова сітка) */}
+          {/* 1.1 Відображення ліній усіх маршрутів мережі з підсвіткою обраних */}
           {showAllRoutesLines && allShapes.map((shape, idx) => {
             const isTram = shape.type === 'TRAM';
-            const isActive = isSpecificRoute && String(shape.route_id) === String(selectedRouteId);
+            const cleanShapeNum = String(shape.route_number || shape.route_id || '').trim().toLowerCase().replace(/^(t|tr)/i, '');
+            const isSelected = selectedRouteIds.includes(cleanShapeNum);
             
-            // Якщо обрано конкретний маршрут, інші лінії делікатно приглушуються
-            const opacity = isSpecificRoute ? (isActive ? 0.95 : 0.18) : (shape.direction_id === 0 ? 0.65 : 0.45);
-            const weight = isActive ? 7 : (isSpecificRoute ? 2 : (shape.direction_id === 0 ? 3.5 : 2.5));
-            const color = shape.color || (isTram ? '#2563eb' : '#059669');
+            // Якщо є вибір маршрутів: вибрані підсвічуються яскраво, не вибрані делікатно приглушуються
+            const opacity = hasAnyRouteSelected 
+              ? (isSelected ? 0.95 : 0.14) 
+              : (shape.direction_id === 0 ? 0.65 : 0.40);
+            const weight = isSelected 
+              ? (shape.direction_id === 0 ? 6 : 4.5) 
+              : (hasAnyRouteSelected ? 2 : (shape.direction_id === 0 ? 3.5 : 2.5));
+            const color = isSelected 
+              ? (shape.direction_id === 0 ? '#2563eb' : '#0891b2') 
+              : (shape.color || (isTram ? '#3b82f6' : '#10b981'));
 
             const positions = (shape.geometry || []).map(pt => [pt.lat, pt.lng] as [number, number]);
             if (positions.length === 0) return null;
@@ -366,7 +446,7 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
                   color: color,
                   weight: weight,
                   opacity: opacity,
-                  dashArray: shape.direction_id === 1 && !isActive ? '4, 6' : undefined,
+                  dashArray: shape.direction_id === 1 && !isSelected ? '4, 6' : undefined,
                   lineCap: 'round',
                   lineJoin: 'round',
                 }}
@@ -380,8 +460,8 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
             );
           })}
 
-          {/* 1.2 Підсвітка траси обраного маршруту в обох напрямках */}
-          {showTrackShape && selectedRoutePolylines.map((poly) => (
+          {/* 1.2 Підсвітка траси одиночного обраного маршруту в обох напрямках */}
+          {showTrackShape && isSpecificRoute && selectedRoutePolylines.map((poly) => (
             <Polyline
               key={`selected-route-dir-${poly.dir}`}
               positions={poly.positions}
@@ -463,7 +543,7 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
           ))}
 
           {/* 1.4 Маршрутні зупинки (в обох напрямках) */}
-          {showStops && routeStopsFromApi.map((stop, sIdx) => {
+          {showStops && isSpecificRoute && routeStopsFromApi.map((stop, sIdx) => {
             const isDir1 = stop.direction_id === 1;
             return (
               <CircleMarker
@@ -496,7 +576,7 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
 
           {/* 1.5 Live Telemetry Vehicle Markers з Wialon */}
           <TelemetryMarkers
-            activeRouteId={selectedRouteId}
+            selectedRouteIds={selectedRouteIds}
             hideServiceVehicles={hideServiceVehicles}
             hideDepotVehicles={hideDepotVehicles}
             onlyCriticalDelays={onlyCriticalDelays}
@@ -518,227 +598,303 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
       )}
 
       {/* 3. Плаваюча бічна панель керування ГІС-картою (Маршрути та Шари) */}
-      {isSidebarOpen && (
-        <aside className="absolute top-4 left-4 bottom-4 z-[1000] w-88 sm:w-96 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden transition-all animate-in fade-in slide-in-from-left-4 duration-200">
+      <aside className={`absolute top-4 left-4 z-[1000] w-84 md:w-92 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 flex flex-col max-h-[calc(100vh-160px)] transition-all duration-300 ${
+        isSidebarOpen ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0 pointer-events-none'
+      }`}>
+        
+        {/* Шапка бічної панелі */}
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400">
+              <Compass className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                <span>Диспетчерський ГІС</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold">
+                  LIVE
+                </span>
+              </h2>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                КП «Одесміськелектротранс» • {totalActivePassengerVehicles} ТЗ на лінії
+              </p>
+            </div>
+          </div>
           
-          {/* Header панелі */}
-          <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/60 dark:bg-slate-800/40">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-600/20">
-                <MapPin className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-1.5">
-                  <h2 className="text-xs font-black text-slate-900 dark:text-white tracking-tight">
-                    ГІС-Карта Wialon Live
-                  </h2>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                </div>
-                <p className="text-[10px] text-slate-500 font-medium">КП «Одесміськелектротранс»</p>
-              </div>
-            </div>
+          <button 
+            onClick={() => setIsSidebarOpen(false)}
+            className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+            title="Згорнути пульт"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        </div>
 
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => setSelectedRouteId('ALL')}
-                className="p-1.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-                title="Скинути до всіх маршрутів міста"
-              >
-                <Crosshair className="w-4 h-4 text-blue-600" />
-              </button>
-              <button
-                onClick={() => setIsSidebarOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-                title="Згорнути панель"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-            </div>
+        {/* Стрічка статусу GPS Wialon та EasyWay */}
+        <div className="px-4 py-2 bg-slate-50/80 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-medium shrink-0">
+          <div className="flex items-center space-x-1.5 text-slate-600 dark:text-slate-300 font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            <span className="font-bold">GPS: {secondsSinceSync}с тому</span>
           </div>
 
-          {/* Вкладки перемикання в панелі (2 чіткі вкладки: Маршрути та Шари) */}
-          <div className="p-2 border-b border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-1 bg-slate-100/50 dark:bg-slate-800/20 shrink-0">
-            <button
-              onClick={() => setActiveTab('routes')}
-              className={`py-1.5 rounded-xl text-[11px] font-extrabold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                activeTab === 'routes'
-                  ? 'bg-white dark:bg-slate-800 text-blue-700 dark:text-blue-300 shadow-2xs font-black'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <Bus className="w-3.5 h-3.5" />
-              <span>Маршрути ({routes.length})</span>
-            </button>
+          <button
+            onClick={handleSyncEasyWay}
+            disabled={isSyncingEasyWay}
+            className="flex items-center space-x-1 text-blue-600 dark:text-blue-400 hover:text-blue-700 font-bold hover:underline cursor-pointer disabled:opacity-50"
+            title="Оновити актуальний реєстр рейсів та зупинок з EasyWay API"
+          >
+            <RefreshCw className={`w-3 h-3 ${isSyncingEasyWay ? 'animate-spin' : ''}`} />
+            <span>{isSyncingEasyWay ? 'Синхронізація...' : 'Синхр. EasyWay'}</span>
+          </button>
+        </div>
 
-            <button
-              onClick={() => setActiveTab('layers')}
-              className={`py-1.5 rounded-xl text-[11px] font-extrabold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                activeTab === 'layers'
-                  ? 'bg-white dark:bg-slate-800 text-blue-700 dark:text-blue-300 shadow-2xs font-black'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Шари та Налаштування</span>
-            </button>
+        {syncResultMsg && (
+          <div className="px-4 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold">
+            ✓ {syncResultMsg}
           </div>
+        )}
 
-          {/* Вміст обраної вкладки */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            
-            {/* ВКЛАДКА 1: МАРШРУТИ */}
-            {activeTab === 'routes' && (
-              <div className="space-y-3.5">
-                
-                {/* Фільтр типу транспорту */}
-                <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-extrabold border border-slate-200 dark:border-slate-700">
-                  <button
-                    onClick={() => setRouteTypeFilter('all')}
-                    className={`py-1 rounded-lg transition-all cursor-pointer ${
-                      routeTypeFilter === 'all' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs font-black' : 'text-slate-500'
-                    }`}
-                  >
-                    Усі ({routes.length})
-                  </button>
-                  <button
-                    onClick={() => setRouteTypeFilter('tram')}
-                    className={`py-1 rounded-lg transition-all cursor-pointer ${
-                      routeTypeFilter === 'tram' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs font-black' : 'text-slate-500'
-                    }`}
-                  >
-                    🚊 Трамваї ({routes.filter(r => normalizeRouteType(r.type) === 'tram').length})
-                  </button>
-                  <button
-                    onClick={() => setRouteTypeFilter('trolleybus')}
-                    className={`py-1 rounded-lg transition-all cursor-pointer ${
-                      routeTypeFilter === 'trolleybus' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-2xs font-black' : 'text-slate-500'
-                    }`}
-                  >
-                    🚎 Тролейбуси ({routes.filter(r => normalizeRouteType(r.type) === 'trolleybus').length})
-                  </button>
-                </div>
+        {/* Вкладки перемикання (Маршрути vs Шари) */}
+        <div className="grid grid-cols-2 p-1.5 gap-1 bg-slate-100/70 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 shrink-0 text-xs font-bold">
+          <button
+            onClick={() => setActiveTab('routes')}
+            className={`py-1.5 px-3 rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'routes'
+                ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs font-black'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Bus className="w-3.5 h-3.5" />
+            <span>Маршрути ({hasAnyRouteSelected ? selectedRouteIds.length : 'Всі'})</span>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('layers')}
+            className={`py-1.5 px-3 rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+              activeTab === 'layers'
+                ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs font-black'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Шари та Налаштування</span>
+          </button>
+        </div>
 
-                {/* Пошук маршруту */}
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Номер або назва кінцевої..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
-
-                {/* Кнопка "Усі маршрути міста" */}
+        {/* Вміст обраної вкладки */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+          
+          {/* ВКЛАДКА 1: МАРШРУТИ ТА МНОЖИННИЙ ВИБІР */}
+          {activeTab === 'routes' && (
+            <div className="space-y-3">
+              
+              {/* Фільтр типу транспорту з точними лічильниками */}
+              <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-extrabold border border-slate-200 dark:border-slate-700">
                 <button
-                  onClick={() => setSelectedRouteId('ALL')}
-                  className={`w-full p-2.5 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                    selectedRouteId === 'ALL'
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20'
-                      : 'bg-white dark:bg-slate-800 hover:bg-blue-50/70 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white'
+                  onClick={() => setRouteTypeFilter('all')}
+                  className={`py-1 rounded-lg transition-all cursor-pointer ${
+                    routeTypeFilter === 'all' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs font-black' : 'text-slate-500'
                   }`}
                 >
-                  <div className="flex items-center space-x-2">
-                    <span className="font-mono font-black text-xs">🌐</span>
-                    <span className="text-xs font-black">Усі маршрути міста</span>
-                  </div>
-                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md ${
-                    selectedRouteId === 'ALL' ? 'bg-blue-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                  }`}>
-                    {totalVehiclesCount} ТЗ онлайн
-                  </span>
+                  Усі ({totalActivePassengerVehicles})
+                </button>
+                <button
+                  onClick={() => setRouteTypeFilter('tram')}
+                  className={`py-1 rounded-lg transition-all cursor-pointer ${
+                    routeTypeFilter === 'tram' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs font-black' : 'text-slate-500'
+                  }`}
+                >
+                  🚊 Трамваї ({tramActiveCount})
+                </button>
+                <button
+                  onClick={() => setRouteTypeFilter('trolleybus')}
+                  className={`py-1 rounded-lg transition-all cursor-pointer ${
+                    routeTypeFilter === 'trolleybus' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-2xs font-black' : 'text-slate-500'
+                  }`}
+                >
+                  🚎 Тролейбуси ({trolleyActiveCount})
+                </button>
+              </div>
+
+              {/* Пошук маршруту */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Номер або назва кінцевої..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Панель швидкого вибору (Обрати всі / Скинути) */}
+              <div className="flex items-center justify-between gap-1.5">
+                <button
+                  onClick={handleClearSelection}
+                  className={`flex-1 py-1.5 px-2 rounded-xl border text-xs font-black flex items-center justify-center space-x-1 transition-all cursor-pointer ${
+                    !hasAnyRouteSelected
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                      : 'bg-white dark:bg-slate-800 hover:bg-blue-50 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <span>🌐 Вся мережа ({totalActivePassengerVehicles} ТЗ)</span>
                 </button>
 
-                {/* Перемикач напрямків (коли обрано конкретний маршрут) */}
-                {isSpecificRoute && (
-                  <div className="p-2.5 rounded-2xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-extrabold text-blue-900 dark:text-blue-300">
-                      <span className="flex items-center space-x-1">
-                        <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Напрямок руху (EasyWay):</span>
-                      </span>
-                      <span className="font-mono text-[10px] bg-blue-200/70 dark:bg-blue-900 px-1.5 py-0.2 rounded text-blue-800 dark:text-blue-200">
-                        {directionMode === 'both' ? 'Обидва' : directionMode === 0 ? 'Прямий' : 'Зворотний'}
-                      </span>
-                    </div>
+                <button
+                  onClick={handleSelectAllFiltered}
+                  className="py-1.5 px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                  title="Вибрати всі маршрути поточної вкладки"
+                >
+                  <Sparkles className="w-3 h-3 text-blue-600" />
+                  <span>Обрати всі</span>
+                </button>
+              </div>
 
-                    <div className="grid grid-cols-3 gap-1 text-[10px] font-bold">
-                      <button
-                        onClick={() => setDirectionMode('both')}
-                        className={`py-1 px-1.5 rounded-lg transition-all cursor-pointer text-center ${
-                          directionMode === 'both'
-                            ? 'bg-blue-600 text-white shadow-2xs font-black'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-blue-100/50'
-                        }`}
-                      >
-                        🔄 Обидва
-                      </button>
-                      <button
-                        onClick={() => setDirectionMode(0)}
-                        className={`py-1 px-1.5 rounded-lg transition-all cursor-pointer text-center ${
-                          directionMode === 0
-                            ? 'bg-blue-600 text-white shadow-2xs font-black'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-blue-100/50'
-                        }`}
-                      >
-                        ➡️ Прямий
-                      </button>
-                      <button
-                        onClick={() => setDirectionMode(1)}
-                        className={`py-1 px-1.5 rounded-lg transition-all cursor-pointer text-center ${
-                          directionMode === 1
-                            ? 'bg-cyan-600 text-white shadow-2xs font-black'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-blue-100/50'
-                        }`}
-                      >
-                        ⬅️ Зворотний
-                      </button>
-                    </div>
+              {/* Плашка активної вибірки маршрутів (якщо обрано > 0) */}
+              {hasAnyRouteSelected && (
+                <div className="p-2.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50 border border-blue-200 dark:border-blue-800 space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-black text-blue-950 dark:text-blue-200">
+                    <span className="flex items-center space-x-1">
+                      <Filter className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Обрано {selectedRouteIds.length} маршрут(ів):</span>
+                    </span>
+                    <span className="font-mono text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full font-bold">
+                      {selectedVehiclesCount} ТЗ на лінії
+                    </span>
                   </div>
-                )}
 
-                {/* Список маршрутів з БД */}
-                <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
-                  {filteredRoutesList.map((route) => {
-                    const rNum = String(route.number || route.id);
-                    const cleanNum = rNum.trim().toLowerCase().replace(/^(t|tr)/i, '');
-                    const isSelected = String(selectedRouteId).trim().toLowerCase().replace(/^(t|tr)/i, '') === cleanNum;
-                    const vCount = vehicleCountByRoute[cleanNum] || 0;
-                    const rType = normalizeRouteType(route.type);
-                    const isTram = rType === 'tram';
-
-                    return (
-                      <button
-                        key={route.id}
-                        onClick={() => setSelectedRouteId(rNum)}
-                        className={`w-full p-2.5 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md shadow-blue-600/20'
-                            : 'bg-white dark:bg-slate-800/80 hover:bg-blue-50/60 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white'
-                        }`}
+                  <div className="flex flex-wrap gap-1 max-h-[60px] overflow-y-auto">
+                    {selectedRouteIds.map(id => (
+                      <span 
+                        key={id}
+                        onClick={() => handleToggleRoute(id)}
+                        className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 text-blue-900 dark:text-blue-200 text-[10px] font-black cursor-pointer hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 transition-colors"
+                        title="Натисніть щоб зняти вибір"
                       >
-                        <div className="flex items-center space-x-2.5 overflow-hidden">
-                          <span className={`w-7 h-7 rounded-lg flex items-center justify-center font-mono font-black text-xs shrink-0 ${
-                            isSelected 
-                              ? 'bg-white text-blue-700' 
-                              : isTram 
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300' 
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300'
-                          }`}>
-                            №{route.number || route.id}
-                          </span>
-                          <div className="truncate">
-                            <div className="text-xs font-extrabold truncate">
-                              {route.name}
-                            </div>
-                            <div className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
-                              {isTram ? '🚊 Трамвай' : '🚎 Тролейбус'} • {route.length_km ? `${route.length_km} км` : 'Одеса'}
-                            </div>
-                          </div>
+                        <span>№{id}</span>
+                        <span className="text-slate-400 hover:text-rose-600">✕</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Перемикач напрямків (коли обрано 1 конкретний маршрут) */}
+              {isSpecificRoute && (
+                <div className="p-2.5 rounded-2xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-extrabold text-blue-900 dark:text-blue-300">
+                    <span className="flex items-center space-x-1">
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Напрямок маршруту №{singleSelectedRouteId}:</span>
+                    </span>
+                    <span className="font-mono text-[10px] bg-blue-200/70 dark:bg-blue-900 px-1.5 py-0.2 rounded text-blue-800 dark:text-blue-200">
+                      {directionMode === 'both' ? 'Обидва' : directionMode === 0 ? 'Прямий' : 'Зворотний'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1 text-[10px] font-bold">
+                    <button
+                      onClick={() => setDirectionMode('both')}
+                      className={`py-1 px-1.5 rounded-lg transition-all cursor-pointer text-center ${
+                        directionMode === 'both'
+                          ? 'bg-blue-600 text-white shadow-2xs font-black'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-blue-100/50'
+                      }`}
+                    >
+                      🔄 Обидва
+                    </button>
+                    <button
+                      onClick={() => setDirectionMode(0)}
+                      className={`py-1 px-1.5 rounded-lg transition-all cursor-pointer text-center ${
+                        directionMode === 0
+                          ? 'bg-blue-600 text-white shadow-2xs font-black'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-blue-100/50'
+                      }`}
+                    >
+                      ➡️ Прямий
+                    </button>
+                    <button
+                      onClick={() => setDirectionMode(1)}
+                      className={`py-1 px-1.5 rounded-lg transition-all cursor-pointer text-center ${
+                        directionMode === 1
+                          ? 'bg-cyan-600 text-white shadow-2xs font-black'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-blue-100/50'
+                      }`}
+                    >
+                      ⬅️ Зворотний
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Список маршрутів із чекбоксами множинного вибору */}
+              <div className="space-y-1.5 max-h-[340px] overflow-y-auto pr-1">
+                {filteredRoutesList.map((route) => {
+                  const rNum = String(route.number || route.id);
+                  const cleanNum = rNum.trim().toLowerCase().replace(/^(t|tr)/i, '');
+                  const isSelected = selectedRouteIds.includes(cleanNum);
+                  const rType = normalizeRouteType(route.type);
+                  const isTram = rType === 'tram';
+                  const vCount = vehicleCountByRoute[`${rType}_${cleanNum}`] ?? (vehicleCountByRoute[cleanNum] || 0);
+
+                  return (
+                    <div
+                      key={route.id}
+                      onClick={() => handleToggleRoute(rNum)}
+                      className={`w-full p-2 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md shadow-blue-600/20'
+                          : 'bg-white dark:bg-slate-800/80 hover:bg-blue-50/60 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 overflow-hidden">
+                        {/* Кастомний чекбокс */}
+                        <div className={`w-4 h-4 rounded-md flex items-center justify-center border transition-colors shrink-0 ${
+                          isSelected
+                            ? 'bg-white border-white text-blue-600'
+                            : 'border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50'
+                        }`}>
+                          {isSelected && <span className="text-[10px] font-black leading-none">✓</span>}
                         </div>
 
-                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md shrink-0 ml-2 ${
+                        {/* Номер маршруту */}
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center font-mono font-black text-xs shrink-0 ${
+                          isSelected 
+                            ? 'bg-white text-blue-700' 
+                            : isTram 
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300' 
+                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300'
+                        }`}>
+                          №{route.number || route.id}
+                        </span>
+
+                        <div className="truncate">
+                          <div className="text-xs font-extrabold truncate">
+                            {route.name}
+                          </div>
+                          <div className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                            {isTram ? '🚊 Трамвай' : '🚎 Тролейбус'} • {route.length_km ? `${route.length_km} км` : 'Одеса'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-1.5 shrink-0 ml-2">
+                        {/* Кнопка "Тільки цей" */}
+                        <button
+                          onClick={(e) => handleSelectOnlyRoute(rNum, e)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-white/20 text-white hover:bg-white/30'
+                              : 'bg-slate-100 dark:bg-slate-700 text-slate-500 hover:bg-blue-100 hover:text-blue-700'
+                          }`}
+                          title="Показати тільки цей маршрут"
+                        >
+                          Тільки
+                        </button>
+
+                        {/* Лічильник активних бортів на лінії */}
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md ${
                           isSelected 
                             ? 'bg-blue-500/80 text-white' 
                             : vCount > 0 
@@ -747,12 +903,13 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
                         }`}>
                           {vCount} ТЗ
                         </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
+            </div>
+          )}
 
             {/* ВКЛАДКА 2: ШАРИ ТА НАЛАШТУВАННЯ */}
             {activeTab === 'layers' && (
@@ -944,7 +1101,7 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
                     : 'bg-red-500'
                 }`} />
                 <span className="font-bold text-slate-700 dark:text-slate-300">
-                  GPS Онлайн: <strong className="text-blue-600">{totalVehiclesCount} ТЗ</strong>
+                  GPS Онлайн: <strong className="text-blue-600">{totalActivePassengerVehicles} ТЗ</strong>
                 </span>
               </div>
               
@@ -968,7 +1125,6 @@ export const LiveMapView: React.FC<LiveMapViewProps> = ({ activeRouteId: propAct
           </div>
 
         </aside>
-      )}
 
     </div>
   );

@@ -200,7 +200,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
         { label: 'Карта Руху (Wialon Live GIS)', path: '/dispatch/map', icon: MapPin },
         { label: 'CAD/AVL Матриця та Відхилення', path: '/dispatch/matrix', icon: TableIcon },
         { label: 'Діаграма Ґантта Змін', path: '/dispatch/gantt', icon: Clock },
-        { label: 'Оперативні розклади (Генератор)', path: '/dispatch/generator', icon: RefreshCw },
+        { label: 'Журнал Розпоряджень', path: '/dispatch/orders', icon: FileText },
       ],
     },
     {
@@ -247,7 +247,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
   return (
     <header ref={headerRef} className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 sticky top-0 z-50 shadow-xs font-sans">
       {/* Top Application Header Banner */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80">
+      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80">
         {/* Brand & System Identifier */}
         <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => setPath('/')}>
           <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-600/20 group-hover:scale-105 transition-transform shrink-0">
@@ -448,8 +448,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       </div>
 
       {/* Navigation Bar */}
-      <div className="bg-slate-50/95 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 shadow-2xs px-4 sm:px-6 lg:px-8 relative z-30">
-        <nav className="max-w-7xl mx-auto flex items-center space-x-2 py-2 text-xs font-bold flex-wrap">
+      <div className="bg-slate-50/95 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 shadow-2xs px-4 sm:px-6 lg:px-8 xl:px-10 relative z-30">
+        <nav className="w-full flex items-center space-x-2 py-2 text-xs font-bold flex-wrap">
           {visibleNavGroups.map((group, idx) => {
             const GroupIcon = group.icon;
 

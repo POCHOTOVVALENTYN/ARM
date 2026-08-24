@@ -68,6 +68,20 @@ export const ShortTurnModal: React.FC<ShortTurnModalProps> = ({
     },
     onSuccess: (data) => {
       toast.success(`Оперативний розворот для вагона Вг-${selectedVehicle} успішно активовано на кільці «${targetLoop}»!`);
+      
+      // Автоматична фіксація в офіційному Журналі розпоряджень КП ОМЕТ
+      apiClient.post('/dispatch/orders', {
+        route_id: selectedRoute,
+        route_number: selectedRoute,
+        transport_type: 'TRAM',
+        vehicle_id: selectedVehicle,
+        order_type: 'SHORT_TURN',
+        target_location: `Кільце «${targetLoop}»`,
+        reason: reason,
+        description: description,
+        dispatcher_name: 'Черговий диспетчер ЦД'
+      }).catch(err => console.warn('Не вдалося зберегти наказ у журналі:', err));
+
       if (onSuccess) onSuccess();
       onClose();
     },

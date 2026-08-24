@@ -22,6 +22,7 @@ from app.api.analytics import router as analytics_router
 from app.api.depots import router as depots_router
 from app.api.waybills import router as waybills_router
 from app.api.driver_communication import router as driver_comm_router
+from app.api.dispatch_orders import router as dispatch_orders_router
 from app.api.telemetry import router as telemetry_router
 from app.api.easyway import router as easyway_router
 from app.services.realtime_fetcher import fetch_and_process_realtime_data
@@ -29,6 +30,7 @@ from app.core.database import init_db
 from app.core.redis import init_redis, close_redis
 from app.core.config import settings
 from app.db.init_admin import seed_initial_admin
+from app.db.seed_fleet_and_depots import seed_depots_and_fleet
 from app.core.logging_config import setup_logging, get_logger
 from app.core.logging_middleware import DetailedRequestLoggingMiddleware, logs_router
 
@@ -44,9 +46,10 @@ async def lifespan(app: FastAPI):
     # 1. Ініціалізуємо Redis
     await init_redis()
     
-    # 2. Створюємо таблиці БД та початкового адміна
+    # 2. Створюємо таблиці БД, початкового адміна та реєстр депо і флоту
     await init_db()
     await seed_initial_admin()
+    await seed_depots_and_fleet()
 
     # 3. Запускаємо бойовий збір телеметрії (EasyWay / Wialon / GTFS-RT)
     telemetry_task = asyncio.create_task(fetch_and_process_realtime_data())
@@ -131,6 +134,8 @@ app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(incidents_router, prefix="/api")
 app.include_router(emergencies_router, prefix="/api/v1")
 app.include_router(emergencies_router, prefix="/api")
+app.include_router(dispatch_orders_router, prefix="/api/v1")
+app.include_router(dispatch_orders_router, prefix="/api")
 
 # Інфраструктура, Депо, Станції, Хаби, Аналітика
 app.include_router(depots_router, prefix="/api/v1")

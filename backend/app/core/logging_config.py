@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
 import os
 from datetime import datetime
@@ -118,16 +119,37 @@ def setup_logging(log_level: str = "INFO"):
     console_handler.setFormatter(ColoredFormatter(use_colors=True))
     root_logger.addHandler(console_handler)
 
+    # 2. Файловий логер з автоматичною ротацією (10 МБ, 5 бекапів)
+    try:
+        logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        log_file_path = os.path.join(logs_dir, "telemetry.log")
+        
+        file_handler = RotatingFileHandler(
+            log_file_path,
+            maxBytes=10 * 1024 * 1024, # 10 MB
+            backupCount=5,
+            encoding="utf-8"
+        )
+        file_handler.setLevel(numeric_level)
+        file_formatter = ColoredFormatter(use_colors=False)
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+    except Exception as e:
+        sys.stderr.write(f"Failed to setup file logger: {e}\n")
+
     # Налаштовуємо логери бібліотек щоб не засмічувати вивід зайвим
     logging.getLogger("uvicorn.access").handlers = []
     logging.getLogger("uvicorn.access").propagate = False
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     # Головний логер додатку
     logger = logging.getLogger("app.main")
-    logger.info("🚀 Деталізовану систему діагностичних логів активовано")
+    logger.info("🚀 Деталізовану систему діагностичних логів та ротації у файл активовано")
     return root_logger
 
 def get_logger(name: str) -> logging.Logger:

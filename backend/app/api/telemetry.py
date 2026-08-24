@@ -302,77 +302,20 @@ DEFAULT_ODESSA_TELEMETRY = [
         "deviation_min": -1.2,
         "status": "IN_SCHEDULE",
         "last_updated": time.time()
-    },
-
-    # СПЕЦТЕХНІКА ТА СЛУЖБОВІ
-    {
-        "vehicle_id": "С-01",
-        "display_name": "Аварійна КС С-01",
-        "route_id": "SERVICE",
-        "route_number": "С-01",
-        "duty_number": 99,
-        "driver_name": "Служба Колії та Мережі",
-        "vehicle_type": "SERVICE",
-        "is_service": True,
-        "lat": 46.468,
-        "lng": 30.735,
-        "speed": 0.0,
-        "heading": 0,
-        "current_station": "Пересипський міст (Ремонт)",
-        "next_station": "База",
-        "deviation_min": 0.0,
-        "status": "SERVICE",
-        "last_updated": time.time()
     }
 ]
 
 def enrich_vehicle_metadata(v: dict) -> dict:
-    """Нормалізує та збагачує телеметрію вагона коректним номером маршруту та типом."""
-    from app.services.telemetry_adapters import get_odessa_route_for_vehicle
-
+    """Нормалізує базові поля вагона."""
     v_id = str(v.get("vehicle_id") or v.get("id") or "")
     v_name = str(v.get("display_name") or v_id)
-    lat = float(v.get("lat") or 46.475)
-    lng = float(v.get("lng") or 30.735)
     
-    # 1. Визначення спецтехніки
     if any(k in v_name.lower() or k in v_id.lower() for k in ["газель", "газ", "камаз", "ревізор", "маз", "с-", "аварійна"]):
         v["is_service"] = True
         v["vehicle_type"] = "SERVICE"
         v["route_id"] = "SERVICE"
-        v["route_number"] = "Спец"
+        v["route_number"] = "SERVICE"
         v["status"] = "SERVICE"
-        return v
-
-    # 2. Якщо маршрут вже встановлено та він валідний (короткий номер без UUID) — зберігаємо
-    r_id = v.get("route_id") or v.get("route_number")
-    if r_id and str(r_id).lower() not in ["none", "null", "unknown", ""] and len(str(r_id)) <= 5 and "-" not in str(r_id):
-        clean_r = str(r_id).replace("T", "").replace("Tr", "").strip()
-        v["route_id"] = clean_r
-        v["route_number"] = clean_r
-        if not v.get("vehicle_type"):
-            v["vehicle_type"] = "TROLLEYBUS" if clean_r in ["2", "3", "7", "8", "9", "10", "12"] and (v_id.startswith("0") or v_id.startswith("4")) else "TRAM"
-        return v
-
-    # 3. Визначаємо тип транспорту за бортовим номером
-    digits = re.sub(r'[^0-9]', '', v_id)
-    v_type = v.get("vehicle_type")
-    if not v_type:
-        if digits:
-            num = int(digits)
-            if (num <= 50) or (600 <= num <= 899) or (2000 <= num <= 2099) or (4000 <= num <= 4099):
-                v_type = "TROLLEYBUS"
-            else:
-                v_type = "TRAM"
-        else:
-            v_type = "TRAM"
-
-    # 4. Канонічне визначення маршруту через get_odessa_route_for_vehicle
-    assigned_route = get_odessa_route_for_vehicle(digits or v_id, v_type, lat, lng)
-
-    v["route_id"] = assigned_route
-    v["route_number"] = assigned_route
-    v["vehicle_type"] = v_type
     return v
 
 @router.get("/live")
@@ -382,43 +325,27 @@ async def get_live_vehicles(
 ):
     """
     Повертає поточне розташування, швидкість, відхилення та темп руху (Pacing) усіх активних бортів
-    з об'єднанням потоків Wialon IPS та EasyWay Live GPS.
+    на основі 5-рівневого гібридного рушія ідентифікації маршрутів (Wialon + EasyWay + DB Геозони).
     """
     try:
-        from app.services.easyway import easyway_service
-        redis = await get_redis()
-        raw_data = await redis.hgetall("telemetry:vehicles")
-        
-        vehicles_dict = {}
-        
-        # 1. Завантажуємо з Redis / Wialon
-        if raw_data:
-            for v_str in raw_data.values():
-                try:
-                    v_obj = json.loads(v_str)
-                    enriched = enrich_vehicle_metadata(v_obj)
-                    v_id = str(enriched.get("vehicle_id"))
-                    vehicles_dict[v_id] = enriched
-                except Exception:
-                    pass
-            
-        # 2. Якщо в Redis порожньо — отримуємо безпосередньо з telemetry_manager (EasyWay)
-        if not vehicles_dict:
-            live_list = await telemetry_manager.get_live_telemetry()
-            for v in live_list:
-                enriched = enrich_vehicle_metadata(dict(v))
-                vehicles_dict[str(enriched.get("vehicle_id"))] = enriched
+        from app.services.telemetry_fusion import telemetry_fusion
+        vehicles = await telemetry_fusion.get_fused_telemetry()
 
-        vehicles = list(vehicles_dict.values())
+        if not vehicles:
+            vehicles = await telemetry_manager.get_live_telemetry()
 
         if route_id and route_id.upper() != "ALL":
-            clean_target = str(route_id).replace("T", "").replace("Tr", "").strip()
-            vehicles = [v for v in vehicles if str(v.get("route_id")) == clean_target or str(v.get("route_number")) == clean_target]
+            clean_target = str(route_id).replace("T", "").replace("Tr", "").strip().lower()
+            vehicles = [
+                v for v in vehicles 
+                if str(v.get("route_id", "")).strip().lower().replace("t", "").replace("tr", "") == clean_target or 
+                   str(v.get("route_number", "")).strip().lower().replace("t", "").replace("tr", "") == clean_target
+            ]
             
         return vehicles
     except Exception as e:
-        print(f"Telemetry error: {e}")
-        return [enrich_vehicle_metadata(dict(v)) for v in DEFAULT_ODESSA_TELEMETRY]
+        logger.error(f"Telemetry error: {e}")
+        return []
 
 class WialonTokenRequest(BaseModel):
     token: str
@@ -458,6 +385,54 @@ async def set_wialon_token(request: WialonTokenRequest):
         "status": "SUCCESS" if telemetry_manager.wialon_adapter.eid else "FAILED",
         "eid_active": bool(telemetry_manager.wialon_adapter.eid),
         "vehicles_fetched": len(vehicles)
+    }
+
+@router.get("/debug-report")
+async def get_telemetry_debug_report():
+    """
+    Повний інженерний звіт діагностики телеметрії CAD/AVL КП «Одесміськелектротранс».
+    Містить метрики зв'язку з Wialon, EasyWay, статус депо, відстані колійного снапінгу та стан бортів.
+    """
+    from app.services.telemetry_fusion import telemetry_fusion
+    
+    vehicles = await telemetry_fusion.get_fused_telemetry()
+    now_ts = time.time()
+    
+    # Розрахунок аналітики
+    on_route = [v for v in vehicles if v.get("status") in ["ON_ROUTE", "STANDING"]]
+    in_depot = [v for v in vehicles if v.get("status") == "IN_DEPOT"]
+    service = [v for v in vehicles if v.get("is_service") or v.get("vehicle_type") == "SERVICE"]
+    
+    routes_summary: Dict[str, List[str]] = {}
+    for v in on_route:
+        key = f"{v.get('vehicle_type')} #{v.get('route_number')}"
+        routes_summary.setdefault(key, []).append(str(v.get("vehicle_id")))
+        
+    depots_summary: Dict[str, int] = {}
+    for v in in_depot:
+        d_name = v.get("depot_name", "Невідоме депо")
+        depots_summary[d_name] = depots_summary.get(d_name, 0) + 1
+        
+    return {
+        "timestamp": now_ts,
+        "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "telemetry_pipeline": {
+            "wialon_active": bool(telemetry_fusion.wialon_adapter.eid),
+            "wialon_units_count": len(vehicles),
+            "easyway_cache_age_sec": round(now_ts - telemetry_fusion._last_easyway_update, 1),
+            "shapes_corridors_loaded": len(telemetry_fusion._shapes_cache),
+            "depot_geofences_loaded": len(telemetry_fusion._depots_cache),
+            "fleet_registry_size": len(telemetry_fusion._fleet_cache)
+        },
+        "fleet_distribution": {
+            "total_tracked": len(vehicles),
+            "active_on_line": len(on_route),
+            "inside_depots": len(in_depot),
+            "service_special": len(service)
+        },
+        "routes_roster": routes_summary,
+        "depots_roster": depots_summary,
+        "active_vehicles": vehicles
     }
 
 @router.post("/wialon/credentials")

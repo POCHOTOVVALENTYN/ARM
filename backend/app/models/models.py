@@ -8,11 +8,15 @@ Base = declarative_base()
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
-    id = Column(String, primary_key=True, index=True) # Бортовий номер (напр. "4020", "3012")
-    type = Column(String, default="TRAM", nullable=True) # TRAM, TROLLEYBUS, ELECTROBUS
-    model = Column(String, default="Tatra T3", nullable=True)
-    status = Column(String, default="AVAILABLE") # AVAILABLE, ON_ROUTE, DETOUR, BREAK, MAINTENANCE, OFFLINE
+    id = Column(String, primary_key=True, index=True) # Бортовий номер (напр. "0015", "4020", "3012", "7152")
+    wialon_name = Column(String, index=True, nullable=True) # Точне ім'я трекера в Wialon (напр. "0015", "4002 - trol", "3011")
+    type = Column(String, default="TRAM", nullable=True) # TRAM, TROLLEYBUS, SERVICE
+    model = Column(String, default="Tatra T3", nullable=True) # Напр. "БКМ-321", "Богдан Т70117", "Одіссей-МАКС"
+    status = Column(String, default="AVAILABLE") # AVAILABLE, ON_ROUTE, IN_DEPOT, MAINTENANCE, SERVICE, OFFLINE
     is_active = Column(Boolean, default=True)
+    is_accessible = Column(Boolean, default=False) # Низькопідлоговий пандус для людей з інвалідністю
+    has_wifi = Column(Boolean, default=False)
+    has_aircond = Column(Boolean, default=False)
     current_trip_id = Column(String, nullable=True)
     depot_id = Column(String, ForeignKey("depots.id", ondelete="SET NULL"), nullable=True)
 
@@ -142,12 +146,14 @@ Station = StationModel
 
 class DepotModel(Base):
     __tablename__ = "depots"
-    id = Column(String, primary_key=True, index=True) # Напр. "depot_tram_1", "depot_tram_2", "depot_trolley_1"
+    id = Column(String, primary_key=True, index=True) # Напр. "depot_1", "depot_2", "depot_3"
+    code = Column(String, nullable=True) # "TD-1", "TD-2", "TrD"
     name = Column(String)
-    type = Column(String, default="TRAM", nullable=True)
+    type = Column(String, default="TRAM", nullable=True) # TRAM, TROLLEYBUS
     address = Column(String, nullable=True)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    polygon = Column(JSON, nullable=True) # Геозона периметру депо: [[lat, lng], ...]
     prepTimeMin = Column(Integer, default=15, nullable=True) # Підготовчо-заключний час
 
     vehicles = relationship("Vehicle", back_populates="depot", cascade="all, delete-orphan", lazy="selectin")
@@ -321,6 +327,37 @@ class DispatcherDirective(Base):
     
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), index=True)
     dispatcher_id = Column(Integer, nullable=True)
+
+class DispatchOrderModel(Base):
+    """
+    Офіційний журнал диспетчерських розпоряджень КП «Одесміськелектротранс»
+    (Short Turn, Pacing, Car Swap, Pull-In, Detour, Service call)
+    """
+    __tablename__ = "dispatch_orders"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    order_number = Column(String, unique=True, index=True, nullable=False) # e.g. "Р-2026/08-001"
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now(), index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    dispatcher_name = Column(String, nullable=False, default="Черговий диспетчер ЦД")
+    dispatcher_id = Column(String, nullable=True)
+    
+    route_id = Column(String, index=True, nullable=False)
+    route_number = Column(String, index=True, nullable=False)
+    transport_type = Column(String, default="TRAM", nullable=False) # TRAM / TROLLEYBUS
+    vehicle_id = Column(String, index=True, nullable=True)
+    duty_number = Column(Integer, nullable=True)
+    driver_name = Column(String, nullable=True)
+    
+    order_type = Column(String, nullable=False) # SHORT_TURN, PACING, CAR_SWAP, PULL_IN, DETOUR, SERVICE_CALL, SPEED_RESTRICTION
+    target_location = Column(String, nullable=True) # e.g. "Кільце «Лузанівка»", "пл. Тираспільська"
+    duration_min = Column(Integer, nullable=True) # e.g. 4 (хв)
+    reason = Column(String, nullable=False) # e.g. "Усунення спарювання (паровозика)", "ДТП на вул. Преображенська"
+    description = Column(String, nullable=False) # Текст наказу
+    
+    status = Column(String, default="ACTIVE", index=True, nullable=False) # ACTIVE, COMPLETED, CANCELLED
+    notes = Column(String, nullable=True)
 
 # Імпорт та експорт моделей розкладів
 from app.models.schedule import Schedule, StaticSchedule, StaticDuty, StaticShift, StaticTrip, StaticStopTime

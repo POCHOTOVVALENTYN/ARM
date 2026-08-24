@@ -1,6 +1,7 @@
 import asyncio
 import re
 import json
+import time
 from datetime import datetime, timezone
 import httpx
 from app.core.redis import get_redis
@@ -9,18 +10,37 @@ from app.api.websocket import ws_manager
 
 logger = get_logger("air_raid_worker")
 
+async def check_ubilling_alert_api(client: httpx.AsyncClient) -> dict | None:
+    """Опитує структурований JSON API системи сповіщення тривог в Україні."""
+    try:
+        res = await client.get("https://ubilling.net.ua/aerialalerts/", timeout=5.0)
+        if res.status_code == 200:
+            data = res.json()
+            states = data.get("states", {})
+            odesa_data = states.get("Одеська область") or states.get("Одеса") or states.get("м. Одеса")
+            if odesa_data:
+                is_active = bool(odesa_data.get("alertnow"))
+                changed_at = odesa_data.get("changed")
+                return {
+                    "active": is_active,
+                    "time": changed_at,
+                    "text": f"{'🚨 ОГОЛОШЕНО' if is_active else '🟢 ВІДБІЙ'} повітряної тривоги (Одеська область)",
+                    "source": "UBilling Aerial Alerts API"
+                }
+    except Exception as e:
+        logger.debug(f"Ubilling alerts API error: {e}")
+    return None
+
 async def parse_telegram_feed(client: httpx.AsyncClient, url: str) -> dict | None:
-    """Парсить публічну web-стрічку Telegram для отримання останнього статусу тривоги в Одесі."""
+    """Парсить публічну web-стрічку Telegram для отримання останнього статусу тривоги в Одесі та районі."""
     try:
         res = await client.get(url, timeout=6.0)
         if res.status_code != 200:
             return None
         
         html = res.text
-        # Знаходимо всі блоки повідомлень
         blocks = re.findall(r'<div class="tgme_widget_message_wrap[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>', html, re.DOTALL)
         if not blocks:
-            # Спрощений патерн
             blocks = re.findall(r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
 
         for b in reversed(blocks):
@@ -32,7 +52,8 @@ async def parse_telegram_feed(client: httpx.AsyncClient, url: str) -> dict | Non
             msg_time = time_match.group(1) if time_match else None
             lower = clean_text.lower()
 
-            if ('одес' in lower or 'тривог' in lower) and ('повітряна тривога' in lower or 'відбій' in lower):
+            # Перевіряємо сувору прив'язку до Одеси / Одеського району
+            if 'одес' in lower and ('повітряна тривога' in lower or 'відбій' in lower or 'тривог' in lower):
                 is_alarm = '🔴' in clean_text or ('повітряна тривога' in lower and 'відбій' not in lower)
                 is_clear = '🟢' in clean_text or 'відбій' in lower
                 
@@ -40,34 +61,46 @@ async def parse_telegram_feed(client: httpx.AsyncClient, url: str) -> dict | Non
                     return {
                         "active": bool(is_alarm and not is_clear),
                         "text": clean_text,
-                        "time": msg_time
+                        "time": msg_time,
+                        "source": url
                     }
     except Exception as e:
-        logger.debug(f"Помилка опитування стрічки {url}: {e}")
+        logger.debug(f"Telegram feed {url} error: {e}")
     return None
 
 async def fetch_current_air_raid_status(client: httpx.AsyncClient) -> dict:
     """
-    Отримує поточний статус повітряної тривоги в м. Одеса з кількох незалежних офіційних джерел.
+    Отримує поточний статус повітряної тривоги в м. Одеса та Одеському районі
+    шляхом опитування кількох незалежних каналів.
     """
-    # 1. Офіційний канал Одеської міської ради
+    # 1. Офіційний структурований фід
+    ub_data = await check_ubilling_alert_api(client)
+    if ub_data:
+        return ub_data
+
+    # 2. Офіційний канал Одеської міської ради (м. Одеса)
     st = await parse_telegram_feed(client, "https://t.me/s/odesacityofficial")
     if st:
         return st
     
-    # 2. Офіційна стрічка сповіщень ДСНС України
+    # 3. Офіційний канал Одеської ОВА (м. Одеса та Одеський район)
+    st = await parse_telegram_feed(client, "https://t.me/s/odesa_oda")
+    if st:
+        return st
+
+    # 4. ДСНС України
     st = await parse_telegram_feed(client, "https://t.me/s/air_alert_ua")
     if st:
         return st
 
-    return {"active": False, "text": "Дані відсутні", "time": None}
+    return {"active": False, "text": "Ситуація спокійна", "time": None, "source": "ОМЕТ Моніторинг"}
 
 async def run_air_raid_monitor():
     """
-    Фоновий неперервний моніторинг повітряної тривоги в Одесі.
+    Фоновий неперервний моніторинг повітряної тривоги в м. Одеса та Одеському районі.
     Опитує офіційні джерела кожні 10 секунд та автоматично розсилає оновлення.
     """
-    logger.info("🚨 [AIR-RAID] Фоновий сервіс авто-моніторингу тривог Одеси запущено")
+    logger.info("🚨 [AIR-RAID] Фоновий сервіс авто-моніторингу тривог Одеси та району запущено")
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -84,17 +117,16 @@ async def run_air_raid_monitor():
                 msg_text = status_data.get("text", "")
                 raw_time = status_data.get("time")
 
-                # Визначаємо час початку тривоги
                 started_at = raw_time if is_active and raw_time else (
                     datetime.now(timezone.utc).isoformat() if is_active else None
                 )
 
                 status_obj = {
                     "active": is_active,
-                    "city": "м. Одеса",
+                    "city": "м. Одеса та Одеський район",
                     "started_at": started_at,
-                    "message": msg_text or ("Повітряна тривога в м. Одеса" if is_active else "Відбій повітряної тривоги"),
-                    "source": "Офіційні канали ОМР / ДСНС (Авто-моніторинг)",
+                    "message": msg_text or ("Повітряна тривога в м. Одеса та Одеському районі" if is_active else "Відбій повітряної тривоги"),
+                    "source": status_data.get("source", "Офіційні канали ОМР / ОВА / ДСНС"),
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }
 
@@ -108,9 +140,9 @@ async def run_air_raid_monitor():
                 # Якщо стан змінився — миттєво сповіщаємо всіх через WebSocket
                 if last_active_state is None or last_active_state != is_active:
                     if is_active:
-                        logger.warning(f"🚨 [AIR-RAID-AUTO] ОГОЛОШЕНО ПОВІТРЯНУ ТРИВОГУ в м. Одеса! ({msg_text})")
+                        logger.warning(f"🚨 [AIR-RAID-AUTO] ОГОЛОШЕНО ПОВІТРЯНУ ТРИВОГУ (м. Одеса та Одеський район)! ({msg_text})")
                     else:
-                        logger.info(f"🟢 [AIR-RAID-AUTO] ВІДБІЙ ПОВІТРЯНОЇ ТРИВОГИ в м. Одеса. ({msg_text})")
+                        logger.info(f"🟢 [AIR-RAID-AUTO] ВІДБІЙ ПОВІТРЯНОЇ ТРИВОГИ (м. Одеса та Одеський район). ({msg_text})")
 
                     await ws_manager.broadcast({
                         "type": "AIR_RAID_UPDATE",
@@ -125,3 +157,4 @@ async def run_air_raid_monitor():
                 logger.error(f"Помилка у циклі авто-моніторингу тривог: {e}")
 
             await asyncio.sleep(10)
+

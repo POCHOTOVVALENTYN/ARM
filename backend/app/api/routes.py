@@ -114,7 +114,13 @@ async def get_all_routes(db: AsyncSession = Depends(get_db)):
             "type": r.type,
             "color": r.color or ("#2563eb" if r.type == "TRAM" else "#059669"),
             "length_km": r.length_km or 10.5,
-            "default_speed_kmh": r.default_speed_kmh or 14.5
+            "default_speed_kmh": r.default_speed_kmh or 14.5,
+            "round_trip_min": r.round_trip_min or (84 if r.type == "TRAM" else 60),
+            "standard_break_min": r.standard_break_min or (15 if r.type == "TRAM" else 20),
+            "designated_break_hub": r.designated_break_hub or "Диспетчерський пункт",
+            "t_dir0_min": r.t_dir0_min or 36,
+            "t_dir1_min": r.t_dir1_min or 36,
+            "layover_min": r.layover_min or 6
         }
         for r in routes
     ]

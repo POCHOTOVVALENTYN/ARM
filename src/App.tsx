@@ -27,6 +27,7 @@ import { AlgorithmSimulatorTab } from './components/tabs/AlgorithmSimulatorTab';
 import { StaticDutiesArchiveView } from './components/views/StaticDutiesArchiveView';
 import { SmartWaybillView } from './components/views/SmartWaybillView';
 import { AnalyticsReportView } from './components/views/AnalyticsReportView';
+import { DispatchOrdersJournalView } from './components/views/DispatchOrdersJournalView';
 import { useScheduleStore } from './store/useScheduleStore';
 import { useConfigStore } from './store/useConfigStore';
 import { useRouteStore } from './store/useRouteStore';
@@ -127,13 +128,14 @@ export default function App() {
         <Header onOpenReport={() => setIsReportOpen(true)} />
 
         {/* Main Content View Routing */}
-        <main className={currentPath === '/dispatch/map' ? "flex-1 w-full h-[calc(100vh-125px)] flex flex-col overflow-hidden" : "flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6"}>
+        <main className={currentPath === '/dispatch/map' ? "flex-1 w-full h-[calc(100vh-125px)] flex flex-col overflow-hidden" : "flex-1 w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6"}>
           {currentPath === '/' && <ExecutiveDashboardView />}
           {currentPath === '/analytics' && <AnalyticsReportView />}
           {currentPath === '/dispatch/map' && <LiveMapView />}
           {currentPath === '/dispatch/marey' && <MareyDiagramTab />}
           {currentPath === '/dispatch/matrix' && <DispatcherLiveView />}
           {currentPath === '/dispatch/gantt' && <OperationalGanttView />}
+          {currentPath === '/dispatch/orders' && <DispatchOrdersJournalView />}
           {currentPath === '/dispatch/generator' && <OperationalScheduleGenerator />}
           {currentPath === '/planning/workspace' && <PlanningWorkspaceView />}
           {currentPath === '/planning/archive' && <StaticDutiesArchiveView />}
