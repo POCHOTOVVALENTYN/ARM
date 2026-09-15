@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import apiClient from '../utils/apiClient';
 import { useUIStore } from './useUIStore';
+import { BreakLocationConfig } from '../types';
 
 export interface EmergencyTemplate {
   id: string;
@@ -42,16 +43,6 @@ export interface RouteDepotConfig {
   defaultInboundTime: string;
 }
 
-export interface BreakLocationConfig {
-  id: string;
-  routeId: string;
-  locationId: string;
-  locationName: string;
-  locationType: string;
-  maxCapacityVehicles: number;
-  durationMin: number;
-}
-
 interface ConfigState {
   emergencyTemplates: EmergencyTemplate[];
   hubs: HubNode[];
@@ -68,6 +59,7 @@ interface ConfigState {
   addDepot: (depot: Depot) => Promise<void>;
   deleteDepot: (id: string) => Promise<void>;
   addBreakLocation: (loc: BreakLocationConfig) => Promise<void>;
+  updateBreakLocation: (loc: BreakLocationConfig) => Promise<void>;
   deleteBreakLocation: (id: string) => Promise<void>;
   addEmergencyTemplate: (template: EmergencyTemplate) => Promise<void>;
   deleteEmergencyTemplate: (id: string) => Promise<void>;
@@ -169,6 +161,18 @@ export const useConfigStore = create<ConfigState>()(
       }
     },
     
+    updateBreakLocation: async (loc) => {
+      try {
+        const res = await apiClient.put(`/v1/settings/break-locations/${loc.id}`, loc);
+        set((state) => {
+          const idx = state.breakLocations.findIndex((b) => b.id === loc.id);
+          if (idx !== -1) state.breakLocations[idx] = res.data;
+        });
+      } catch (error) {
+        console.error('Failed to update break location', error);
+      }
+    },
+
     deleteBreakLocation: async (id) => {
       try {
         await apiClient.delete(`/v1/settings/break-locations/${id}`);

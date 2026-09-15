@@ -37,6 +37,8 @@ async def get_tech_norms():
 @router.get("", response_model=SystemConfigResponse)
 @router.get("/", response_model=SystemConfigResponse)
 @router.get("/config", response_model=SystemConfigResponse)
+@router.get("/system", response_model=SystemConfigResponse)
+@router.get("/network", response_model=SystemConfigResponse)
 async def get_settings(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_dispatcher)
@@ -137,6 +139,7 @@ async def delete_depot(
 
 # --- HUB NODES (ТРАНСПОРТНІ ХАБИ ТА ВУЗЛИ) ---
 @router.get("/hubs", response_model=List[Dict[str, Any]])
+@router.get("/global-hubs", response_model=List[Dict[str, Any]])
 async def get_hubs(db: AsyncSession = Depends(get_db)):
     cached = await get_cache("settings:hubs")
     if cached:
@@ -146,9 +149,13 @@ async def get_hubs(db: AsyncSession = Depends(get_db)):
     hubs = result.scalars().all()
     data = [
         {
-            "id": h.id, "name": h.name, "stationIds": json.loads(h.stationIdsJson or "[]"),
-            "maxCapacity": h.maxCapacity, "isInterlineTransferAllowed": h.isInterlineTransferAllowed,
-            "notes": h.notes
+            "id": h.id, 
+            "name": h.name, 
+            "locationDescription": getattr(h, "locationDescription", ""),
+            "availableTracksCount": getattr(h, "availableTracksCount", 2),
+            "minHeadwayMin": getattr(h, "minHeadwayMin", 2),
+            "routesConnecting": getattr(h, "routesConnecting", []) or [],
+            "channels": getattr(h, "channels", []) or []
         }
         for h in hubs
     ]
@@ -156,15 +163,13 @@ async def get_hubs(db: AsyncSession = Depends(get_db)):
     return data
 
 @router.post("/hubs", response_model=Dict[str, Any])
+@router.post("/global-hubs", response_model=Dict[str, Any])
 async def create_hub(
     hub: HubNodeCreate, 
     db: AsyncSession = Depends(get_db),
     admin: Dispatcher = Depends(get_current_active_superuser)
 ):
     data = hub.model_dump()
-    station_ids = data.pop("stationIds", [])
-    data["stationIdsJson"] = json.dumps(station_ids)
-    
     new_hub = HubNodeModel(**data)
     db.add(new_hub)
     await db.commit()
@@ -197,9 +202,17 @@ async def get_route_depot_configs(db: AsyncSession = Depends(get_db)):
     configs = result.scalars().all()
     data = [
         {
-            "id": c.id, "routeId": c.routeId, "depotId": c.depotId,
-            "zeroTripDurationMin": c.zeroTripDurationMin, "zeroTripDistanceKm": c.zeroTripDistanceKm,
-            "preferredFleetRatio": c.preferredFleetRatio
+            "id": c.id,
+            "routeId": c.routeId,
+            "depotId": getattr(c, "primaryDepotId", getattr(c, "depotId", "depot_1")),
+            "primaryDepotId": getattr(c, "primaryDepotId", None),
+            "secondaryDepotId": getattr(c, "secondaryDepotId", None),
+            "zeroTripDurationMin": getattr(c, "travelTimeMin", getattr(c, "zeroTripDurationMin", 20)),
+            "zeroTripDistanceKm": getattr(c, "distanceKm", getattr(c, "zeroTripDistanceKm", 5.0)),
+            "preferredFleetRatio": getattr(c, "preferredFleetRatio", 1.0),
+            "distanceKm": getattr(c, "distanceKm", 5.0),
+            "travelTimeMin": getattr(c, "travelTimeMin", 20),
+            "pathDescription": getattr(c, "pathDescription", "")
         }
         for c in configs
     ]
@@ -213,7 +226,14 @@ async def create_route_depot_config(
     db: AsyncSession = Depends(get_db),
     admin: Dispatcher = Depends(get_current_active_superuser)
 ):
-    new_cfg = RouteDepotConfigModel(**cfg.model_dump())
+    new_cfg = RouteDepotConfigModel(
+        id=cfg.id,
+        routeId=cfg.routeId,
+        primaryDepotId=cfg.primaryDepotId,
+        secondaryDepotId=cfg.secondaryDepotId,
+        defaultOutboundTime=str(cfg.defaultOutboundTime),
+        defaultInboundTime=str(cfg.defaultInboundTime)
+    )
     db.add(new_cfg)
     await db.commit()
     await invalidate_cache("settings:route_depots")
@@ -266,9 +286,26 @@ async def create_break_location(
     await invalidate_cache("settings:break_locations")
     return loc.model_dump()
 
+@router.put("/break-locations/{loc_id}", response_model=Dict[str, Any])
+async def update_break_location(
+    loc_id: str,
+    loc: BreakLocationConfigCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: Dispatcher = Depends(get_current_active_superuser)
+):
+    result = await db.execute(select(BreakLocationConfigModel).where(BreakLocationConfigModel.id == loc_id))
+    existing = result.scalar_one_or_none()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Пункт обіду не знайдено")
+    for field, value in loc.model_dump().items():
+        setattr(existing, field, value)
+    await db.commit()
+    await invalidate_cache("settings:break_locations")
+    return loc.model_dump()
+
 @router.delete("/break-locations/{loc_id}")
 async def delete_break_location(
-    loc_id: str, 
+    loc_id: str,
     db: AsyncSession = Depends(get_db),
     admin: Dispatcher = Depends(get_current_active_superuser)
 ):

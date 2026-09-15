@@ -161,3 +161,24 @@ async def assign_crew_to_duty(
         dispatcher_id=new_waybill.dispatcher_id,
         status=new_waybill.status
     )
+
+@router.get("", summary="Отримання реєстру водіїв")
+@router.get("/", summary="Отримання реєстру водіїв")
+@router.get("/drivers", summary="Отримання повного реєстру водіїв")
+async def get_all_drivers(
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_dispatcher)
+):
+    """Повертає повний список водіїв підприємства."""
+    drivers_res = await db.execute(select(Driver).order_by(Driver.id.asc()))
+    drivers = drivers_res.scalars().all()
+    return [
+        {
+            "id": d.id,
+            "full_name": d.full_name or d.name or f"Водій #{d.id}",
+            "class_rank": d.class_rank or 1,
+            "status": d.status or "AVAILABLE",
+            "is_active": d.is_active if hasattr(d, "is_active") else True
+        }
+        for d in drivers
+    ]

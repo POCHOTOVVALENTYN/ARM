@@ -1,36 +1,79 @@
-import React from 'react';
-import { Archive } from 'lucide-react';
+import React from 'react'
+import { useStaticDutiesArchiveLogic } from '../../hooks/useStaticDutiesArchiveLogic'
+import { StaticDutiesArchiveToolbar } from '../planning/StaticDutiesArchiveToolbar'
+import { StaticDutiesArchiveEmptyState } from '../planning/StaticDutiesArchiveEmptyState'
+import { StaticDutiesArchiveCard } from '../planning/StaticDutiesArchiveCard'
+import { ScheduleActivationModal } from '../planning/ScheduleActivationModal'
 
 export const StaticDutiesArchiveView: React.FC = () => {
-  return (
-    <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-        <div className="flex items-start space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
-            <Archive className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                Архів статичних нарядів
-              </h2>
-            </div>
-            <p className="text-sm text-slate-500 mt-1">
-              Перегляд та аналітика затверджених планів випуску (історичні дані).
-            </p>
-          </div>
-        </div>
-      </div>
+  const {
+    archiveList,
+    filteredArchive,
+    isLoading,
+    isActivating,
+    searchQuery,
+    setSearchQuery,
+    selectedTransportFilter,
+    setSelectedTransportFilter,
+    activationModal,
+    handleOpenInMatrix,
+    handleOpenActivationModal,
+    handleCloseActivationModal,
+    handleConfirmActivation,
+    handleExportCsv,
+    handleDeleteArchive,
+    handleNavigateToParameters
+  } = useStaticDutiesArchiveLogic()
 
-      {/* Placeholder Content */}
-      <div className="bg-white p-12 border-2 border-dashed border-gray-300 rounded-3xl flex flex-col items-center justify-center text-gray-500 space-y-4">
-        <Archive className="w-12 h-12 text-gray-400" />
-        <h3 className="text-lg font-bold text-gray-900">Розділ у розробці</h3>
-        <p className="text-sm text-center max-w-md">
-          У майбутньому тут буде знаходитись функціонал для перегляду та аналізу вже виконаних (затверджених) статичних нарядів та планів випуску рухомого складу.
-        </p>
-      </div>
+  return (
+    <div className="space-y-6 font-sans max-w-7xl mx-auto" role="region" aria-label="Архів затверджених розкладів">
+      {/* 1. Панель керування та фільтри */}
+      <StaticDutiesArchiveToolbar
+        totalCount={archiveList.length}
+        searchQuery={searchQuery}
+        selectedTransportFilter={selectedTransportFilter}
+        onSearchChange={setSearchQuery}
+        onTransportFilterChange={setSelectedTransportFilter}
+        onNavigateToParameters={handleNavigateToParameters}
+      />
+
+      {/* 2. Контент: Стан завантаження, Пустий стан або Сітка карток */}
+      {isLoading ? (
+        <div className="p-16 text-center text-slate-400 font-bold text-xs animate-pulse bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+          Завантаження архівних розкладів із бази даних...
+        </div>
+      ) : filteredArchive.length === 0 ? (
+        <StaticDutiesArchiveEmptyState
+          onNavigateToParameters={handleNavigateToParameters}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {filteredArchive.map((item) => (
+            <StaticDutiesArchiveCard
+              key={item.id}
+              item={item}
+              onOpenInMatrix={handleOpenInMatrix}
+              onOpenActivationModal={handleOpenActivationModal}
+              onExportCsv={handleExportCsv}
+              onDeleteArchive={handleDeleteArchive}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* 3. Модальне вікно планового введення в дію (Сценарій 1) */}
+      <ScheduleActivationModal
+        isOpen={activationModal.isOpen}
+        scheduleId={activationModal.scheduleId}
+        routeNumber={activationModal.routeNumber}
+        routeName={activationModal.routeName}
+        versionName={activationModal.versionName}
+        isPending={isActivating}
+        onClose={handleCloseActivationModal}
+        onConfirm={handleConfirmActivation}
+      />
     </div>
-  );
-};
+  )
+}
+
+export default StaticDutiesArchiveView

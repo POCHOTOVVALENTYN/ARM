@@ -69,6 +69,10 @@ export interface Route {
   lengthDir2Km?: number;
   length_km?: number;
   default_speed_kmh?: number;
+  round_trip_min?: number;
+  t_dir0_min?: number;
+  t_dir1_min?: number;
+  layover_min?: number;
   color?: string;
   stations?: string[];
   allStations?: string[]; // Includes unique stations from both directions
@@ -229,6 +233,8 @@ export interface DriverDuty {
   driverBadge: string;
   shiftType: ShiftType;
   transportType?: TransportType; // 'tram' | 'trolleybus' | 'electrobus'
+  depotId?: string;              // 'depot_1', 'depot_2', 'depot_3'
+  routeId?: string | number;
   shiftStartTime: string;        // HH:mm
   shiftEndTime: string;          // HH:mm
   totalShiftMin: number;
@@ -283,4 +289,179 @@ export interface EmergencyDetour {
   alternativeStations: string[];
   startTime: string;
   estimatedEndTime: string;
+}
+
+// --- ЕТАЛОННІ РОЗКЛАДИ ТА ЗВЕДЕНА ТАБЛИЦЯ РЕЙСІВ КП «ОМЕТ» ---
+
+export interface ControlPointConfig {
+  id: string;
+  name: string;
+  is_dp?: boolean;
+  is_break?: boolean;
+  is_junction?: boolean;
+  is_terminus?: boolean;
+  offset_fwd?: number;
+  offset_bwd?: number;
+}
+
+export interface SummaryPassport {
+  route_id: string;
+  route_name: string;
+  transport_type: string;
+  designated_dp_name: string;
+  depot_name?: string;
+  total_wagon_hours: number;
+  total_wagon_km: number;
+  total_shifts: number;
+  total_trips: number;
+  round_trip_min: number;
+  operating_speed_kmh: number;
+  route_length_km: number;
+  headway_min: number;
+  duties_count: number;
+  schedule_period: string;
+  schedule_type: string;
+  station_a_name: string;
+  station_b_name: string;
+  control_points: ControlPointConfig[];
+}
+
+export interface MasterGridLunchBreak {
+  start: string;
+  end: string;
+  duration_min: number;
+  standard_min: number;
+  is_overtime: boolean;
+  overtime_min: number;
+  is_paid_break: boolean;
+  location: string;
+}
+
+export interface MasterGridRound {
+  round_number: number;
+  departure_station_a: string;
+  departure_station_b: string;
+  arrival_station_a?: string;
+  layover_station_a_min?: number;
+  tag?: 'LUNCH' | 'SHIFT_CHANGE' | 'ROTATION' | 'PULL_OUT' | 'PULL_IN' | null;
+  note?: string;
+  lunch_break?: MasterGridLunchBreak | null;
+}
+
+export interface MasterGridRow {
+  duty_number: string;
+  duty_type: 'DOUBLE' | 'SINGLE' | 'SPLIT' | 'PEAK';
+  start_location: string;
+  vehicle_id: string;
+  vehicle_id_2?: string | null;
+  depot_name: string;
+  zero_run_min?: number;
+  zero_run_km?: number;
+  junction_stop?: string;
+  rotation_location?: string | null;
+  driver_arrival_time: string;
+  pullout_time: string;
+  dp_arrival_time: string;
+  first_departure_time: string;
+  pullin_time: string;
+  total_work_hours_str: string;
+  shift1_hours_str: string;
+  shift2_hours_str: string;
+  rounds: MasterGridRound[];
+}
+
+export interface DutyBookCPTime {
+  cp_id: string;
+  cp_name: string;
+  arrival_time: string;
+  is_dp?: boolean;
+  is_break?: boolean;
+}
+
+export interface DutyBookTrip {
+  trip_number: number;
+  round_number: number;
+  direction: 'FORWARD' | 'BACKWARD' | 'PULL_OUT' | 'PULL_IN';
+  direction_label: string;
+  departure_time: string;
+  arrival_time: string;
+  layover_min: number;
+  vehicle_id: string;
+  event_tag: string;
+  control_point_times: DutyBookCPTime[];
+}
+
+export interface DutyBookDriver {
+  name: string;
+  arrival_time?: string;
+  pullout_time?: string;
+  start_time: string;
+  lunch_time: string;
+  pullin_time?: string;
+  shift_end_time: string;
+}
+
+export interface DutyBook {
+  duty_number: string
+  route_id: string
+  route_name: string
+  transport_type: string
+  depot_name: string
+  zero_run_min?: number
+  zero_run_km?: number
+  junction_stop?: string
+  rotation_location?: string | null
+  schedule_period: string
+  schedule_type: string
+  vehicle_id: string
+  vehicle_id_2?: string | null
+  duty_type: 'DOUBLE' | 'SINGLE' | 'SPLIT' | 'PEAK'
+  driver1: DutyBookDriver
+  driver2: DutyBookDriver
+  trips: DutyBookTrip[]
+}
+
+export interface MasterScheduleData {
+  summary_passport: SummaryPassport;
+  master_grid_rows: MasterGridRow[];
+  duty_books: Record<string, DutyBook>;
+}
+
+export interface MasterScheduleArchiveItem {
+  id: string
+  routeId: string
+  routeName: string
+  transportType: string
+  scheduleType: string
+  schedulePeriod: string
+  dutiesCount: number
+  totalTrips: number
+  totalWagonKm: number
+  totalWagonHours: number
+  totalShifts: number
+  savedAt: string
+  data: MasterScheduleData
+}
+
+export interface GenerateMasterSchedulePayload {
+  route_id: string
+  route_name?: string
+  transport_type?: string
+  duties_count: number
+  round_trip_min: number
+  route_length_km: number
+  default_speed_kmh: number
+  start_time?: string
+  end_time?: string
+  designated_dp_name?: string
+  control_points?: ControlPointConfig[]
+  depot_name?: string
+  depot_zero_run_min?: number
+  depot_zero_run_km?: number
+  depot_junction_stop_name?: string
+  start_stations_per_duty?: Record<string, string>
+  duty_types_per_duty?: Record<string, string>
+  depots_per_duty?: Record<string, string>
+  schedule_period?: string
+  schedule_type?: string
 }

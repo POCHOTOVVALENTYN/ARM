@@ -101,22 +101,46 @@ export const useRouteStops = (routeId?: string | null, directionId?: number) => 
   return useQuery<RouteStopItem[]>({
     queryKey: ['route-stops', routeId, directionId],
     queryFn: async () => {
-      if (!routeId || routeId === 'ALL') return [];
-      const cleanId = String(routeId).trim().replace(/^(T|Tr)/i, '');
-      const queryParam = directionId !== undefined ? `?direction_id=${directionId}` : '';
+      if (!routeId || routeId === 'ALL') return []
+      const cleanId = String(routeId).trim().replace(/^(T|Tr)/i, '')
+      const queryParam = directionId !== undefined ? `?direction_id=${directionId}` : ''
       try {
-        const { data } = await api.get<{ stops: RouteStopItem[] }>(`/routes/${cleanId}/stops${queryParam}`);
-        return data?.stops || [];
+        const { data } = await api.get<{ stops: RouteStopItem[] }>(`/routes/${cleanId}/stops${queryParam}`)
+        return data?.stops || []
       } catch {
         try {
-          const { data } = await api.get<{ stops: RouteStopItem[] }>(`/routes/${routeId}/stops${queryParam}`);
-          return data?.stops || [];
+          const { data } = await api.get<{ stops: RouteStopItem[] }>(`/routes/${routeId}/stops${queryParam}`)
+          return data?.stops || []
         } catch {
-          return [];
+          return []
         }
       }
     },
     enabled: !!routeId && routeId !== 'ALL',
     staleTime: 60000,
-  });
-};
+  })
+}
+
+export interface ControlPointItem {
+  id: string
+  name: string
+  lat: number
+  lng: number
+  is_dp: boolean
+  break_capacity?: number
+}
+
+export const useControlPoints = () => {
+  return useQuery<ControlPointItem[]>({
+    queryKey: ['control-points'],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get<ControlPointItem[]>('/control-points')
+        return data || []
+      } catch {
+        return []
+      }
+    },
+    staleTime: 5 * 60 * 1000
+  })
+}

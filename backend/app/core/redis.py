@@ -6,6 +6,43 @@ from typing import Any, Optional, Dict
 
 logger = logging.getLogger("app.redis")
 
+class InMemoryPipeline:
+    def __init__(self, store_ref: "InMemoryRedisFallback"):
+        self.store = store_ref
+        self.queue = []
+
+    def set(self, key: str, value: str, ex: Optional[int] = None):
+        self.queue.append(("set", (key, value, ex)))
+        return self
+
+    def hset(self, name: str, key: str, value: str):
+        self.queue.append(("hset", (name, key, value)))
+        return self
+
+    def delete(self, *keys: str):
+        self.queue.append(("delete", keys))
+        return self
+
+    async def execute(self):
+        results = []
+        for cmd, args in self.queue:
+            if cmd == "set":
+                self.store._store[args[0]] = str(args[1])
+                results.append(True)
+            elif cmd == "hset":
+                name, k, v = args
+                if name not in self.store._hashes:
+                    self.store._hashes[name] = {}
+                self.store._hashes[name][k] = str(v)
+                results.append(1)
+            elif cmd == "delete":
+                for k in args:
+                    self.store._store.pop(k, None)
+                    self.store._hashes.pop(k, None)
+                results.append(len(args))
+        self.queue.clear()
+        return results
+
 class InMemoryRedisFallback:
     """Резервне in-memory сховище, якщо Redis сервер не запущено локально."""
     def __init__(self):
@@ -46,10 +83,7 @@ class InMemoryRedisFallback:
         return self._hashes.get(name, {})
 
     def pipeline(self):
-        return self
-
-    async def execute(self):
-        return True
+        return InMemoryPipeline(self)
 
     async def close(self):
         pass

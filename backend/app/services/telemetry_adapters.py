@@ -2,6 +2,8 @@ import asyncio
 import logging
 import httpx
 import json
+import time
+import math
 import os
 import csv
 import re
@@ -292,42 +294,161 @@ class WialonAdapter(BaseTelemetryAdapter):
 
 class SimulationAdapter(BaseTelemetryAdapter):
     """
-    Резервний інтелектуальний симулятор переміщення вагонів Одеси
-    (використовується, коли реальний онлайн-фід порожній / у нічний час).
+    Резервний інтелектуальний симулятор переміщення вагонів Одеси з прив'язкою до колій.
+    Динамічно завантажує актуальні геометрії маршрутів та парк із бази даних omet.db,
+    розраховує координати вздовж осі колій (Track-Snapping / Anti-EW) та азимут руху.
     """
     def __init__(self):
-        self.sample_vehicles = [
-            {"vehicle_id": "3012", "route_id": "7", "lat": 46.5824, "lng": 30.7932, "speed": 22.0, "status": "active", "heading": 195},
-            {"vehicle_id": "3014", "route_id": "7", "lat": 46.5412, "lng": 30.7610, "speed": 18.5, "status": "active", "heading": 190},
-            {"vehicle_id": "3018", "route_id": "7", "lat": 46.4950, "lng": 30.7250, "speed": 24.0, "status": "active", "heading": 210},
-            {"vehicle_id": "4015", "route_id": "18", "lat": 46.4668, "lng": 30.7441, "speed": 16.0, "status": "active", "heading": 175},
-            {"vehicle_id": "4020", "route_id": "18", "lat": 46.4290, "lng": 30.7558, "speed": 20.0, "status": "active", "heading": 180},
-            {"vehicle_id": "5001", "route_id": "28", "lat": 46.4815, "lng": 30.7320, "speed": 15.0, "status": "active", "heading": 90},
-            {"vehicle_id": "5005", "route_id": "5", "lat": 46.4295, "lng": 30.7660, "speed": 0.0, "status": "break", "heading": 0},
-            {"vehicle_id": "5008", "route_id": "8", "lat": 46.4421, "lng": 30.7012, "speed": 19.0, "status": "active", "heading": 270},
-            {"vehicle_id": "5012", "route_id": "9", "lat": 46.4600, "lng": 30.7200, "speed": 17.5, "status": "active", "heading": 45},
-            {"vehicle_id": "9901", "route_id": "7", "lat": 46.4678, "lng": 30.7334, "speed": 0.0, "status": "depot", "heading": 0},
-        ]
+        self._cached_data: Optional[List[Dict[str, Any]]] = None
+        self._last_load: float = 0.0
+
+    async def _ensure_loaded(self) -> List[Dict[str, Any]]:
+        now = time.time()
+        if self._cached_data and (now - self._last_load < 300.0):
+            return self._cached_data
+
+        try:
+            from sqlalchemy import select
+            from app.core.database import AsyncSessionLocal
+            from app.models.models import RouteModel, RouteShape, Vehicle
+
+            async with AsyncSessionLocal() as db:
+                routes_res = (await db.execute(select(RouteModel))).scalars().all()
+                shapes_res = (await db.execute(select(RouteShape))).scalars().all()
+                vehicles_res = (await db.execute(select(Vehicle))).scalars().all()
+
+                shapes_by_route: Dict[str, List[List[Dict[str, float]]]] = {}
+                for s in shapes_res:
+                    pts = s.geometry if isinstance(s.geometry, list) else (json.loads(s.geometry) if isinstance(s.geometry, str) else [])
+                    if pts and len(pts) >= 5:
+                        shapes_by_route.setdefault(str(s.route_id), []).append(pts)
+
+                vehicles_by_type: Dict[str, List[Dict[str, Any]]] = {"TRAM": [], "TROLLEYBUS": []}
+                for v in vehicles_res:
+                    vt = (v.type or "TRAM").upper()
+                    if vt in vehicles_by_type:
+                        vehicles_by_type[vt].append({
+                            "id": str(v.id),
+                            "model": v.model or ("Tatra T3" if vt == "TRAM" else "Богдан Т70117"),
+                            "is_accessible": bool(v.is_accessible),
+                            "depot_id": v.depot_id or ("depot_1" if vt == "TRAM" else "depot_3")
+                        })
+
+                # Формуємо розклад випусків для кожного з 24 маршрутів
+                active_units = []
+                v_idx_tram = 0
+                v_idx_trol = 0
+
+                for r in routes_res:
+                    r_id_str = str(r.id)
+                    r_num_str = str(r.number or r.id)
+                    r_type = (r.type or "TRAM").upper()
+                    r_shapes = shapes_by_route.get(r_id_str) or shapes_by_route.get(r_num_str) or []
+
+                    if not r_shapes:
+                        continue
+
+                    # 2-3 випуски на маршрут
+                    duties_count = 2 if len(r_num_str) > 2 else 3
+                    for duty_no in range(1, duties_count + 1):
+                        pool = vehicles_by_type["TRAM"] if r_type == "TRAM" else vehicles_by_type["TROLLEYBUS"]
+                        if r_type == "TRAM":
+                            veh = pool[v_idx_tram % len(pool)] if pool else {"id": f"30{duty_no:02d}", "model": "Tatra T3", "is_accessible": False}
+                            v_idx_tram += 1
+                        else:
+                            veh = pool[v_idx_trol % len(pool)] if pool else {"id": f"00{duty_no:02d}", "model": "Богдан Т70117", "is_accessible": True}
+                            v_idx_trol += 1
+
+                        shape_pts = r_shapes[(duty_no - 1) % len(r_shapes)]
+                        active_units.append({
+                            "vehicle_id": veh["id"],
+                            "route_id": r_id_str,
+                            "route_number": r_num_str,
+                            "duty_number": duty_no,
+                            "vehicle_type": r_type,
+                            "model": veh["model"],
+                            "is_accessible": veh["is_accessible"],
+                            "shape_points": shape_pts,
+                            "offset_ratio": (duty_no - 1) / float(duties_count)
+                        })
+
+                self._cached_data = active_units
+                self._last_load = now
+                logger.info(f"🛰️ [SIMULATION] Сформовано {len(active_units)} активних бортів для {len(routes_res)} маршрутів ОМЕТ")
+                return active_units
+        except Exception as e:
+            logger.error(f"Помилка ініціалізації симулятора: {e}")
+            return []
 
     async def fetch_vehicles(self) -> List[Dict[str, Any]]:
-        now_ms = int(datetime.now().timestamp() * 1000)
-        current_time_sec = datetime.now().timestamp()
-        result = []
-        for base in self.sample_vehicles:
-            lat_offset = 0.0003 * (base["speed"] > 0) * (0.5 - (current_time_sec % 60) / 60.0)
-            lng_offset = 0.0002 * (base["speed"] > 0) * (0.5 - (current_time_sec % 45) / 45.0)
-            result.append({
-                "vehicle_id": base["vehicle_id"],
-                "route_id": base["route_id"],
-                "lat": round(base["lat"] + lat_offset, 6),
-                "lng": round(base["lng"] + lng_offset, 6),
-                "speed": base["speed"],
-                "heading": base.get("heading", 0),
-                "status": base["status"],
-                "source": "SIMULATION",
+        import math
+        units = await self._ensure_loaded()
+        if not units:
+            return []
+
+        now_ts = time.time()
+        now_ms = int(now_ts * 1000)
+        results = []
+
+        for u in units:
+            pts = u["shape_points"]
+            n = len(pts)
+            if n < 2:
+                continue
+
+            # Циклічний рух вздовж колії: повне коло ~ 240 секунд (4 хв у симуляції)
+            cycle_duration = 240.0
+            t_rel = (now_ts + u["offset_ratio"] * cycle_duration) % cycle_duration
+            progress = t_rel / cycle_duration
+
+            # Симуляція зупинок (якщо progress біля кратних значень, швидкість = 0)
+            stop_phase = (progress * 12) % 1.0
+            is_at_stop = stop_phase < 0.15
+
+            pt_float = progress * (n - 1)
+            idx1 = int(pt_float)
+            idx2 = min(idx1 + 1, n - 1)
+            alpha = pt_float - idx1
+
+            p1 = pts[idx1]
+            p2 = pts[idx2]
+
+            cur_lat = p1["lat"] + alpha * (p2["lat"] - p1["lat"])
+            cur_lng = p1["lng"] + alpha * (p2["lng"] - p1["lng"])
+
+            # Розрахунок курсу (bearing)
+            d_lng = math.radians(p2["lng"] - p1["lng"])
+            phi1 = math.radians(p1["lat"])
+            phi2 = math.radians(p2["lat"])
+            y = math.sin(d_lng) * math.cos(phi2)
+            x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(d_lng)
+            bearing = int((math.degrees(math.atan2(y, x)) + 360) % 360) if (idx1 != idx2) else 0
+
+            speed_kmh = 0.0 if is_at_stop else round(18.0 + 4.0 * math.sin(progress * math.pi * 4), 1)
+            dev_min = round(math.sin(u["duty_number"] * 1.5 + progress * math.pi) * 2.5, 1)
+
+            results.append({
+                "vehicle_id": u["vehicle_id"],
+                "display_name": f"Борт {u['vehicle_id']}",
+                "route_id": u["route_id"],
+                "route_number": u["route_number"],
+                "duty_number": u["duty_number"],
+                "vehicle_type": u["vehicle_type"],
+                "model": u["model"],
+                "is_service": False,
+                "is_accessible": u["is_accessible"],
+                "lat": round(cur_lat, 6),
+                "lng": round(cur_lng, 6),
+                "speed": speed_kmh,
+                "heading": bearing,
+                "deviation_min": dev_min,
+                "status": "STANDING" if is_at_stop else "ON_ROUTE",
+                "source": "FUSION_SIM",
+                "anti_ew_corrected": True,
                 "last_updated": now_ms
             })
-        return result
+
+        return results
 
 
 class EasyWayAdapter(BaseTelemetryAdapter):

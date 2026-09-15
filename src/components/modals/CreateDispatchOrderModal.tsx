@@ -12,25 +12,30 @@ import {
   ShieldAlert,
   Send
 } from 'lucide-react';
-import apiClient from '../../utils/apiClient';
-import { useRouteStore } from '../../store/useRouteStore';
-import { toast } from 'sonner';
+import apiClient from '../../utils/apiClient'
+import { useRouteStore } from '../../store/useRouteStore'
+import { toast } from 'sonner'
 
 interface CreateDispatchOrderModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
+  isOpen: boolean
+  onClose: () => void
+  onSuccess?: () => void
+  initialRouteId?: string
+  initialVehicleId?: string
 }
 
 export const CreateDispatchOrderModal: React.FC<CreateDispatchOrderModalProps> = ({
   isOpen,
   onClose,
-  onSuccess
+  onSuccess,
+  initialRouteId,
+  initialVehicleId
 }) => {
-  const { routes } = useRouteStore();
+  const routesFromStore = useRouteStore((state) => state.routes)
+  const routes = routesFromStore || []
 
-  const [routeId, setRouteId] = useState<string>('7');
-  const [vehicleId, setVehicleId] = useState<string>('');
+  const [routeId, setRouteId] = useState<string>(initialRouteId || '7')
+  const [vehicleId, setVehicleId] = useState<string>(initialVehicleId || '')
   const [dutyNumber, setDutyNumber] = useState<number>(1);
   const [driverName, setDriverName] = useState<string>('');
   const [orderType, setOrderType] = useState<string>('SHORT_TURN');
@@ -91,7 +96,7 @@ export const CreateDispatchOrderModal: React.FC<CreateDispatchOrderModalProps> =
       });
 
       toast.success('Розпорядження успішно зареєстровано в Журналі КП «ОМЕТ»!');
-      onSuccess();
+      onSuccess?.();
       onClose();
     } catch (error: any) {
       console.error('Помилка реєстрації розпорядження:', error);

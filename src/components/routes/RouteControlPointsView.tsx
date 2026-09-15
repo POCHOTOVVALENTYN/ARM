@@ -67,8 +67,8 @@ export const RouteControlPointsView: React.FC<RouteControlPointsViewProps> = ({ 
   // Available points are now the actual stations on this route
   const availablePointsToAdd = (route.allStations || route.stations || [])
     .map(stationId => getStationById(stationId))
-    .filter(s => s !== undefined)
-    .filter(station => !routePoints.some(rp => rp.controlPointId === station!.id));
+    .filter((s): s is NonNullable<typeof s> => Boolean(s))
+    .filter(station => !routePoints.some(rp => rp.controlPointId === station.id))
 
   return (
     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-5 space-y-4">
@@ -104,12 +104,12 @@ export const RouteControlPointsView: React.FC<RouteControlPointsViewProps> = ({ 
           </div>
         ) : (
           routePoints.map(rp => {
-            const stationInfo = getStationById(rp.controlPointId);
-            const globalHubInfo = controlPoints.find(c => c.id === rp.controlPointId);
-            const isComplexHub = !!globalHubInfo;
-            const displayName = stationInfo?.name || globalHubInfo?.name || 'Невідома точка';
-            const displayDesc = globalHubInfo?.locationDescription || `Зупинка: ${stationInfo?.name || ''}`;
-            const maxTracks = globalHubInfo?.availableTracksCount || 1;
+            const stationInfo = getStationById(rp.controlPointId)
+            const globalHubInfo = controlPoints.find(c => c.id === rp.controlPointId)
+            const isComplexHub = !!globalHubInfo
+            const displayName = stationInfo?.name || globalHubInfo?.name || `Точка ${rp.controlPointId}`
+            const displayDesc = globalHubInfo?.locationDescription || `Зупинка: ${stationInfo?.name || rp.controlPointId}`
+            const maxTracks = globalHubInfo?.availableTracksCount || 1
 
             return (
               <div key={rp.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex items-start gap-4">

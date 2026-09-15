@@ -1,47 +1,59 @@
-import React from 'react';
-import { X, Printer, Download, Clock, Bus, User, FileText, CheckCircle2 } from 'lucide-react';
+import React from 'react'
+import { X, Printer, FileText, CheckCircle2 } from 'lucide-react'
 
 interface KPZCardData {
-  kpz_id: string;
-  date: string;
-  route_number: string;
-  route_name: string;
-  duty_number: number;
-  shift_name: string;
-  driver_name: string;
-  driver_tab_num: string;
-  vehicle_num: string;
-  second_vehicle_num?: string | null;
-  depot_name: string;
-  depot_arrival_time: string;
-  prep_time_min: number;
-  med_check_time: string;
-  pullout_time: string;
-  pullin_time: string;
-  lunch_location: string;
-  lunch_start_time: string;
-  lunch_duration_min: number;
-  paid_excess_break_min: number;
-  total_work_hours: number;
-  driving_hours: number;
-  night_hours: number;
-  timeline_events: Array<{ time: string; event: string }>;
+  kpz_id: string
+  date: string
+  route_number: string
+  route_name: string
+  duty_number: number
+  shift_name: string
+  driver_name: string
+  driver_tab_num: string
+  vehicle_num: string
+  second_vehicle_num?: string | null
+  depot_name: string
+  depot_arrival_time: string
+  prep_time_min: number
+  med_check_time: string
+  pullout_time: string
+  pullin_time: string
+  lunch_location: string
+  lunch_start_time: string
+  lunch_duration_min: number
+  paid_excess_break_min: number
+  total_work_hours: number
+  driving_hours: number
+  night_hours: number
+  timeline_events: Array<{ time: string; event: string }>
 }
 
 interface KPZCardPrinterModalProps {
-  data: KPZCardData | null;
-  onClose: () => void;
+  data: KPZCardData | null
+  onClose: () => void
 }
 
 export const KPZCardPrinterModal: React.FC<KPZCardPrinterModalProps> = ({ data, onClose }) => {
-  if (!data) return null;
+  if (!data) return null
 
   const handlePrint = () => {
-    window.print();
-  };
+    window.print()
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose()
+    }
+  }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 font-sans"
+      onKeyDown={handleKeyDown}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Картка обліку роботи водія КПЗ"
+    >
       <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-3xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/60 shrink-0">
@@ -53,15 +65,21 @@ export const KPZCardPrinterModal: React.FC<KPZCardPrinterModalProps> = ({ data, 
           </div>
           <div className="flex items-center space-x-2">
             <button
+              type="button"
               onClick={handlePrint}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 cursor-pointer transition-colors shadow-xs"
+              tabIndex={0}
+              aria-label="Роздрукувати картку КПЗ"
             >
               <Printer className="w-4 h-4" />
               <span>Друк КПЗ</span>
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg transition-colors cursor-pointer"
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg transition-colors cursor-pointer"
+              tabIndex={0}
+              aria-label="Закрити модальне вікно КПЗ"
             >
               <X className="w-5 h-5" />
             </button>
@@ -168,5 +186,7 @@ export const KPZCardPrinterModal: React.FC<KPZCardPrinterModalProps> = ({ data, 
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
+
+export default KPZCardPrinterModal

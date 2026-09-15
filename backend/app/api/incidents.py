@@ -38,6 +38,8 @@ class IncidentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+@router.get("", response_model=List[IncidentResponse], summary="Отримання списку інцидентів")
+@router.get("/", response_model=List[IncidentResponse], summary="Отримання списку інцидентів")
 @router.get("/active", response_model=List[IncidentResponse], summary="Отримання активних інцидентів")
 async def get_active_incidents(
     db: AsyncSession = Depends(get_db),

@@ -3,11 +3,12 @@ from datetime import datetime, date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, or_
 from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.models.models import DispatchOrderModel
+from app.api.websocket import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class DispatchStatsOut(BaseModel):
 # --- API Endpoints ---
 
 @router.get("", response_model=List[DispatchOrderOut])
+@router.get("/", response_model=List[DispatchOrderOut])
 async def get_dispatch_orders(
     date_str: Optional[str] = Query(None, description="YYYY-MM-DD or 'today'"),
     route_id: Optional[str] = Query(None),
@@ -114,6 +116,7 @@ async def get_dispatch_orders(
 
 
 @router.post("", response_model=DispatchOrderOut)
+@router.post("/", response_model=DispatchOrderOut)
 async def create_dispatch_order(
     payload: DispatchOrderCreate,
     db: AsyncSession = Depends(get_db)
@@ -154,10 +157,30 @@ async def create_dispatch_order(
     await db.commit()
     await db.refresh(order)
     logger.info(f"📋 [DISPATCH ORDER] Створено наказ {order.order_number}: {order.order_type} для маршруту {order.route_number} (Борт {order.vehicle_id})")
+
+    try:
+        await ws_manager.broadcast({
+            "type": "DISPATCH_ORDER_EVENT",
+            "payload": {
+                "action": "CREATED",
+                "id": order.id,
+                "order_number": order.order_number,
+                "order_type": order.order_type,
+                "route_id": order.route_id,
+                "route_number": order.route_number,
+                "vehicle_id": order.vehicle_id,
+                "status": order.status,
+                "description": order.description
+            }
+        })
+    except Exception as e:
+        logger.debug(f"WS broadcast error: {e}")
+
     return order
 
 
 @router.patch("/{order_id}/complete", response_model=DispatchOrderOut)
+@router.post("/{order_id}/complete", response_model=DispatchOrderOut)
 async def complete_dispatch_order(order_id: int, db: AsyncSession = Depends(get_db)):
     """Позначити розпорядження як успішно виконане"""
     res = await db.execute(select(DispatchOrderModel).where(DispatchOrderModel.id == order_id))
@@ -170,10 +193,27 @@ async def complete_dispatch_order(order_id: int, db: AsyncSession = Depends(get_
     await db.commit()
     await db.refresh(order)
     logger.info(f"✅ [DISPATCH ORDER] Розпорядження {order.order_number} виконано.")
+
+    try:
+        await ws_manager.broadcast({
+            "type": "DISPATCH_ORDER_EVENT",
+            "payload": {
+                "action": "COMPLETED",
+                "id": order.id,
+                "order_number": order.order_number,
+                "route_id": order.route_id,
+                "route_number": order.route_number,
+                "status": "COMPLETED"
+            }
+        })
+    except Exception as e:
+        logger.debug(f"WS broadcast error: {e}")
+
     return order
 
 
 @router.patch("/{order_id}/cancel", response_model=DispatchOrderOut)
+@router.post("/{order_id}/cancel", response_model=DispatchOrderOut)
 async def cancel_dispatch_order(order_id: int, db: AsyncSession = Depends(get_db)):
     """Скасувати розпорядження"""
     res = await db.execute(select(DispatchOrderModel).where(DispatchOrderModel.id == order_id))
@@ -186,13 +226,34 @@ async def cancel_dispatch_order(order_id: int, db: AsyncSession = Depends(get_db
     await db.commit()
     await db.refresh(order)
     logger.info(f"🛑 [DISPATCH ORDER] Розпорядження {order.order_number} скасовано.")
+
+    try:
+        await ws_manager.broadcast({
+            "type": "DISPATCH_ORDER_EVENT",
+            "payload": {
+                "action": "CANCELLED",
+                "id": order.id,
+                "order_number": order.order_number,
+                "route_id": order.route_id,
+                "route_number": order.route_number,
+                "status": "CANCELLED"
+            }
+        })
+    except Exception as e:
+        logger.debug(f"WS broadcast error: {e}")
+
     return order
 
 
 @router.get("/stats", response_model=DispatchStatsOut)
 async def get_dispatch_stats(db: AsyncSession = Depends(get_db)):
     """Отримати статистику наказів за сьогоднішню зміну"""
-    today_date = date.today()
+    today_utc = datetime.utcnow().date()
+    today_local = date.today()
+    date_filter = or_(
+        func.date(DispatchOrderModel.created_at) == today_utc,
+        func.date(DispatchOrderModel.created_at) == today_local
+    )
     
     # Перевірка чи є взагалі записи
     total_db_res = await db.execute(select(func.count(DispatchOrderModel.id)))
@@ -200,28 +261,28 @@ async def get_dispatch_stats(db: AsyncSession = Depends(get_db)):
         await _seed_sample_orders(db)
 
     # Підрахунок сьогоднішніх
-    total_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date))
+    total_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter))
     total_today = total_res.scalar() or 0
 
-    active_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.status == "ACTIVE"))
+    active_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.status == "ACTIVE"))
     active_count = active_res.scalar() or 0
 
-    comp_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.status == "COMPLETED"))
+    comp_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.status == "COMPLETED"))
     completed_count = comp_res.scalar() or 0
 
-    st_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.order_type == "SHORT_TURN"))
+    st_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.order_type == "SHORT_TURN"))
     short_turns_count = st_res.scalar() or 0
 
-    pac_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.order_type == "PACING"))
+    pac_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.order_type == "PACING"))
     pacing_count = pac_res.scalar() or 0
 
-    pull_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.order_type == "PULL_IN"))
+    pull_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.order_type == "PULL_IN"))
     pull_in_count = pull_res.scalar() or 0
 
-    det_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.order_type == "DETOUR"))
+    det_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.order_type == "DETOUR"))
     detour_count = det_res.scalar() or 0
 
-    serv_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(func.date(DispatchOrderModel.created_at) == today_date, DispatchOrderModel.order_type == "SERVICE_CALL"))
+    serv_res = await db.execute(select(func.count(DispatchOrderModel.id)).where(date_filter, DispatchOrderModel.order_type == "SERVICE_CALL"))
     service_calls_count = serv_res.scalar() or 0
 
     return DispatchStatsOut(

@@ -43,87 +43,73 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
   fetchLiveTelemetry: async () => {
     try {
       const res = await fetch('/api/v1/telemetry/vehicles');
-      if (res.ok) {
-        const list = await res.json();
-        if (Array.isArray(list) && list.length > 0) {
-          const map: Record<string, VehicleTelemetry> = {};
-          list.forEach((v) => {
-            if (v && (v.vehicle_id || v.id)) {
-              const vId = String(v.vehicle_id || v.id);
-              map[vId] = {
-                vehicle_id: vId,
-                route_id: String(v.route_id || v.route_number || ''),
-                route_number: String(v.route_number || v.route_id || ''),
-                duty_number: v.duty_number || 1,
-                vehicle_type: v.vehicle_type || (vId.startsWith('0') ? 'TROLLEYBUS' : 'TRAM'),
-                is_service: Boolean(v.is_service),
-                lat: v.lat || 46.475,
-                lng: v.lng || v.lon || 30.735,
-                speed: v.speed || 0,
-                heading: v.heading || 0,
-                last_updated: Date.now(),
-                deviation_min: v.deviation_min || 0,
-                status: v.status || 'ON_ROUTE',
-                current_station: v.current_station,
-                next_station: v.next_station,
-                driver_name: v.driver_name,
-                has_active_detour: Boolean(v.has_active_detour),
-                active_detour_loop: v.active_detour_loop
-              };
-            }
-          });
-          set({ vehicles: map, isConnected: true, lastSyncTime: Date.now() });
-        }
+      if (!res.ok) {
+        set({ isConnected: false });
+        return;
+      }
+      const list = await res.json();
+      if (Array.isArray(list)) {
+        const map: Record<string, VehicleTelemetry> = {};
+        list.forEach((v) => {
+          if (v && (v.vehicle_id || v.id)) {
+            const vId = String(v.vehicle_id || v.id);
+            map[vId] = {
+              vehicle_id: vId,
+              route_id: String(v.route_id || v.route_number || ''),
+              route_number: String(v.route_number || v.route_id || ''),
+              duty_number: v.duty_number || 1,
+              vehicle_type: v.vehicle_type || (vId.startsWith('0') ? 'TROLLEYBUS' : 'TRAM'),
+              is_service: Boolean(v.is_service),
+              lat: typeof v.lat === 'number' ? v.lat : 46.475,
+              lng: typeof (v.lng || v.lon) === 'number' ? (v.lng || v.lon) : 30.735,
+              speed: typeof v.speed === 'number' ? v.speed : 0,
+              heading: typeof v.heading === 'number' ? v.heading : 0,
+              last_updated: v.last_updated || Date.now(),
+              deviation_min: typeof v.deviation_min === 'number' ? v.deviation_min : 0,
+              status: v.status || 'ON_ROUTE',
+              current_station: v.current_station,
+              next_station: v.next_station,
+              driver_name: v.driver_name,
+              has_active_detour: Boolean(v.has_active_detour),
+              active_detour_loop: v.active_detour_loop
+            };
+          }
+        });
+        set({ vehicles: map, isConnected: true, lastSyncTime: Date.now() });
       }
     } catch {
-      // Background silent fallback
+      set({ isConnected: false });
     }
   },
 
   // Пакетне оновлення живого флоту КП «ОМЕТ» без збереження застарілих "фантомних" бортів
   updateVehicles: (data) =>
     set((state) => {
-      if (!Array.isArray(data) || data.length === 0) {
+      if (!Array.isArray(data)) {
         return state;
       }
-      // Якщо прийшов повний пакет флоту (>= 10 ТЗ) — повністю синхронізуємо флот
-      if (data.length >= 10) {
-        const freshMap: Record<string, VehicleTelemetry> = {};
-        for (let i = 0; i < data.length; i++) {
-          const v = data[i];
-          if (v && (v.vehicle_id || (v as any).id)) {
-            const vId = String(v.vehicle_id || (v as any).id);
-            freshMap[vId] = {
-              ...v,
-              vehicle_id: vId,
-              route_id: String(v.route_id || v.route_number || ''),
-              route_number: String(v.route_number || v.route_id || ''),
-            };
-          }
-        }
-        return {
-          vehicles: freshMap,
-          isConnected: true,
-          lastSyncTime: Date.now(),
-        };
+      if (data.length === 0) {
+        return { vehicles: {}, lastSyncTime: Date.now() };
       }
-
-      // Якщо прийшло точкове оновлення декількох ТЗ — оновлюємо існуючі
-      const newVehicles = { ...state.vehicles };
+      // Оновлюємо мапу транспортних засобів
+      const updatedMap: Record<string, VehicleTelemetry> = { ...state.vehicles };
       for (let i = 0; i < data.length; i++) {
         const v = data[i];
         if (v && (v.vehicle_id || (v as any).id)) {
           const vId = String(v.vehicle_id || (v as any).id);
-          newVehicles[vId] = {
+          updatedMap[vId] = {
             ...v,
             vehicle_id: vId,
             route_id: String(v.route_id || v.route_number || ''),
             route_number: String(v.route_number || v.route_id || ''),
+            speed: typeof v.speed === 'number' ? v.speed : 0,
+            deviation_min: typeof v.deviation_min === 'number' ? v.deviation_min : 0,
+            last_updated: v.last_updated || Date.now()
           };
         }
       }
       return {
-        vehicles: newVehicles,
+        vehicles: updatedMap,
         isConnected: true,
         lastSyncTime: Date.now(),
       };
@@ -133,7 +119,12 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
     set((state) => ({
       vehicles: {
         ...state.vehicles,
-        [vehicle.vehicle_id]: vehicle,
+        [vehicle.vehicle_id]: {
+          ...vehicle,
+          deviation_min: typeof vehicle.deviation_min === 'number' ? vehicle.deviation_min : 0,
+          speed: typeof vehicle.speed === 'number' ? vehicle.speed : 0,
+          last_updated: vehicle.last_updated || Date.now()
+        },
       },
       isConnected: true,
       lastSyncTime: Date.now(),

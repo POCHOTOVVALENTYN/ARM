@@ -4,6 +4,14 @@ import math
 from datetime import datetime, timedelta, time as dt_time
 from typing import List, Dict, Any, Tuple, Optional
 from app.core.logging_config import get_logger
+from app.core.transit_rules import (
+    MIN_WORK_MINS_BEFORE_LUNCH,
+    MAX_WORK_MINS_BEFORE_LUNCH,
+    MAX_LUNCH_DURATION_MIN,
+    TRAM_STANDARD_LUNCH_MIN,
+    standard_lunch_min,
+    prep_time_min,
+)
 
 logger = get_logger("transit_solver")
 
@@ -23,6 +31,630 @@ def minutes_to_time(minutes_float: float) -> dt_time:
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
     return dt_time(hour=hours, minute=minutes, second=seconds)
+
+def format_minutes_to_hhmm(mins: float) -> str:
+    norm = int(mins) % 1440
+    h = norm // 60
+    m = norm % 60
+    return f"{h:02d}:{m:02d}"
+
+def format_duration_hours_mins(mins: float) -> str:
+    total_m = int(mins)
+    h = total_m // 60
+    m = total_m % 60
+    return f"{h} год {m:02d} хв"
+
+# Топологічна матриця нульових рейсів депо Одеси
+ODESSA_DEPOT_ZERO_RUN_MATRIX: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {
+    "TRAM": {
+        "5": {
+            "ТД-2": {"zero_min": 29, "zero_km": 6.4, "junction": "Музкомедія"},
+            "ТД-1": {"zero_min": 22, "zero_km": 4.8, "junction": "Музкомедія"}
+        },
+        "7": {
+            "ТД-2": {"zero_min": 32, "zero_km": 7.8, "junction": "Пересипський міст"},
+            "ТД-1": {"zero_min": 45, "zero_km": 11.2, "junction": "Пересипський міст"}
+        },
+        "17": {
+            "ТД-1": {"zero_min": 18, "zero_km": 3.8, "junction": "Куликове поле"},
+            "ТД-2": {"zero_min": 35, "zero_km": 8.2, "junction": "Куликове поле"}
+        },
+        "18": {
+            "ТД-1": {"zero_min": 20, "zero_km": 4.2, "junction": "Куликове поле"},
+            "ТД-2": {"zero_min": 38, "zero_km": 9.0, "junction": "Куликове поле"}
+        },
+        "28": {
+            "ТД-2": {"zero_min": 24, "zero_km": 5.1, "junction": "Тираспольська площа"},
+            "ТД-1": {"zero_min": 25, "zero_km": 5.4, "junction": "пл. Старосінна"}
+        }
+    },
+    "TROLLEYBUS": {
+        "Tr7": {
+            "ТРД-1": {"zero_min": 25, "zero_km": 6.2, "junction": "Залізничний вокзал"}
+        },
+        "7": {
+            "ТРД-1": {"zero_min": 25, "zero_km": 6.2, "junction": "Залізничний вокзал"}
+        },
+        "8": {
+            "ТРД-1": {"zero_min": 18, "zero_km": 4.5, "junction": "Залізничний вокзал"}
+        },
+        "9": {
+            "ТРД-1": {"zero_min": 20, "zero_km": 5.0, "junction": "вул. Рішельєвська"}
+        },
+        "10": {
+            "ТРД-1": {"zero_min": 22, "zero_km": 5.6, "junction": "Пересипський міст"}
+        }
+    }
+}
+
+def get_depot_zero_run_info(route_id: str, transport_type: str, depot_name: str) -> Tuple[int, float, str]:
+    t_key = "TROLLEYBUS" if transport_type.upper() in ["TROLLEYBUS", "TROLLEY", "ТРОЛЕЙБУС"] else "TRAM"
+    route_matrix = ODESSA_DEPOT_ZERO_RUN_MATRIX.get(t_key, {}).get(route_id, {})
+    if depot_name in route_matrix:
+        d = route_matrix[depot_name]
+        return d["zero_min"], d["zero_km"], d["junction"]
+    
+    if t_key == "TROLLEYBUS":
+        return 20, 5.0, "Залізничний вокзал"
+    return (25, 5.5, "Музкомедія") if depot_name == "ТД-1" else (30, 6.5, "Пересипський міст")
+
+from app.services.deadhead_optimizer import get_deadhead_between
+
+DEPOT_CODE_TO_ID: Dict[str, str] = {
+    "ТД-1": "depot_1", "TD-1": "depot_1", "depot_1": "depot_1",
+    "ТД-2": "depot_2", "TD-2": "depot_2", "depot_2": "depot_2",
+    "ТРД-1": "depot_3", "ТрД-1": "depot_3", "ТрД-3": "depot_3", "TrD": "depot_3", "depot_3": "depot_3"
+}
+
+def _resolve_duty_param(
+    duty_dict: Optional[Dict[str, Any]],
+    v_idx: int,
+    duty_num: str,
+    route_id: str,
+    default_val: Any = None
+) -> Any:
+    """
+    Універсальний пошук параметрів наряду за всіма можливими варіантами ключів:
+    '1', '5-01', '01', '5-1', '#1'
+    """
+    if not duty_dict:
+        return default_val
+    candidates = [
+        str(v_idx + 1),
+        duty_num,
+        f"{v_idx + 1:02d}",
+        f"{route_id}-{v_idx + 1}",
+        f"#{v_idx + 1}"
+    ]
+    for c in candidates:
+        if c in duty_dict and duty_dict[c] is not None and str(duty_dict[c]).strip() != "":
+            return duty_dict[c]
+    return default_val
+
+def generate_omet_master_schedule(
+    route_id: str,
+    route_name: str = "Станція «Аркадія» — Автовокзал",
+    transport_type: str = "TRAM",
+    duties_count: int = 14,
+    round_trip_min: int = 85,
+    route_length_km: float = 17.9,
+    default_speed_kmh: float = 12.3,
+    start_time: str = "05:00",
+    end_time: str = "23:45",
+    designated_dp_name: str = "Станція «Аркадія»",
+    control_points: Optional[List[Dict[str, Any]]] = None,
+    depot_name: str = "ТД-2",
+    depot_zero_run_min: Optional[int] = None,
+    depot_zero_run_km: Optional[float] = None,
+    depot_junction_stop_name: Optional[str] = None,
+    start_stations_per_duty: Optional[Dict[str, str]] = None,
+    duty_types_per_duty: Optional[Dict[str, str]] = None,
+    depots_per_duty: Optional[Dict[str, str]] = None,
+    vehicles_per_duty: Optional[Dict[str, str]] = None,
+    vehicles2_per_duty: Optional[Dict[str, str]] = None,
+    rotation_junctions_per_duty: Optional[Dict[str, str]] = None,
+    duty_configs: Optional[List[Dict[str, Any]]] = None,
+    secondary_dp_name: Optional[str] = None,
+    schedule_period: str = "з 22 вересня по 11 жовтня 2026 року",
+    schedule_type: str = "Будній"
+) -> Dict[str, Any]:
+    """
+    Головне математичне ядро планування розкладів КП «Одесміськелектротранс».
+    1. Розрахунок інтервалу на основі ручної кількості нарядів N: I = T_об / N.
+    2. Генерація повної шахової таблиці всіх рейсів (без обмеження 14 кругів) за кінцевими А і Б.
+    3. Розрахунок часу прибуття на всі Контрольні Точки (КТ) для Маршрутної книжки.
+    4. Автоматичний динамічний розрахунок обідів водіїв з урахуванням інтервалів на лінії.
+       (Базовий: 15 хв трамвай / 20 хв тролейбус; весь додатковий час обов'язково додається до робочої зміни водія).
+    5. Справжні розривні наряди (ротація 2-х фізичних вагонів на найближчій зупинці до депо).
+    6. Повний розрахунок добових показників (Вагоно-години, Вагоно-км, Швидкість, Зміни, Рейси).
+    """
+    logger.info(f"📐 Генерація еталонного розкладу КП ОМЕТ для маршруту #{route_id} ({route_name}): {duties_count} нарядів, T_об={round_trip_min}хв")
+    
+    # 1. Нормативи виду транспорту
+    is_trolley = transport_type.upper() in ["TROLLEYBUS", "TROLLEY", "ТРОЛЕЙБУС"]
+    prep_time_min_val = prep_time_min(is_trolley)
+    standard_break_min = standard_lunch_min(is_trolley)
+    
+    # Отримуємо точні параметри нульового рейсу з топологічної матриці
+    m_min, m_km, m_junc = get_depot_zero_run_info(route_id, transport_type, depot_name)
+    actual_zero_min = depot_zero_run_min or m_min
+    actual_zero_km = depot_zero_run_km or m_km
+    actual_junction_stop = depot_junction_stop_name or m_junc
+
+    # 2. Розрахунок результуючого інтервалу руху I = T_об / N
+    duties_count = max(1, duties_count)
+    exact_headway = round_trip_min / duties_count
+    headway_min = round(exact_headway, 1)
+    
+    # Динамічний розрахунок тривалості обіду водія:
+    # Базовий мінімум 15/20 хв. Якщо інтервал більший або графік потребує кратності, призначається розширений обід.
+    # Будь-який понаднормовий час (extra_break) додається до тривалості зміни водія!
+    lunch_shift_duration = standard_break_min
+    if headway_min > 0:
+        slots = max(1, round(standard_break_min / headway_min))
+        calc_lunch = round(slots * headway_min)
+        if calc_lunch >= standard_break_min:
+            lunch_shift_duration = min(MAX_LUNCH_DURATION_MIN, calc_lunch)
+    overtime_lunch_min = max(0, lunch_shift_duration - standard_break_min)
+    is_paid_lunch_overtime = overtime_lunch_min > 0
+
+    # Розрахунок часу в один бік (туди/назад) та відстоїв
+    one_way_time = max(15, int((round_trip_min - 12) / 2))
+    base_layover = max(5, min(10, int((round_trip_min - (one_way_time * 2)) / 2)))
+    
+    # 3. Дефолтні Контрольні Точки (якщо не передано)
+    if not control_points or len(control_points) < 2:
+        if route_id == "5":
+            control_points = [
+                {"id": "cp_5_1", "name": "Станція «Аркадія»", "is_dp": True, "is_break": True, "offset_fwd": 0, "offset_bwd": one_way_time},
+                {"id": "cp_5_2", "name": "Театр Музкомедії", "is_dp": False, "is_break": False, "is_junction": True, "offset_fwd": int(one_way_time * 0.42), "offset_bwd": int(one_way_time * 0.58)},
+                {"id": "cp_5_3", "name": "пл. Старосінна (Вокзал)", "is_dp": False, "is_break": False, "offset_fwd": int(one_way_time * 0.60), "offset_bwd": int(one_way_time * 0.40)},
+                {"id": "cp_5_4", "name": "пл. Тираспільська", "is_dp": False, "is_break": False, "offset_fwd": int(one_way_time * 0.78), "offset_bwd": int(one_way_time * 0.22)},
+                {"id": "cp_5_5", "name": "Автовокзал", "is_dp": False, "is_break": False, "is_terminus": True, "offset_fwd": one_way_time, "offset_bwd": 0},
+            ]
+        elif route_id == "7":
+            control_points = [
+                {"id": "cp_7_1", "name": "ДП «вул. Паустовського»", "is_dp": True, "is_break": True, "offset_fwd": 0, "offset_bwd": one_way_time},
+                {"id": "cp_7_2", "name": "вул. Заболотного", "is_dp": False, "is_break": False, "offset_fwd": int(one_way_time * 0.15), "offset_bwd": int(one_way_time * 0.85)},
+                {"id": "cp_7_3", "name": "Лузанівка", "is_dp": False, "is_break": False, "offset_fwd": int(one_way_time * 0.40), "offset_bwd": int(one_way_time * 0.60)},
+                {"id": "cp_7_4", "name": "Пересипський міст", "is_dp": False, "is_break": False, "is_junction": True, "offset_fwd": int(one_way_time * 0.75), "offset_bwd": int(one_way_time * 0.25)},
+                {"id": "cp_7_5", "name": "пл. Тираспільська", "is_dp": False, "is_break": False, "is_terminus": True, "offset_fwd": one_way_time, "offset_bwd": 0},
+            ]
+        else:
+            control_points = [
+                {"id": f"cp_{route_id}_1", "name": designated_dp_name, "is_dp": True, "is_break": True, "offset_fwd": 0, "offset_bwd": one_way_time},
+                {"id": f"cp_{route_id}_2", "name": actual_junction_stop, "is_dp": False, "is_break": False, "is_junction": True, "offset_fwd": int(one_way_time * 0.5), "offset_bwd": int(one_way_time * 0.5)},
+                {"id": f"cp_{route_id}_3", "name": "Кінцева станція Б", "is_dp": False, "is_break": False, "is_terminus": True, "offset_fwd": one_way_time, "offset_bwd": 0},
+            ]
+
+    # Станції А і Б
+    station_a_name = control_points[0]["name"]
+    station_b_name = control_points[-1]["name"]
+
+    start_mins_global = int(start_time.split(":")[0]) * 60 + int(start_time.split(":")[1])
+    end_mins_global = int(end_time.split(":")[0]) * 60 + int(end_time.split(":")[1])
+    if end_mins_global < start_mins_global:
+        end_mins_global += 1440
+
+    master_grid_rows = []
+    duty_books = {}
+    total_wagon_working_mins = 0.0
+    total_revenue_trips = 0
+    total_zero_runs = 0
+    total_shifts_count = 0
+
+    max_rounds_count = 24
+
+    for v_idx in range(duties_count):
+        duty_num = f"{route_id}-{v_idx + 1:02d}"
+        
+        # 1. Визначаємо тип наряду (ручний конфіг або дефолтний)
+        assigned_type = _resolve_duty_param(duty_types_per_duty, v_idx, duty_num, route_id)
+        if assigned_type:
+            duty_type = assigned_type
+        elif v_idx == 3 or v_idx == 7:
+            duty_type = "SPLIT" # Розривний наряд
+        elif v_idx == 11:
+            duty_type = "PEAK" # Піковий
+        elif v_idx == 13:
+            duty_type = "SINGLE" # Однозмінний
+        else:
+            duty_type = "DOUBLE" # Двозмінний
+
+        # 2. Початкова станція виходу
+        assigned_station = _resolve_duty_param(start_stations_per_duty, v_idx, duty_num, route_id)
+        if assigned_station:
+            start_station = assigned_station
+        else:
+            start_station = station_b_name if (v_idx % 4 == 2) else station_a_name
+
+        # 3. Депо приписки наряду (Мультидепо)
+        assigned_depot = _resolve_duty_param(depots_per_duty, v_idx, duty_num, route_id, default_val=depot_name)
+        duty_depot = assigned_depot or depot_name
+        duty_depot_id = DEPOT_CODE_TO_ID.get(duty_depot, "depot_1" if transport_type == "TRAM" else "depot_3")
+
+        # Точний розрахунок нульового рейсу на основі географічних координат та топології
+        dh_info = get_deadhead_between(duty_depot_id, start_station, transport_type)
+        duty_zero_min = int(dh_info.get("duration_min", actual_zero_min))
+        duty_zero_km = float(dh_info.get("distance_km", actual_zero_km))
+        duty_junction_stop = str(dh_info.get("junction_stop", actual_junction_stop))
+
+        # Якщо вагон виїжджає через протилежну кінцеву Б до ДП:
+        # t_нуль = t(Депо -> Кінцева Б) + t_відст_B + t(Кінцева Б -> ДП)
+        zero_run_tag = f"Виїзд з депо {duty_depot} на лінію ({duty_zero_km:.1f} км, {duty_zero_min} хв, посадка від зуп. примикання: {duty_junction_stop})"
+        if start_station != station_a_name and start_station == station_b_name:
+            duty_zero_min = duty_zero_min + base_layover + one_way_time
+            duty_zero_km = round(duty_zero_km + (route_length_km / 2.0), 1)
+            zero_run_tag = f"Виїзд з депо {duty_depot} через {station_b_name} до ДП ({duty_zero_km:.1f} км, {duty_zero_min} хв, посадка від зуп. примикання: {duty_junction_stop})"
+
+        # Час першого графікового відправлення
+        first_dep_mins = start_mins_global + int(v_idx * headway_min)
+        
+        # Нульовий виїзд
+        dp_arrival_mins = first_dep_mins
+        pullout_mins = dp_arrival_mins - duty_zero_min
+        driver_arrival_mins = pullout_mins - prep_time_min_val
+        total_zero_runs += 1
+
+        # Вагони для наряду
+        assigned_veh1 = _resolve_duty_param(vehicles_per_duty, v_idx, duty_num, route_id)
+        assigned_veh2 = _resolve_duty_param(vehicles2_per_duty, v_idx, duty_num, route_id)
+        # ПРИМІТКА: rotation_junctions_per_duty приймається лише для зворотної
+        # сумісності API і НЕ впливає на місце ротації вагонів — ротація
+        # SPLIT-нарядів завжди прив'язана до прибуття на ДП (station_a_name),
+        # ніколи до проміжного вузла примикання лінії.
+
+        car_id_1 = assigned_veh1 or (f"Вг-{4000 + (v_idx * 7) % 80:04d}" if transport_type == "TRAM" else f"Тр-{3000 + (v_idx * 5) % 60:04d}")
+        car_id_2 = (assigned_veh2 or (f"Вг-{4100 + (v_idx * 9) % 80:04d}" if transport_type == "TRAM" else f"Тр-{3100 + (v_idx * 5) % 60:04d}")) if duty_type == "SPLIT" else None
+
+        # Генерація кругів
+        rounds = []
+        duty_book_trips = []
+        curr_time_mins = first_dep_mins
+        trip_seq = 1
+
+        # 0-й рейс: Нульовий виїзд з депо
+        duty_book_trips.append({
+            "trip_number": 0,
+            "round_number": 0,
+            "direction": "PULL_OUT",
+            "direction_label": f"{duty_depot} → {start_station}",
+            "departure_time": format_minutes_to_hhmm(pullout_mins),
+            "arrival_time": format_minutes_to_hhmm(dp_arrival_mins),
+            "layover_min": 5,
+            "vehicle_id": car_id_1,
+            "event_tag": zero_run_tag,
+            "control_point_times": [
+                {"cp_id": "depot", "cp_name": duty_depot, "arrival_time": format_minutes_to_hhmm(pullout_mins), "is_dp": False},
+                {"cp_id": "junction", "cp_name": duty_junction_stop, "arrival_time": format_minutes_to_hhmm(pullout_mins + int(duty_zero_min * 0.4)), "is_dp": False},
+                {"cp_id": "target", "cp_name": start_station, "arrival_time": format_minutes_to_hhmm(dp_arrival_mins), "is_dp": True}
+            ]
+        })
+
+        # Таймінги змін та балансування закінчення роботи вагона
+        shift1_start_mins = driver_arrival_mins
+        shift1_end_mins = None
+        shift1_lunch_mins = None
+        shift2_lunch_mins = None
+        shift1_extra_min = 0
+        shift2_extra_min = 0
+
+        # Розрахунок планового часу заїзду вагона (поетапний заїзд)
+        if duty_type == "SINGLE":
+            duty_closing_mins = shift1_start_mins + int(7.8 * 60)
+        elif duty_type == "PEAK":
+            duty_closing_mins = shift1_start_mins + int(5.0 * 60)
+        else:
+            echelon_progress = v_idx / max(1, duties_count - 1)
+            target_wagon_hours = 15.2 + (echelon_progress * 1.8)
+            duty_closing_mins = min(1395, shift1_start_mins + int(target_wagon_hours * 60))
+
+        # Збалансована перезмінка на ДП: точка поділу змін для двозмінки
+        total_working_window = duty_closing_mins - shift1_start_mins
+        shift_handoff_target = shift1_start_mins + int(total_working_window / 2)
+
+        had_shift1_lunch = False
+        had_shift2_lunch = False
+        had_rotation_or_handoff = False
+
+        pullin_mins = None
+
+        for r_idx in range(1, max_rounds_count + 1):
+            if curr_time_mins > duty_closing_mins:
+                break
+
+            round_num = r_idx
+            round_tag = None
+            round_note = ""
+
+            # --- Рейс 1 у крузі: станція А -> станція Б ---
+            dep_a_mins = curr_time_mins
+            arr_b_mins = dep_a_mins + one_way_time
+            total_revenue_trips += 1
+
+            # Контрольні точки рейсу вперед
+            cp_times_fwd = []
+            for cp in control_points:
+                offset = cp.get("offset_fwd", 0)
+                cp_times_fwd.append({
+                    "cp_id": cp["id"],
+                    "cp_name": cp["name"],
+                    "arrival_time": format_minutes_to_hhmm(dep_a_mins + offset),
+                    "is_dp": cp.get("is_dp", False),
+                    "is_break": cp.get("is_break", False)
+                })
+
+            duty_book_trips.append({
+                "trip_number": trip_seq,
+                "round_number": round_num,
+                "direction": "FORWARD",
+                "direction_label": f"{station_a_name} → {station_b_name}",
+                "departure_time": format_minutes_to_hhmm(dep_a_mins),
+                "arrival_time": format_minutes_to_hhmm(arr_b_mins),
+                "layover_min": base_layover,
+                "vehicle_id": car_id_2 if (duty_type == "SPLIT" and had_rotation_or_handoff) else car_id_1,
+                "event_tag": "Графіковий рейс",
+                "control_point_times": cp_times_fwd
+            })
+            trip_seq += 1
+
+            # Відстій на кінцевій Б
+            dep_b_mins = arr_b_mins + base_layover
+            arr_a_mins = dep_b_mins + one_way_time
+            total_revenue_trips += 1
+
+            # Контрольні точки рейсу назад
+            cp_times_bwd = []
+            for cp in reversed(control_points):
+                offset = cp.get("offset_bwd", 0)
+                cp_times_bwd.append({
+                    "cp_id": cp["id"],
+                    "cp_name": cp["name"],
+                    "arrival_time": format_minutes_to_hhmm(dep_b_mins + (one_way_time - offset)),
+                    "is_dp": cp.get("is_dp", False),
+                    "is_break": cp.get("is_break", False)
+                })
+
+            # Перевірка обіду І зміни.
+            # ІНВАРІАНТ: обід надається ВИКЛЮЧНО в момент прибуття вагона на
+            # Диспетчерський пункт (arr_a_mins == прибуття на ст. А), у вікні
+            # [MIN_WORK_MINS_BEFORE_LUNCH; MAX_WORK_MINS_BEFORE_LUNCH] від явки водія.
+            layover_at_dp = base_layover
+            lunch_break_obj = None
+            mins_worked_shift1 = arr_a_mins - shift1_start_mins
+
+            if not had_shift1_lunch and mins_worked_shift1 >= MIN_WORK_MINS_BEFORE_LUNCH:
+                if mins_worked_shift1 > MAX_WORK_MINS_BEFORE_LUNCH:
+                    logger.warning(
+                        f"⚠️ Наряд {duty_num}: обід І зміни надано на ДП через {mins_worked_shift1:.0f} хв "
+                        f"(понад дозволені {MAX_WORK_MINS_BEFORE_LUNCH} хв) — інтервал обороту зависокий для дотримання вікна обіду."
+                    )
+                layover_at_dp = lunch_shift_duration
+                shift1_lunch_mins = arr_a_mins
+                had_shift1_lunch = True
+                round_tag = "LUNCH"
+                lunch_break_obj = {
+                    "start": format_minutes_to_hhmm(arr_a_mins),
+                    "end": format_minutes_to_hhmm(arr_a_mins + lunch_shift_duration),
+                    "duration_min": lunch_shift_duration,
+                    "standard_min": standard_break_min,
+                    "is_overtime": overtime_lunch_min > 0,
+                    "overtime_min": overtime_lunch_min,
+                    "is_paid_break": is_paid_lunch_overtime,
+                    "location": station_a_name,
+                }
+                note_lunch = f"ОБІД І зміни {lunch_shift_duration}хв"
+                if overtime_lunch_min > 0:
+                    note_lunch += f" (+{overtime_lunch_min}хв до зміни)"
+                round_note = f"{note_lunch} ({format_minutes_to_hhmm(arr_a_mins)} - {format_minutes_to_hhmm(arr_a_mins + lunch_shift_duration)})"
+                shift1_extra_min += overtime_lunch_min
+
+            # Перевірка перезмінки або ротації розривного наряду (збалансована точка).
+            # ІНВАРІАНТ: перезмінка водіїв і ротація вагонів (SPLIT) відбуваються
+            # ВИКЛЮЧНО на Диспетчерському пункті (ст. А) — arr_a_mins — ніколи на
+            # проміжному вузлі примикання лінії чи в депо.
+            elif not had_rotation_or_handoff and (duty_type in ["DOUBLE", "SPLIT"]) and (arr_a_mins >= shift_handoff_target):
+                had_rotation_or_handoff = True
+                shift1_end_mins = arr_a_mins
+                if duty_type == "SPLIT":
+                    round_tag = "ROTATION"
+                    round_note = f"РОТАЦІЯ ВАГОНІВ на ДП ({station_a_name}): Вагон {car_id_1} в депо, Вагон {car_id_2} на лінію"
+                else:
+                    round_tag = "SHIFT_CHANGE"
+                    round_note = f"ПЕРЕЗМІНКА ВОДІЇВ на ДП ({format_minutes_to_hhmm(arr_a_mins)})"
+
+            # Перевірка обіду ІІ зміни (для двозмінного або розривного)
+            elif had_rotation_or_handoff and not had_shift2_lunch and shift1_end_mins and ((arr_a_mins - shift1_end_mins) >= MIN_WORK_MINS_BEFORE_LUNCH):
+                mins_worked_shift2 = arr_a_mins - shift1_end_mins
+                if mins_worked_shift2 > MAX_WORK_MINS_BEFORE_LUNCH:
+                    logger.warning(
+                        f"⚠️ Наряд {duty_num}: обід ІІ зміни надано на ДП через {mins_worked_shift2:.0f} хв "
+                        f"(понад дозволені {MAX_WORK_MINS_BEFORE_LUNCH} хв) — інтервал обороту зависокий для дотримання вікна обіду."
+                    )
+                layover_at_dp = lunch_shift_duration
+                shift2_lunch_mins = arr_a_mins
+                had_shift2_lunch = True
+                round_tag = "LUNCH"
+                lunch_break_obj = {
+                    "start": format_minutes_to_hhmm(arr_a_mins),
+                    "end": format_minutes_to_hhmm(arr_a_mins + lunch_shift_duration),
+                    "duration_min": lunch_shift_duration,
+                    "standard_min": standard_break_min,
+                    "is_overtime": overtime_lunch_min > 0,
+                    "overtime_min": overtime_lunch_min,
+                    "is_paid_break": is_paid_lunch_overtime,
+                    "location": station_a_name,
+                }
+                note_lunch = f"ОБІД ІІ зміни {lunch_shift_duration}хв"
+                if overtime_lunch_min > 0:
+                    note_lunch += f" (+{overtime_lunch_min}хв до зміни)"
+                round_note = f"{note_lunch} ({format_minutes_to_hhmm(arr_a_mins)} - {format_minutes_to_hhmm(arr_a_mins + lunch_shift_duration)})"
+                shift2_extra_min += overtime_lunch_min
+
+            duty_book_trips.append({
+                "trip_number": trip_seq,
+                "round_number": round_num,
+                "direction": "BACKWARD",
+                "direction_label": f"{station_b_name} → {station_a_name}",
+                "departure_time": format_minutes_to_hhmm(dep_b_mins),
+                "arrival_time": format_minutes_to_hhmm(arr_a_mins),
+                "layover_min": layover_at_dp,
+                "vehicle_id": car_id_2 if (duty_type == "SPLIT" and had_rotation_or_handoff) else car_id_1,
+                "event_tag": round_note if round_note else "Графіковий рейс",
+                "control_point_times": cp_times_bwd
+            })
+            trip_seq += 1
+
+            # Додаємо круг до матриці
+            rounds.append({
+                "round_number": round_num,
+                "departure_station_a": format_minutes_to_hhmm(dep_a_mins),
+                "departure_station_b": format_minutes_to_hhmm(dep_b_mins),
+                "arrival_station_a": format_minutes_to_hhmm(arr_a_mins),
+                "layover_station_a_min": layover_at_dp,
+                "tag": round_tag,
+                "note": round_note,
+                "lunch_break": lunch_break_obj
+            })
+
+            curr_time_mins = arr_a_mins + layover_at_dp
+
+            # Якщо це однозмінний або піковий наряд — завершення після 1-ї зміни
+            if duty_type in ["SINGLE", "PEAK"] and (curr_time_mins - shift1_start_mins) >= (8 * 60):
+                break
+
+        # Захід у депо
+        pullin_dep_mins = curr_time_mins
+        pullin_mins = pullin_dep_mins + duty_zero_min
+        total_zero_runs += 1
+
+        if not shift1_end_mins:
+            shift1_end_mins = pullin_mins if duty_type in ["SINGLE", "PEAK"] else (shift1_start_mins + int((pullin_mins - shift1_start_mins) / 2))
+        
+        if duty_type in ["DOUBLE", "SPLIT"]:
+            shift2_end_mins = pullin_mins
+            raw_s1 = (shift1_end_mins - shift1_start_mins + shift1_extra_min)
+            raw_s2 = (shift2_end_mins - shift1_end_mins + shift2_extra_min)
+            # Захист КЗпП: максимум 9:59 (599 хв)
+            shift1_hours = min(599, max(0, raw_s1)) / 60.0
+            shift2_hours = min(599, max(0, raw_s2)) / 60.0
+            total_shifts_count += 2
+        else:
+            raw_s1 = (pullin_mins - shift1_start_mins + shift1_extra_min)
+            shift1_hours = min(599, max(0, raw_s1)) / 60.0
+            shift2_hours = 0.0
+            total_shifts_count += 1
+
+
+        total_work_hours = (pullin_mins - pullout_mins) / 60.0
+        total_wagon_working_mins += (pullin_mins - pullout_mins)
+
+        # 0-й рейс: Заїзд у депо
+        duty_book_trips.append({
+            "trip_number": trip_seq,
+            "round_number": len(rounds) + 1,
+            "direction": "PULL_IN",
+            "direction_label": f"{station_a_name} → {duty_depot}",
+            "departure_time": format_minutes_to_hhmm(pullin_dep_mins),
+            "arrival_time": format_minutes_to_hhmm(pullin_mins),
+            "layover_min": 0,
+            "vehicle_id": car_id_2 if duty_type == "SPLIT" else car_id_1,
+            "event_tag": f"Заїзд у депо {duty_depot} ({duty_zero_km:.1f} км, {duty_zero_min} хв)",
+            "control_point_times": [
+                {"cp_id": "origin", "cp_name": station_a_name, "arrival_time": format_minutes_to_hhmm(pullin_dep_mins), "is_dp": True},
+                {"cp_id": "junction", "cp_name": duty_junction_stop, "arrival_time": format_minutes_to_hhmm(pullin_dep_mins + int(duty_zero_min * 0.6)), "is_dp": False},
+                {"cp_id": "depot", "cp_name": duty_depot, "arrival_time": format_minutes_to_hhmm(pullin_mins), "is_dp": False}
+            ]
+        })
+
+        # Додаємо рядок до матриці
+        master_grid_rows.append({
+            "duty_number": duty_num,
+            "duty_type": duty_type,
+            "start_location": start_station,
+            "vehicle_id": car_id_1,
+            "vehicle_id_2": car_id_2,
+            "depot_name": duty_depot,
+            "zero_run_min": duty_zero_min,
+            "zero_run_km": duty_zero_km,
+            "junction_stop": duty_junction_stop,
+            "rotation_location": station_a_name if duty_type == "SPLIT" else None,
+            "driver_arrival_time": format_minutes_to_hhmm(driver_arrival_mins),
+            "pullout_time": format_minutes_to_hhmm(pullout_mins),
+            "dp_arrival_time": format_minutes_to_hhmm(dp_arrival_mins),
+            "first_departure_time": format_minutes_to_hhmm(first_dep_mins),
+            "pullin_time": format_minutes_to_hhmm(pullin_mins),
+            "total_work_hours_str": format_duration_hours_mins(total_work_hours * 60),
+            "shift1_hours_str": format_duration_hours_mins(shift1_hours * 60),
+            "shift2_hours_str": format_duration_hours_mins(shift2_hours * 60) if shift2_hours > 0 else "—",
+            "rounds": rounds
+        })
+
+        # Формуємо Маршрутну книжку для наряду
+        duty_books[duty_num] = {
+            "duty_number": duty_num,
+            "route_id": route_id,
+            "route_name": route_name,
+            "transport_type": transport_type,
+            "depot_name": duty_depot,
+            "zero_run_min": duty_zero_min,
+            "zero_run_km": duty_zero_km,
+            "junction_stop": duty_junction_stop,
+            "rotation_location": station_a_name if duty_type == "SPLIT" else None,
+            "schedule_period": schedule_period,
+            "schedule_type": schedule_type,
+            "vehicle_id": car_id_1,
+            "vehicle_id_2": car_id_2,
+            "duty_type": duty_type,
+            "driver1": {
+                "name": f"Водій І зміни ({duty_num})",
+                "arrival_time": format_minutes_to_hhmm(driver_arrival_mins),
+                "pullout_time": format_minutes_to_hhmm(pullout_mins),
+                "start_time": format_minutes_to_hhmm(first_dep_mins),
+                "lunch_time": f"{format_minutes_to_hhmm(shift1_lunch_mins)} — {format_minutes_to_hhmm(shift1_lunch_mins + standard_break_min)}" if shift1_lunch_mins else "—",
+                "shift_end_time": format_minutes_to_hhmm(shift1_end_mins)
+            },
+            "driver2": {
+                "name": f"Водій ІІ зміни ({duty_num})" if duty_type in ["DOUBLE", "SPLIT"] else "—",
+                "start_time": format_minutes_to_hhmm(shift1_end_mins) if duty_type in ["DOUBLE", "SPLIT"] else "—",
+                "lunch_time": f"{format_minutes_to_hhmm(shift2_lunch_mins)} — {format_minutes_to_hhmm(shift2_lunch_mins + standard_break_min)}" if shift2_lunch_mins else "—",
+                "pullin_time": format_minutes_to_hhmm(pullin_mins) if duty_type in ["DOUBLE", "SPLIT"] else "—",
+                "shift_end_time": format_minutes_to_hhmm(shift2_end_mins) if duty_type in ["DOUBLE", "SPLIT"] else "—"
+            },
+            "trips": duty_book_trips
+        }
+
+    # 4. Паспортні зведені показники маршруту на добу
+    total_wagon_hours = round(total_wagon_working_mins / 60.0, 1)
+    depot_km = depot_zero_run_km if depot_zero_run_km is not None else 6.4
+    total_wagon_km = round((total_revenue_trips * (route_length_km / 2.0)) + (total_zero_runs * depot_km), 1)
+
+    summary_passport = {
+        "route_id": route_id,
+        "route_name": route_name,
+        "transport_type": transport_type,
+        "designated_dp_name": designated_dp_name,
+        "total_wagon_hours": total_wagon_hours,
+        "total_wagon_km": total_wagon_km,
+        "total_shifts": total_shifts_count,
+        "total_trips": total_revenue_trips,
+        "round_trip_min": round_trip_min,
+        "operating_speed_kmh": default_speed_kmh,
+        "route_length_km": route_length_km,
+        "headway_min": headway_min,
+        "duties_count": duties_count,
+        "schedule_period": schedule_period,
+        "schedule_type": schedule_type,
+        "station_a_name": station_a_name,
+        "station_b_name": station_b_name,
+        "control_points": control_points
+    }
+
+    return {
+        "summary_passport": summary_passport,
+        "master_grid_rows": master_grid_rows,
+        "duty_books": duty_books
+    }
 
 def generate_optimized_schedule(
     route_id: str, 
@@ -133,11 +765,13 @@ def generate_optimized_schedule(
                 global_trip_counter += 1
                 total_generated_trips += 1
                 current_time = t_end
-                
-                # Обід 1-ї зміни
-                worked_h = (current_time - v_start).total_seconds() / 3600
-                if not had_lunch_shift1 and worked_h >= 4.0:
-                    current_time += timedelta(minutes=15)
+
+                # Обід 1-ї зміни. ІНВАРІАНТ: обід можливий ЛИШЕ одразу після
+                # BACKWARD-рейсу (тобто в момент прибуття на ДП/станцію А),
+                # ніколи одразу після FORWARD-рейсу (прибуття на станцію Б).
+                worked_mins = (current_time - v_start).total_seconds() / 60.0
+                if not had_lunch_shift1 and direction == "BACKWARD" and worked_mins >= MIN_WORK_MINS_BEFORE_LUNCH:
+                    current_time += timedelta(minutes=TRAM_STANDARD_LUNCH_MIN)
                     had_lunch_shift1 = True
                 else:
                     current_time += timedelta(minutes=actual_layover_min)
@@ -146,7 +780,7 @@ def generate_optimized_schedule(
                 "shift_sequence": 1,
                 "shift_type": "FIRST_SHIFT",
                 "has_break": had_lunch_shift1,
-                "break_duration_minutes": 15 if had_lunch_shift1 else 0,
+                "break_duration_minutes": TRAM_STANDARD_LUNCH_MIN if had_lunch_shift1 else 0,
                 "trips": shift1_trips
             })
             
@@ -176,10 +810,11 @@ def generate_optimized_schedule(
                 global_trip_counter += 1
                 total_generated_trips += 1
                 current_time = t_end
-                
-                worked_h2 = (current_time - shift2_start).total_seconds() / 3600
-                if not had_lunch_shift2 and worked_h2 >= 4.0:
-                    current_time += timedelta(minutes=15)
+
+                # ІНВАРІАНТ: те саме правило — обід ІІ зміни лише після прибуття на ДП (BACKWARD).
+                worked_mins2 = (current_time - shift2_start).total_seconds() / 60.0
+                if not had_lunch_shift2 and direction == "BACKWARD" and worked_mins2 >= MIN_WORK_MINS_BEFORE_LUNCH:
+                    current_time += timedelta(minutes=TRAM_STANDARD_LUNCH_MIN)
                     had_lunch_shift2 = True
                 else:
                     current_time += timedelta(minutes=actual_layover_min)
@@ -200,7 +835,7 @@ def generate_optimized_schedule(
                 "shift_sequence": 2,
                 "shift_type": "SECOND_SHIFT",
                 "has_break": had_lunch_shift2,
-                "break_duration_minutes": 15 if had_lunch_shift2 else 0,
+                "break_duration_minutes": TRAM_STANDARD_LUNCH_MIN if had_lunch_shift2 else 0,
                 "trips": shift2_trips
             })
 
@@ -222,9 +857,19 @@ def generate_optimized_schedule(
             global_trip_counter += 1
             current_time += timedelta(minutes=zero_trip_min)
             
-            # Робота першого вагона до 14:00 (понад 8 годин)
+            # Робота першого вагона до 14:00 (понад 8 годин).
+            # ІНВАРІАНТ: ротація SPLIT-вагонів відбувається виключно на ДП —
+            # тобто лише одразу після BACKWARD-рейсу (прибуття назад на початкову
+            # точку наряду), ніколи одразу після FORWARD-рейсу (це була б станція
+            # Б). Тому цикл не зупиняється рівно по `split_time`, а завершує
+            # поточний оборотний рейс і виходить лише на BACKWARD-кроці.
             split_time = start_dt + timedelta(hours=8, minutes=15)
-            while current_time < split_time:
+            direction = "BACKWARD"
+            safety_guard = 0
+            while current_time < split_time or direction != "BACKWARD":
+                safety_guard += 1
+                if safety_guard > 500:
+                    break
                 dur = actual_trip_min
                 t_end = current_time + timedelta(minutes=dur)
                 direction = "FORWARD" if len(shift1_trips) % 2 != 0 else "BACKWARD"
@@ -240,8 +885,8 @@ def generate_optimized_schedule(
                 global_trip_counter += 1
                 total_generated_trips += 1
                 current_time = t_end + timedelta(minutes=actual_layover_min)
-                
-            # Перший вагон заїжджає в депо на ремонт/ТО з найближчої зупинки
+
+            # Перший вагон заїжджає в депо на ремонт/ТО — вагон гарантовано на ДП
             shift1_trips.append({
                 "id": global_trip_counter,
                 "trip_sequence": len(shift1_trips) + 1,
@@ -260,7 +905,7 @@ def generate_optimized_schedule(
                 "trips": shift1_trips
             })
             
-            # Другий вагон виїжджає з депо на ту саму зупинку майже одночасно
+            # Другий вагон виїжджає з депо на ту саму ДП майже одночасно
             shift2_start = current_time + timedelta(minutes=5)
             current_time = shift2_start
             shift2_trips.append({

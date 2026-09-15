@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Time, Float, Boolean, Enum as SQLEnum, Date, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, Time, Float, Boolean, Enum as SQLEnum, Date, DateTime, JSON
 from sqlalchemy.orm import relationship
 from app.models.models import Base
 from datetime import datetime
@@ -46,6 +46,7 @@ class StaticDuty(Base):
     service_id = Column(SQLEnum(ServiceDay), default=ServiceDay.WORKDAY, nullable=False)
     duty_number = Column(String, nullable=False) # Напр. "18-01", "7-04"
     duty_type = Column(SQLEnum(DutyType), default=DutyType.DOUBLE, nullable=False)
+    depot_id = Column(String, nullable=True) # ТД-1, ТД-2, ТРД-1
 
     schedule = relationship("Schedule", back_populates="duties")
     shifts = relationship("StaticShift", back_populates="duty", cascade="all, delete-orphan", lazy="selectin")
@@ -61,8 +62,11 @@ class StaticShift(Base):
     vehicle_id = Column(String, nullable=True) # Для розривних нарядів (SPLIT) фіксує конкретний вагон
     has_break = Column(Boolean, default=False)
     break_start_time = Column(Time, nullable=True)
+    break_end_time = Column(Time, nullable=True)
     break_duration_minutes = Column(Integer, nullable=True)
     break_location_id = Column(String, nullable=True)
+    is_paid_break = Column(Boolean, default=False)
+    overtime_break_minutes = Column(Integer, default=0)
 
     duty = relationship("StaticDuty", back_populates="shifts")
     trips = relationship("StaticTrip", back_populates="shift", cascade="all, delete-orphan", lazy="selectin")
@@ -94,4 +98,19 @@ class StaticStopTime(Base):
 
     trip = relationship("StaticTrip", back_populates="stop_times")
 
+class ScheduleTemplate(Base):
+    """
+    Шаблон добового розкладу Служби Руху КП «ОМЕТ».
+    Дозволяє зберегти перевірену конфігурацію нарядів та інтервалів для швидкого повторного застосування.
+    """
+    __tablename__ = "schedule_templates"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False) # Напр. "Базовий літній будній", "Зимовий скорочений"
+    route_id = Column(String, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)
+    description = Column(String, nullable=True)
+    template_data = Column(JSON, nullable=False) # Повний зліпок структури нарядів, змін, інтервалу
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 StaticSchedule = Schedule
+

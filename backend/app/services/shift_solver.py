@@ -1,6 +1,13 @@
 from typing import List, Dict, Any, Optional
 import math
 from datetime import datetime, timedelta
+from app.core.transit_rules import (
+    MIN_WORK_MINS_BEFORE_LUNCH,
+    MAX_WORK_MINS_BEFORE_LUNCH,
+    TRAM_PREP_MIN,
+    TROLLEY_PREP_MIN,
+    standard_lunch_min,
+)
 
 def parse_time_str(t_str: str) -> int:
     """Перетворює рядок "HH:MM" у хвилини від початку доби"""
@@ -28,16 +35,22 @@ class ShiftSolverEngine:
         route_id: str,
         route_type: str,
         static_columns: List[Dict[str, Any]],
-        prep_tram_min: int = 10,
-        prep_trolley_min: int = 19
+        prep_tram_min: int = TRAM_PREP_MIN,
+        prep_trolley_min: int = TROLLEY_PREP_MIN
     ) -> List[Dict[str, Any]]:
         """
         Розрізає добові наряди 1..N на нормативні зміни водіїв.
-        Ураховує підготовчий час в депо, часове вікно обідів (4-6h) та типи нарядів.
+        Ураховує підготовчий час в депо, часове вікно обідів
+        (MIN_WORK_MINS_BEFORE_LUNCH..MAX_WORK_MINS_BEFORE_LUNCH, 4.0-5.5 год) та типи нарядів.
+        Обід ЗАВЖДИ прив'язаний до прибуття на Диспетчерський пункт (ДП) — див.
+        transit_rules.py та інваріант у transit_solver.generate_omet_master_schedule().
+        Тут пріоритет мають реальні події `LUNCH`/`SHIFT_CHANGE` з таймлайну наряду
+        (`col['events']`, згенеровані transit_solver-ом); хардкод-офсети нижче — це
+        ЛИШЕ аварійний фолбек на випадок відсутності таймлайн-даних.
         """
         is_tram = (route_type or 'TRAM').upper() == 'TRAM'
         prep_time_min = prep_tram_min if is_tram else prep_trolley_min
-        std_lunch_min = 15 if is_tram else 20
+        std_lunch_min = standard_lunch_min(is_trolley=not is_tram)
 
         driver_shifts = []
 
@@ -70,7 +83,7 @@ class ShiftSolverEngine:
                 lunch_event_1 = next((e for e in col['events'] if e['type'] == 'LUNCH' and parse_time_str(e['time']) < mid_min), None)
                 l1_duration = lunch_event_1['duration_min'] if lunch_event_1 else std_lunch_min
                 l1_excess = max(0, l1_duration - std_lunch_min)
-                l1_time_str = lunch_event_1['time'] if lunch_event_1 else minutes_to_time(s1_start_work + 300)
+                l1_time_str = lunch_event_1['time'] if lunch_event_1 else minutes_to_time(s1_start_work + MIN_WORK_MINS_BEFORE_LUNCH)
 
                 shift1 = {
                     "id": f"SHIFT_{route_id}_{duty_num}_S1",
@@ -108,7 +121,7 @@ class ShiftSolverEngine:
                 lunch_event_2 = next((e for e in col['events'] if e['type'] == 'LUNCH' and parse_time_str(e['time']) >= mid_min), None)
                 l2_duration = lunch_event_2['duration_min'] if lunch_event_2 else std_lunch_min
                 l2_excess = max(0, l2_duration - std_lunch_min)
-                l2_time_str = lunch_event_2['time'] if lunch_event_2 else minutes_to_time(s2_start_work + 270)
+                l2_time_str = lunch_event_2['time'] if lunch_event_2 else minutes_to_time(s2_start_work + MIN_WORK_MINS_BEFORE_LUNCH)
 
                 # Нічні години з 22:00 (1320 хв)
                 night_min = max(0, end_min - 1320)
@@ -151,7 +164,17 @@ class ShiftSolverEngine:
                 v1_num = f"Вг-{4000 + duty_num} (ТО Депо)"
                 v2_num = f"Вг-{4500 + duty_num} (Резерв Депо)"
 
-                mid_min = start_min + 480 # ~8 год першої зміни
+                # Точка ротації (передача вагона А->депо, вагона Б->лінію) — шукаємо
+                # реальну подію ROTATION з таймлайну наряду (завжди на ДП); фолбек
+                # на ~8 год першої зміни лише за відсутності таймлайн-даних.
+                rotation_event = next((e for e in col['events'] if e['type'] in ('ROTATION', 'SHIFT_CHANGE')), None)
+                mid_min = parse_time_str(rotation_event['time']) if rotation_event else start_min + 480
+                dp_location = col['events'][0].get('location', 'Диспетчерський пункт (ДП)') if col.get('events') else 'Диспетчерський пункт (ДП)'
+
+                lunch_event_1 = next((e for e in col['events'] if e['type'] == 'LUNCH' and parse_time_str(e['time']) < mid_min), None)
+                l1_duration = lunch_event_1['duration_min'] if lunch_event_1 else std_lunch_min
+                l1_excess = max(0, l1_duration - std_lunch_min)
+                l1_time_str = lunch_event_1['time'] if lunch_event_1 else minutes_to_time(start_min + MIN_WORK_MINS_BEFORE_LUNCH)
 
                 shift1 = {
                     "id": f"SHIFT_{route_id}_{duty_num}_SPLIT1",
@@ -169,17 +192,24 @@ class ShiftSolverEngine:
                     "pullout_time": col['start_time'],
                     "start_time": depot_arrival_str,
                     "end_time": minutes_to_time(mid_min),
-                    "lunch_start_time": minutes_to_time(start_min + 300),
-                    "lunch_end_time": minutes_to_time(start_min + 300 + std_lunch_min),
-                    "lunch_duration_min": std_lunch_min,
-                    "paid_excess_break_min": 0,
-                    "lunch_location": "ДП біля Депо",
+                    "lunch_start_time": l1_time_str,
+                    "lunch_end_time": minutes_to_time(parse_time_str(l1_time_str) + l1_duration),
+                    "lunch_duration_min": l1_duration,
+                    "paid_excess_break_min": l1_excess,
+                    "lunch_location": dp_location,
+                    "rotation_time": minutes_to_time(mid_min),
+                    "rotation_location": dp_location,
                     "work_hours": 8.0,
                     "driving_hours": 7.75,
                     "night_hours": 0.0,
                     "compliance_status": "VALID",
                     "timeline_events": col['events']
                 }
+
+                lunch_event_2 = next((e for e in col['events'] if e['type'] == 'LUNCH' and parse_time_str(e['time']) >= mid_min), None)
+                l2_duration = lunch_event_2['duration_min'] if lunch_event_2 else std_lunch_min
+                l2_excess = max(0, l2_duration - std_lunch_min)
+                l2_time_str = lunch_event_2['time'] if lunch_event_2 else minutes_to_time(mid_min + MIN_WORK_MINS_BEFORE_LUNCH)
 
                 shift2 = {
                     "id": f"SHIFT_{route_id}_{duty_num}_SPLIT2",
@@ -197,11 +227,13 @@ class ShiftSolverEngine:
                     "pullout_time": minutes_to_time(mid_min),
                     "start_time": minutes_to_time(mid_min - prep_time_min),
                     "end_time": col['end_time'],
-                    "lunch_start_time": minutes_to_time(mid_min + 240),
-                    "lunch_end_time": minutes_to_time(mid_min + 240 + std_lunch_min),
-                    "lunch_duration_min": std_lunch_min,
-                    "paid_excess_break_min": 0,
-                    "lunch_location": "ДП біля Депо",
+                    "lunch_start_time": l2_time_str,
+                    "lunch_end_time": minutes_to_time(parse_time_str(l2_time_str) + l2_duration),
+                    "lunch_duration_min": l2_duration,
+                    "paid_excess_break_min": l2_excess,
+                    "lunch_location": dp_location,
+                    "rotation_time": minutes_to_time(mid_min),
+                    "rotation_location": dp_location,
                     "work_hours": round((end_min - mid_min) / 60.0, 2),
                     "driving_hours": round((end_min - mid_min) / 60.0 - 0.25, 2),
                     "night_hours": round(max(0, end_min - 1320) / 60.0, 2),
@@ -230,8 +262,8 @@ class ShiftSolverEngine:
                     "pullout_time": col['start_time'],
                     "start_time": depot_arrival_str,
                     "end_time": col['end_time'],
-                    "lunch_start_time": minutes_to_time(start_min + 300),
-                    "lunch_end_time": minutes_to_time(start_min + 300 + std_lunch_min),
+                    "lunch_start_time": minutes_to_time(start_min + MIN_WORK_MINS_BEFORE_LUNCH),
+                    "lunch_end_time": minutes_to_time(start_min + MIN_WORK_MINS_BEFORE_LUNCH + std_lunch_min),
                     "lunch_duration_min": std_lunch_min,
                     "paid_excess_break_min": 0,
                     "lunch_location": col['events'][0].get('location', 'ДП «Паустовського»'),

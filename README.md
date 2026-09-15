@@ -1,19 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# АРМ «Розклади та Диспетчеризація» — КП «Одесміськелектротранс»
 
-# Run and deploy your AI Studio app
+Автоматизоване робоче місце (АРМ) інженера розкладів, чергового диспетчера (CAD/AVL) та кабінного терміналу водія міського електротранспорту міста Одеси.
 
-This contains everything you need to run your app locally.
-https://ai.studio/apps/87a3e075-494b-4d94-a54d-b4745a3cb99f
+---
 
-## Run Locally
+## 🚀 Швидкий запуск
 
-**Prerequisites:**  Node.js
+### 1. Запуск через Docker Compose (Повний стек)
+```bash
+docker-compose up -d --build
+```
+- **Frontend**: [http://localhost](http://localhost) (порт 80)
+- **Backend API**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
+- **pgAdmin**: [http://localhost:5050](http://localhost:5050)
+- **PostgreSQL**: `localhost:5433` (DB: `omet_db`, User: `omet_admin`)
+- **Redis**: `localhost:6379`
 
+### 2. Локальний запуск для розробки
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`# ARM
+#### Frontend (React + Vite + Tailwind v4):
+```bash
+npm install
+npm run dev
+```
+Додаток доступний на `http://localhost:3000` (або `http://localhost:5173`).
+
+#### Backend (FastAPI + Python 3.11+):
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+*(При відсутності запущеного PostgreSQL бекенд автоматично підключається до локальної бази даних SQLite `omet.db`)*
+
+---
+
+## 🏛️ Ключові можливості
+- **Аналітичний моніторинг**: KPI випуску, добовий кілометраж, On-Time Performance (OTP) аналітика.
+- **Диспетчерський комплекс**: Онлайн-карта (Wialon GPS + GTFS-RT), CAD/AVL табельна матриця, діаграма Ґантта змін, журнал наказів (Short Turn, Pacing, заміна вагонів).
+- **Планування та розклади (Служба Руху)**:
+  - Математичний транзитний солвер еталонних розкладів КП «Одесміськелектротранс».
+  - Зведена шахова таблиця рейсів з фіксованими колонками та необмеженою кількістю кругів (15–22+).
+  - **Динамічний розрахунок обідів водіїв**: Базові 15 хв (трамвай) / 20 хв (тролейбус) на кінцевих ДП з адаптацією під інтервал руху. Увесь понаднормовий час обіду автоматично зараховується до загального робочого часу зміни водія.
+  - **Топологічна матриця нульових рейсів депо**: ТД-1 (Водопровідна), ТД-2 (Слобідка), ТРД-1 (вул. Інглезі).
+  - Експорт розкладів у Excel (.csv з UTF-8 BOM) та локальний архів графіків.
+- **Персонал та водії**: Добова рознарядка, друкована маршрутна книжка водія за контрольними точками (КТ), бортовий веб-термінал водія в кабіні.
+- **Безпека & Анти-РЕБ**: Фільтрація спотворених координат GPS, інтеграція сповіщень про повітряну тривогу.
+

@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useScheduleStore, UserRole, ThemeMode } from '../store/useScheduleStore';
-import { useSettingsStore } from '../store/useSettingsStore';
-import { useAuthStore } from '../store/useAuthStore';
-import { ConfirmActionModal, ConfirmModalConfig } from './ConfirmActionModal';
-import { HistoryLogModal } from './HistoryLogModal';
+import React, { useEffect, useState, useRef } from 'react'
+import { useScheduleStore, UserRole, ThemeMode } from '../store/useScheduleStore'
+import { useSettingsStore } from '../store/useSettingsStore'
+import { useAuthStore } from '../store/useAuthStore'
+import { useTelemetryStore } from '../store/useTelemetryStore'
+import { toast } from 'sonner'
+import { downloadGtfsZip } from '../services/gtfsApi'
 import { 
   Activity, 
   BookOpen, 
@@ -14,10 +15,6 @@ import {
   ShieldAlert, 
   Users, 
   Wifi, 
-  RotateCcw, 
-  RotateCw, 
-  Check, 
-  X, 
   Layers, 
   MapPin, 
   Bus, 
@@ -34,155 +31,83 @@ import {
   Moon,
   Eye,
   Sparkles,
-  History,
   CheckCircle2,
   Archive,
   RefreshCw,
-  FileSpreadsheet
-} from 'lucide-react';
+  FileSpreadsheet,
+  Settings2,
+  Scissors,
+  Database,
+  Smartphone,
+  Share2
+} from 'lucide-react'
 
 interface HeaderProps {
-  onOpenReport: () => void;
+  onOpenReport?: () => void
 }
 
 export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
-  const { user: authUser, isAuthenticated, logout } = useAuthStore();
+  const { user: authUser, isAuthenticated, logout } = useAuthStore()
   const {
     currentPath,
     setPath,
     userRole,
-    setUserRole,
     user,
     theme,
     setTheme,
-    isDraftModified,
-    historyStack,
-    redoStack,
-    undoLastAction,
-    redoAction,
-    revertToHistoryIndex,
-    commitDraft,
-    discardDraft,
     conflicts,
-  } = useScheduleStore();
+  } = useScheduleStore()
 
-  const [isThemeOpen, setIsThemeOpen] = useState(false);
-  const [openGroupIdx, setOpenGroupIdx] = useState<number | null>(null);
-  const [modalConfig, setModalConfig] = useState<ConfirmModalConfig | null>(null);
-  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const isTelemetryConnected = useTelemetryStore((state) => state.isConnected)
 
-  const handleOpenCommitModal = () => {
-    const changesList = historyStack.length > 0 
-      ? historyStack.map((h) => h.label) 
-      : ['Модифікація нарядів вагонів та екіпажів водіїв'];
+  const [isThemeOpen, setIsThemeOpen] = useState(false)
+  const [openGroupIdx, setOpenGroupIdx] = useState<number | null>(null)
 
-    setModalConfig({
-      isOpen: true,
-      title: 'Публікація графіку в БД КП «ОМЕТ»',
-      badgeText: 'ГОТОВО ДО ПУБЛІКАЦІЇ',
-      description: 'Ви збираєтесь застосувати чернетку змін (наряди вагонів, закріплення водіїв, розклад) до бойової бази даних КП «Одесміськелектротранс». Усі підключені диспетчери та мобільні термінали водіїв миттєво отримають новий випуск.',
-      confirmText: 'Зафіксувати та Опублікувати',
-      cancelText: 'Продовжити редагування',
-      variant: 'success',
-      icon: 'check',
-      changesList,
-      conflictsCount: conflicts.length,
-      onConfirm: () => {
-        commitDraft();
-        setModalConfig(null);
-      },
-      onCancel: () => setModalConfig(null),
-    });
-  };
+  const headerRef = useRef<HTMLDivElement>(null)
 
-  const handleOpenDiscardModal = () => {
-    const changesList = historyStack.length > 0 
-      ? historyStack.map((h) => h.label) 
-      : ['Незбережені зміни в чернетці'];
+  const isNight = theme === 'night-dispatch' || theme === 'dark'
 
-    setModalConfig({
-      isOpen: true,
-      title: 'Скидання всіх незбережених змін',
-      badgeText: 'УВАГА: СКАСУВАННЯ ЧЕРНЕТКИ',
-      description: 'Ви збираєтесь анулювати всі внесені коригування рейсових графіків та екіпажів водіїв і повернутися до вихідного активного розкладу.',
-      confirmText: 'Скинути всі зміни',
-      cancelText: 'Повернутися до чернетки',
-      variant: 'danger',
-      icon: 'trash',
-      changesList,
-      conflictsCount: conflicts.length,
-      onConfirm: () => {
-        discardDraft();
-        setModalConfig(null);
-      },
-      onCancel: () => setModalConfig(null),
-    });
-  };
-
-  const handleRequestRevertConfirm = (targetIndex: number, actionLabel: string) => {
-    setIsHistoryModalOpen(false);
-    setModalConfig({
-      isOpen: true,
-      title: 'Підтвердження відкату історії',
-      description: `Ви збираєтесь повернути стан розкладу до точки: "${actionLabel}". Усі наступні зміни буде переміщено у стек Redo. Відкотити?`,
-      confirmText: 'Відкотити стан',
-      cancelText: 'Скасувати',
-      variant: 'warning',
-      icon: 'warning',
-      onConfirm: () => {
-        revertToHistoryIndex(targetIndex);
-        setModalConfig(null);
-      },
-      onCancel: () => setModalConfig(null),
-    });
-  };
-
-  const handleRequestClearConfirm = () => {
-    setIsHistoryModalOpen(false);
-    setModalConfig({
-      isOpen: true,
-      title: 'Очищення історії дій',
-      description: 'Ви впевнені, що бажаєте повністю очистити історію редагувань та скасувань? Поточна чернетка залишиться активною.',
-      confirmText: 'Очистити історію',
-      cancelText: 'Скасувати',
-      variant: 'danger',
-      icon: 'trash',
-      onConfirm: () => {
-        discardDraft();
-        setModalConfig(null);
-      },
-      onCancel: () => setModalConfig(null),
-    });
-  };
-
-  const headerRef = useRef<HTMLDivElement>(null);
-
-  const isNight = theme === 'night-dispatch' || theme === 'dark';
 
   useEffect(() => {
-    const effectiveTheme = theme || 'omet-clean';
-    document.documentElement.setAttribute('data-theme', effectiveTheme);
-    document.body.setAttribute('data-theme', effectiveTheme);
+    const effectiveTheme = theme || 'omet-clean'
+    document.documentElement.setAttribute('data-theme', effectiveTheme)
+    document.body.setAttribute('data-theme', effectiveTheme)
     if (effectiveTheme === 'night-dispatch' || effectiveTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
+      document.documentElement.classList.add('dark')
+      document.body.classList.add('dark')
     } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
+      document.documentElement.classList.remove('dark')
+      document.body.classList.remove('dark')
     }
-  }, [theme]);
+  }, [theme])
 
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (headerRef.current && !headerRef.current.contains(e.target as Node)) {
-        setIsThemeOpen(false);
-        setOpenGroupIdx(null);
+        setIsThemeOpen(false)
+        setOpenGroupIdx(null)
       }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const [isExportingGtfs, setIsExportingGtfs] = useState(false)
+
+  const handleExportGtfs = async () => {
+    if (isExportingGtfs) return
+    setIsExportingGtfs(true)
+    const toastId = toast.loading('Формування стандартизованого GTFS архіву Одеси...')
+    try {
+      await downloadGtfsZip()
+      toast.success('Офіційний GTFS архів успішно згенеровано та завантажено!', { id: toastId })
+    } catch (err: any) {
+      toast.error(`Помилка генерації GTFS: ${err?.message || 'Спробуйте пізніше'}`, { id: toastId })
+    } finally {
+      setIsExportingGtfs(false)
+    }
+  }
 
   const NAV_GROUPS: { label: string; icon: any; superuserOnly?: boolean; items?: { label: string; path: string; icon: any }[]; path?: string }[] = [
     {
@@ -207,7 +132,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       label: 'Планування',
       icon: Layers,
       items: [
-        { label: 'Розклади та Наряди (Робочий стіл)', path: '/planning/workspace', icon: TableIcon },
+        { label: 'Конструктор нарядів', path: '/planning/parameters', icon: Settings2 },
+        { label: 'Активні наряди маршрутів', path: '/planning/active-duties', icon: Zap },
+        { label: 'Зведена таблиця рейсів', path: '/planning/matrix', icon: TableIcon },
+        { label: 'Конструктор Змін & КПЗ', path: '/planning/shifts', icon: Scissors },
+        { label: 'Синхронізація «Звʼязок»', path: '/planning/interline', icon: Radio },
         { label: 'Архів розкладів та нарядів', path: '/planning/archive', icon: Archive },
       ],
     },
@@ -216,10 +145,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Settings,
       superuserOnly: true,
       items: [
-        { label: 'Реєстр Зупинок та КП', path: '/settings/stops', icon: MapPin },
-        { label: 'Реєстр Маршрутів (Паспорти)', path: '/settings/routes', icon: Settings },
-        { label: 'Колійні Вузли та Стрілки', path: '/settings/intersections', icon: Layers },
-        { label: 'Депо та Нульові рейси', path: '/settings/depots', icon: Bus },
+        { label: 'Реєстр Маршрутів (Паспорти та КТ)', path: '/settings/routes', icon: Settings },
+        { label: 'Зупинки, Контрольні точки та ДП', path: '/settings/stops', icon: MapPin },
+        { label: 'Спільні зупинки маршрутів', path: '/settings/shared-stops', icon: Share2 },
+        { label: 'Депо та Матриця нульових рейсів', path: '/settings/depots', icon: Bus },
+        { label: 'Колійні Вузли та Звʼязки', path: '/settings/intersections', icon: Layers },
         { label: 'Пункти та Їдальні Обіду', path: '/settings/breaks', icon: Clock },
       ],
     },
@@ -228,8 +158,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Users,
       items: [
         { label: 'Добова рознарядка (Призначення)', path: '/crew/assignment', icon: UserCheck },
-        { label: 'Розклад рейсів (Книжка водія)', path: '/crew/schedule-book', icon: BookOpen },
-        { label: 'Бортовий термінал водія', path: '/driver', icon: Radio },
+        { label: 'Бортовий термінал водія (PWA)', path: '/crew/terminal', icon: Smartphone },
+        { label: 'Маршрутна книжка водія (КТ)', path: '/crew/schedule-book', icon: BookOpen },
+        { label: 'Табелювання та Реєстр змін', path: '/crew/roster', icon: Users },
       ],
     },
     {
@@ -237,7 +168,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
       icon: Lock,
       superuserOnly: true,
       items: [
-        { label: 'Панель керування & Центр даних', path: '/admin', icon: Lock },
+        { label: 'Користувачі та Права (RBAC)', path: '/admin/users', icon: Users },
+        { label: 'Рухомий склад (Вагони)', path: '/admin/vehicles', icon: Bus },
+        { label: 'Реєстр водіїв', path: '/admin/drivers', icon: UserCheck },
+        { label: 'Типи нарядів (КЗпП)', path: '/admin/duty-types', icon: Layers },
+        { label: 'Резервне копіювання БД', path: '/admin/backup', icon: Database },
       ],
     },
   ];
@@ -275,27 +210,28 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
           {/* Quick Theme Switcher Button */}
           <button
             onClick={() => {
-              const nextTheme = isNight ? 'omet-clean' : 'night-dispatch';
-              localStorage.setItem('omet_theme', nextTheme);
-              setTheme(nextTheme);
-              useSettingsStore.getState().setTheme(nextTheme === 'night-dispatch' ? 'dark' : 'light');
+              const nextTheme = isNight ? 'omet-clean' : 'night-dispatch'
+              localStorage.setItem('omet_theme', nextTheme)
+              setTheme(nextTheme)
+              useSettingsStore.getState().setTheme(nextTheme === 'night-dispatch' ? 'dark' : 'light')
 
-              const root = document.documentElement;
-              root.classList.remove('light', 'dark');
-              document.body.classList.remove('light', 'dark');
+              const root = document.documentElement
+              root.classList.remove('light', 'dark')
+              document.body.classList.remove('light', 'dark')
 
               if (nextTheme === 'night-dispatch') {
-                root.classList.add('dark');
-                document.body.classList.add('dark');
-                document.documentElement.setAttribute('data-theme', 'night-dispatch');
-                document.body.setAttribute('data-theme', 'night-dispatch');
+                root.classList.add('dark')
+                document.body.classList.add('dark')
+                root.setAttribute('data-theme', 'night-dispatch')
+                document.body.setAttribute('data-theme', 'night-dispatch')
               } else {
-                root.classList.remove('dark');
-                document.body.classList.remove('dark');
-                document.documentElement.setAttribute('data-theme', 'omet-clean');
-                document.body.setAttribute('data-theme', 'omet-clean');
+                root.classList.remove('dark')
+                document.body.classList.remove('dark')
+                root.setAttribute('data-theme', 'omet-clean')
+                document.body.setAttribute('data-theme', 'omet-clean')
               }
             }}
+            aria-label={isNight ? 'Перемкнути на світлу тему' : 'Перемкнути на нічну тему'}
             className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 hover:bg-blue-50/80 dark:hover:bg-slate-700 text-slate-700 dark:text-blue-300 border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:text-blue-700 px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-all shadow-2xs"
             title="Швидке перемикання теми (Світла / Нічна)"
           >
@@ -340,84 +276,53 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
             </button>
           )}
 
-          {/* History & Draft Tools */}
+          {/* Quick Actions Bar */}
           <div className="flex items-center space-x-1 bg-slate-100/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shadow-2xs">
-            {isDraftModified && (
-              <span className="bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded-lg text-[10px] animate-pulse uppercase tracking-wider shrink-0">
-                Чернетка
-              </span>
-            )}
-
-            {/* Undo */}
+            {/* Analytics OTP Report Direct Navigation */}
             <button
-              onClick={undoLastAction}
-              disabled={historyStack.length === 0}
-              title="Скасувати останню дію"
-              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all ${
-                historyStack.length > 0
-                  ? 'bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-300 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95'
-                  : 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-800 cursor-not-allowed opacity-50'
-              }`}
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Скасувати ({historyStack.length})</span>
-            </button>
-
-            {/* Redo */}
-            <button
-              onClick={redoAction}
-              disabled={redoStack.length === 0}
-              title="Повернути скасовану дію"
-              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all ${
-                redoStack.length > 0
-                  ? 'bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-300 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95'
-                  : 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-800 cursor-not-allowed opacity-50'
-              }`}
-            >
-              <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Повернути ({redoStack.length})</span>
-            </button>
-
-            {/* History Modal Trigger */}
-            <button
-              onClick={() => setIsHistoryModalOpen(true)}
-              title="Історія редагувань"
-              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-300 dark:border-slate-700 shadow-2xs cursor-pointer transition-all"
-            >
-              <History className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Історія</span>
-            </button>
-
-            {/* Analytics OTP Report Modal Trigger */}
-            <button
-              onClick={onOpenReport}
-              title="Швидкий аналітичний звіт та OTP"
+              type="button"
+              onClick={() => setPath('/analytics')}
+              title="Звітність регулярності руху та OTP"
               className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-blue-50 dark:bg-blue-950/80 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shadow-2xs cursor-pointer transition-all"
             >
               <Activity className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Звіт OTP</span>
             </button>
 
-            {/* Commit & Discard Draft */}
-            {isDraftModified && (
-              <>
-                <button
-                  onClick={handleOpenCommitModal}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg flex items-center space-x-1 cursor-pointer text-[11px] transition-all shadow-2xs"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Коміт</span>
-                </button>
+            {/* GTFS Open Data Export Button */}
+            <button
+              type="button"
+              onClick={handleExportGtfs}
+              disabled={isExportingGtfs}
+              title="Завантажити офіційний GTFS архів КП «ОМЕТ» для Google Transit та Open Data"
+              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-emerald-50 dark:bg-emerald-950/80 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs cursor-pointer transition-all disabled:opacity-50"
+              tabIndex={0}
+              aria-label="Завантажити GTFS архів"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>{isExportingGtfs ? 'Експорт...' : 'GTFS Zip'}</span>
+            </button>
+          </div>
 
-                <button
-                  onClick={handleOpenDiscardModal}
-                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-2 py-1 rounded-lg flex items-center space-x-1 cursor-pointer text-[11px] transition-all shadow-2xs"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Скинути</span>
-                </button>
-              </>
-            )}
+          {/* WebSocket Real-time Status Badge */}
+          <div
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-extrabold shadow-2xs transition-all ${
+              isTelemetryConnected
+                ? 'bg-emerald-50/80 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
+                : 'bg-amber-50/80 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400'
+            }`}
+            title={isTelemetryConnected ? 'WebSocket зʼєднання активне: живі телеметрія та накази' : 'WebSocket очікує підключення або повторна спроба'}
+            tabIndex={0}
+            aria-label={isTelemetryConnected ? 'WebSocket зʼєднання активне' : 'WebSocket зʼєднання неактивне'}
+          >
+            <span className="relative flex h-2 w-2">
+              {isTelemetryConnected && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              )}
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isTelemetryConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            </span>
+            <Wifi className="w-3.5 h-3.5" />
+            <span>{isTelemetryConnected ? 'WS Live' : 'WS Offline'}</span>
           </div>
 
           {/* Conflict Indicator Badge */}
@@ -435,15 +340,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
               <span>Без конфліктів</span>
             </div>
           )}
-
-          {/* Solid White / Blue Border Action Button */}
-          <button
-            onClick={onOpenReport}
-            className="flex items-center space-x-1.5 bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 hover:text-blue-700 dark:text-blue-300 border border-slate-200 hover:border-blue-400 dark:border-slate-700 font-extrabold px-4 py-1.5 rounded-xl shadow-2xs transition-all text-xs cursor-pointer active:scale-95"
-          >
-            <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <span>Звіт ТЗ</span>
-          </button>
         </div>
       </div>
 
@@ -498,18 +394,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
                 {isOpen && (
                   <div
                     onMouseLeave={() => setOpenGroupIdx(null)}
-                    className="absolute left-0 top-full mt-1.5 z-50 min-w-64 bg-white dark:bg-slate-900 border-2 border-blue-200 dark:border-slate-800 rounded-2xl shadow-[0_12px_32px_rgba(37,99,235,0.18)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.8)] p-2 space-y-1"
+                    className="absolute left-0 top-full mt-1.5 z-50 min-w-64 max-h-[calc(100vh-140px)] overflow-y-auto bg-white dark:bg-slate-900 border-2 border-blue-200 dark:border-slate-800 rounded-2xl shadow-[0_12px_32px_rgba(37,99,235,0.18)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.8)] p-2 space-y-1"
                   >
                     {group.items?.map((sub, sIdx) => {
-                      const SubIcon = sub.icon;
-                      const isSubActive = currentPath === sub.path;
+                      const SubIcon = sub.icon
+                      const isSubActive = currentPath === sub.path
                       return (
                         <button
                           key={sIdx}
                           onClick={() => {
-                            setPath(sub.path);
-                            setOpenGroupIdx(null);
+                            setPath(sub.path)
+                            setOpenGroupIdx(null)
                           }}
+                          tabIndex={0}
+                          aria-label={sub.label}
                           className={`w-full text-left px-3.5 py-2.5 rounded-xl font-bold flex items-center space-x-2.5 transition-all cursor-pointer text-xs ${
                             isSubActive
                               ? 'bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-slate-700 shadow-2xs font-extrabold'
@@ -519,7 +417,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
                           <SubIcon className={`w-4 h-4 shrink-0 ${isSubActive ? 'text-blue-700 dark:text-blue-400' : 'text-blue-600 dark:text-blue-400'}`} />
                           <span className="truncate">{sub.label}</span>
                         </button>
-                      );
+                      )
                     })}
                   </div>
                 )}
@@ -528,15 +426,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenReport }) => {
           })}
         </nav>
       </div>
-
-      {modalConfig && <ConfirmActionModal {...modalConfig} />}
-
-      <HistoryLogModal
-        isOpen={isHistoryModalOpen}
-        onClose={() => setIsHistoryModalOpen(false)}
-        onRequestRevertConfirm={handleRequestRevertConfirm}
-        onRequestClearConfirm={handleRequestClearConfirm}
-      />
     </header>
   );
 };

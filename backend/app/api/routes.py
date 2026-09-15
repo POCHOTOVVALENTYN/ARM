@@ -111,20 +111,28 @@ async def get_all_routes(db: AsyncSession = Depends(get_db)):
             "id": r.id,
             "number": r.number,
             "name": r.name,
-            "type": r.type,
-            "color": r.color or ("#2563eb" if r.type == "TRAM" else "#059669"),
+            "type": (r.type or "TRAM").lower(),
+            "status": (r.status or "ACTIVE").lower(),
+            "color": r.color or ("#2563eb" if (r.type or "").upper() == "TRAM" else "#059669"),
             "length_km": r.length_km or 10.5,
+            "lengthDir1Km": r.lengthDir1Km or round((r.length_km or 10.5) / 2, 1),
+            "lengthDir2Km": r.lengthDir2Km or round((r.length_km or 10.5) / 2, 1),
             "default_speed_kmh": r.default_speed_kmh or 14.5,
-            "round_trip_min": r.round_trip_min or (84 if r.type == "TRAM" else 60),
-            "standard_break_min": r.standard_break_min or (15 if r.type == "TRAM" else 20),
+            "round_trip_min": r.round_trip_min or (84 if (r.type or "").upper() == "TRAM" else 60),
+            "standard_break_min": r.standard_break_min or (15 if (r.type or "").upper() == "TRAM" else 20),
             "designated_break_hub": r.designated_break_hub or "Диспетчерський пункт",
             "t_dir0_min": r.t_dir0_min or 36,
             "t_dir1_min": r.t_dir1_min or 36,
-            "layover_min": r.layover_min or 6
+            "layover_min": r.layover_min or 6,
+            "segments": r.segments or [],
+            "stations": r.stations or [],
+            "allStations": r.allStations or [],
+            "description": r.description or f"Маршрут №{r.number} КП «ОМЕТ»"
         }
         for r in routes
     ]
 
+@router.get("/shapes", summary="Отримання геометрій усіх маршрутів міста")
 @router.get("/shapes/all", summary="Отримання геометрій усіх маршрутів міста в обох напрямках")
 async def get_all_route_shapes(db: AsyncSession = Depends(get_db)):
     """Повертає геометрії всіх маршрутів трамваїв та тролейбусів для обох напрямків."""
@@ -289,3 +297,183 @@ async def update_route(route_id: str, payload: RouteUpdate, db: AsyncSession = D
     await db.commit()
     await db.refresh(route)
     return {"status": "success", "message": f"Маршрут {route_id} оновлено"}
+
+from app.models.models import RouteSharedCorridorModel, StopPassingRouteModel, RouteStation, StationModel
+from sqlalchemy import or_
+
+@router.get("/{route_id}/shared-corridors", summary="Отримання точних суміщених ділянок маршруту зі спільними зупинками")
+async def get_route_shared_corridors(route_id: str, db: AsyncSession = Depends(get_db)):
+    clean_id = route_id.strip()
+    query = (
+        select(RouteSharedCorridorModel)
+        .where(
+            or_(
+                RouteSharedCorridorModel.base_route_id == clean_id,
+                RouteSharedCorridorModel.base_route_number == clean_id
+            ),
+            RouteSharedCorridorModel.is_active == True
+        )
+        .order_by(RouteSharedCorridorModel.shared_stops_count.desc())
+    )
+    result = await db.execute(query)
+    corridors = result.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "targetRouteId": c.target_route_id,
+            "targetRouteNumber": c.target_route_number,
+            "targetRouteName": c.target_route_name,
+            "targetRouteColor": c.target_route_color,
+            "transportType": (c.transport_type or "TRAM").lower(),
+            "sharedStopsCount": c.shared_stops_count,
+            "startStop": c.start_stop,
+            "endStop": c.end_stop,
+            "sharedStops": c.shared_stops or [],
+            "sharedStopIds": c.shared_stop_ids or [],
+            "minHeadwayMin": c.min_headway_min,
+            "corridorName": c.corridor_name
+        }
+        for c in corridors
+    ]
+
+@router.get("/{route_id}/variants", summary="Отримання доступних варіантів/схем руху маршруту")
+async def get_route_variants(route_id: str, db: AsyncSession = Depends(get_db)):
+    clean_id = route_id.strip()
+    result = await db.execute(select(RouteModel).where(or_(RouteModel.id == clean_id, RouteModel.number == clean_id)))
+    route = result.scalar_one_or_none()
+    if not route:
+        raise HTTPException(status_code=404, detail="Маршрут не знайдено")
+
+    is_r27 = route.number == "27" or route.id == "27"
+    is_r7 = (route.number == "7" or route.id == "7") and (route.type or "").upper() == "TRAM"
+
+    if is_r27:
+        presets = [
+            {
+                "variant_key": "OPERATIONAL_SHORT",
+                "title": "Скорочена схема (через дефіцит е/е)",
+                "terminals": "11-а ст. Люстдорфської дороги — Рибний порт",
+                "stops_count": 15,
+                "length_km": 14.7,
+                "round_trip_min": 56,
+                "default_speed_kmh": 16.0,
+                "is_active": (route.active_variant or "OPERATIONAL_SHORT") == "OPERATIONAL_SHORT"
+            },
+            {
+                "variant_key": "BASE",
+                "title": "Повна базова схема (паспортна)",
+                "terminals": "пл. Старосінна — Рибний порт",
+                "stops_count": 45,
+                "length_km": 38.8,
+                "round_trip_min": 140,
+                "default_speed_kmh": 17.5,
+                "is_active": route.active_variant == "BASE"
+            }
+        ]
+    elif is_r7:
+        presets = [
+            {
+                "variant_key": "BASE",
+                "title": "Повна магістральна схема «Північ-Південь»",
+                "terminals": "вул. Паустовського — 11-а ст. Люстдорфської дороги",
+                "stops_count": 62,
+                "length_km": 65.0,
+                "round_trip_min": 220,
+                "default_speed_kmh": 19.5,
+                "is_active": (route.active_variant or "BASE") == "BASE"
+            },
+            {
+                "variant_key": "OPERATIONAL_SHORT",
+                "title": "Скорочена схема Північного куща",
+                "terminals": "вул. Паустовського — Лузанівка",
+                "stops_count": 28,
+                "length_km": 28.0,
+                "round_trip_min": 95,
+                "default_speed_kmh": 20.0,
+                "is_active": route.active_variant == "OPERATIONAL_SHORT"
+            }
+        ]
+    else:
+        presets = [
+            {
+                "variant_key": "BASE",
+                "title": f"Повна базова схема: {route.name}",
+                "terminals": route.name or "",
+                "stops_count": 30,
+                "length_km": route.length_km or 12.0,
+                "round_trip_min": route.round_trip_min or 80,
+                "default_speed_kmh": route.default_speed_kmh or 15.0,
+                "is_active": True
+            }
+        ]
+
+    return {
+        "route_id": route.id,
+        "route_number": route.number,
+        "name": route.name,
+        "active_variant": route.active_variant or "OPERATIONAL_SHORT",
+        "variant_notes": route.variant_notes,
+        "presets": presets
+    }
+
+class SwitchVariantRequest(BaseModel):
+    variant_key: str # "BASE" | "OPERATIONAL_SHORT" | "DETOUR"
+
+@router.post("/{route_id}/switch-variant", summary="Перемикання схеми курсування маршруту (базова / скорочена)")
+async def switch_route_variant(route_id: str, payload: SwitchVariantRequest, db: AsyncSession = Depends(get_db)):
+    clean_id = route_id.strip()
+    result = await db.execute(select(RouteModel).where(or_(RouteModel.id == clean_id, RouteModel.number == clean_id)))
+    route = result.scalar_one_or_none()
+    if not route:
+        raise HTTPException(status_code=404, detail="Маршрут не знайдено")
+
+    variant = payload.variant_key.upper()
+    if route.number == "27" or route.id == "27":
+        if variant == "BASE":
+            route.name = "пл. Старосінна — Рибний порт"
+            route.length_km = 38.8
+            route.lengthDir1Km = 19.4
+            route.lengthDir2Km = 19.4
+            route.round_trip_min = 140
+            route.default_speed_kmh = 17.5
+            route.active_variant = "BASE"
+            route.variant_notes = "Повна базова схема: пл. Старосінна — Рибний порт (45 зупинок)"
+        else:
+            route.name = "11-а ст. Люстдорфської дороги — Рибний порт"
+            route.length_km = 14.7
+            route.lengthDir1Km = 7.4
+            route.lengthDir2Km = 7.3
+            route.round_trip_min = 56
+            route.default_speed_kmh = 16.0
+            route.active_variant = "OPERATIONAL_SHORT"
+            route.variant_notes = "Скорочена оперативна схема (через дефіцит е/е): 11-а ст. — Рибний порт (15 зупинок)"
+    else:
+        route.active_variant = variant
+
+    await db.commit()
+
+    # Запуск перерахунку мережі
+    try:
+        from scripts.sync_network_topology import run_sync
+        run_sync()
+    except Exception as err:
+        pass
+
+    return {
+        "status": "success",
+        "route_id": route.id,
+        "active_variant": route.active_variant,
+        "name": route.name,
+        "length_km": route.length_km,
+        "round_trip_min": route.round_trip_min
+    }
+
+@router.post("/recalculate-all-corridors", summary="Повний перерахунок спільних зупинок та суміщених коридорів мережі")
+async def recalculate_all_corridors():
+    try:
+        from scripts.sync_network_topology import run_sync
+        run_sync()
+        return {"status": "success", "message": "Топологію та суміщені ділянки успішно синхронізовано"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

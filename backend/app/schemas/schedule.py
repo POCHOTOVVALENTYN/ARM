@@ -58,6 +58,8 @@ class StaticDutyResponse(BaseModel):
     id: int
     duty_number: str
     duty_type: DutyType = DutyType.DOUBLE
+    route_id: Optional[str] = None
+    depot_id: Optional[str] = None
     shifts: List[StaticShiftResponse] = []
 
     model_config = ConfigDict(from_attributes=True)

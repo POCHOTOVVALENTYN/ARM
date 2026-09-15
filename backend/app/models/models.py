@@ -84,10 +84,16 @@ class RouteModel(Base):
 
     stations = Column(JSON, nullable=True)
     allStations = Column(JSON, nullable=True)
+    control_points = Column(JSON, nullable=True) # Масив контрольних точок [{id, name, sequence, is_dp, is_break, default_arrival_offset_min}]
+    designated_dp_id = Column(String, nullable=True) # Головний Диспетчерський Пункт (ДП)
+    primary_depot_id = Column(String, nullable=True) # Закріплене депо (ТД-1, ТД-2, ТрД-3)
+    depot_junction_stop_id = Column(String, nullable=True) # Найближча зупинка примикання до депо для ротації розривних нарядів
     segments = Column(JSON, nullable=True)
     activeVehiclesCount = Column(JSON, nullable=True)
     description = Column(String, nullable=True)
     color = Column(String, nullable=True)
+    active_variant = Column(String, default="OPERATIONAL_SHORT", nullable=True) # "BASE", "OPERATIONAL_SHORT", "DETOUR"
+    variant_notes = Column(String, nullable=True) # Примітка щодо варіанту схеми рух
 
 Route = RouteModel
 
@@ -139,10 +145,49 @@ class StationModel(Base):
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    transport_type = Column(String, default="MIXED", nullable=True) # TRAM, TROLLEYBUS, MIXED
     is_dispatch_station = Column(Boolean, default=False)
     break_capacity = Column(Integer, default=0) # Місткість колій відстою/обіду (вагонів)
 
 Station = StationModel
+
+class StopPassingRouteModel(Base):
+    """Каталог зупинок із зазначенням маршрутів, що проходять через них"""
+    __tablename__ = "stop_passing_routes"
+
+    id = Column(String, primary_key=True, index=True) # stop_id
+    stop_id = Column(String, index=True, nullable=False)
+    stop_name = Column(String, nullable=False)
+    transport_type = Column(String, nullable=False) # TRAM, TROLLEYBUS
+    routes_list = Column(JSON, nullable=False) # ["1", "6", "7"]
+    route_count = Column(Integer, default=1, nullable=False)
+    is_shared = Column(Boolean, default=False) # route_count >= 2
+    is_dispatch_station = Column(Boolean, default=False)
+    break_capacity = Column(Integer, default=0)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    corridor_name = Column(String, nullable=True)
+
+class RouteSharedCorridorModel(Base):
+    """Таблиця точних суміщених ділянок між парами маршрутів (тільки де є спільні зупинки)"""
+    __tablename__ = "route_shared_corridors"
+
+    id = Column(String, primary_key=True, index=True) # Напр. "overlap_tram_1_7"
+    base_route_id = Column(String, index=True, nullable=False)
+    base_route_number = Column(String, nullable=False)
+    target_route_id = Column(String, index=True, nullable=False)
+    target_route_number = Column(String, nullable=False)
+    target_route_name = Column(String, nullable=True)
+    target_route_color = Column(String, default="#3b82f6", nullable=True)
+    transport_type = Column(String, nullable=False) # TRAM або TROLLEYBUS (суворе розділення)
+    shared_stops_count = Column(Integer, nullable=False) # Тільки >= 1!
+    start_stop = Column(String, nullable=False)
+    end_stop = Column(String, nullable=False)
+    shared_stops = Column(JSON, nullable=False) # Список назв спільних зупинок за ходом руху
+    shared_stop_ids = Column(JSON, nullable=False) # Список ID спільних зупинок
+    min_headway_min = Column(Integer, default=2, nullable=False) # Нормативний мінімальний інтервал
+    corridor_name = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
 
 class DepotModel(Base):
     __tablename__ = "depots"
@@ -176,8 +221,11 @@ class RouteDepotConfigModel(Base):
     routeId = Column(String)
     primaryDepotId = Column(String)
     secondaryDepotId = Column(String, nullable=True)
-    defaultOutboundTime = Column(String)
-    defaultInboundTime = Column(String)
+    defaultOutboundTime = Column(String, nullable=True)
+    defaultInboundTime = Column(String, nullable=True)
+    distanceKm = Column(Float, default=5.0, nullable=True) # Відстань нульового рейсу від депо
+    travelTimeMin = Column(Integer, default=20, nullable=True) # Час нульового рейсу від депо
+    pathDescription = Column(String, nullable=True) # Траса нульового рейсу (через які вулиці)
 
 class BreakLocationConfigModel(Base):
     __tablename__ = "break_location_configs"

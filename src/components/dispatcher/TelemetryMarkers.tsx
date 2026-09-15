@@ -268,11 +268,13 @@ interface AnimatedVehicleItem {
 }
 
 interface TelemetryMarkersProps {
-  activeRouteId?: string | null;
-  selectedRouteIds?: string[] | string | null;
-  hideServiceVehicles?: boolean;
-  hideDepotVehicles?: boolean;
-  onlyCriticalDelays?: boolean;
+  activeRouteId?: string | null
+  selectedRouteIds?: string[] | string | null
+  hideServiceVehicles?: boolean
+  hideDepotVehicles?: boolean
+  onlyCriticalDelays?: boolean
+  isAntiEwActive?: boolean
+  onIssueDispatchOrder?: (vehicleId: string, routeId: string) => void
 }
 
 export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({ 
@@ -280,11 +282,26 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({
   selectedRouteIds,
   hideServiceVehicles = true,
   hideDepotVehicles = false,
-  onlyCriticalDelays = false
+  onlyCriticalDelays = false,
+  isAntiEwActive = true,
+  onIssueDispatchOrder
 }) => {
-  const map = useMap();
-  const animatedVehiclesRef = useRef<{ [vehicleId: string]: AnimatedVehicleItem }>({});
-  const animFrameIdRef = useRef<number | null>(null);
+  const map = useMap()
+  const animatedVehiclesRef = useRef<{ [vehicleId: string]: AnimatedVehicleItem }>({})
+  const animFrameIdRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const handleOrderEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ vehicle_id: string; route_id: string }>
+      if (custom.detail && onIssueDispatchOrder) {
+        onIssueDispatchOrder(custom.detail.vehicle_id, custom.detail.route_id)
+      }
+    }
+    window.addEventListener('omet:dispatch-order', handleOrderEvent)
+    return () => {
+      window.removeEventListener('omet:dispatch-order', handleOrderEvent)
+    }
+  }, [onIssueDispatchOrder])
 
   // Множина нормалізованих номерів обраних маршрутів
   const normalizedSelectedRoutes = React.useMemo(() => {
@@ -528,6 +545,7 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({
               <div>
                 <div class="flex items-center gap-1.5">
                   <span class="font-black text-slate-900 text-sm font-mono tracking-tight">Борт №${vehicle.vehicle_id}</span>
+                  ${(vehicle as any).model ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-700 font-mono">${(vehicle as any).model}</span>` : ''}
                   ${vehicle.vehicle_type === 'SERVICE' ? '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800">СПЕЦ</span>' : ''}
                 </div>
                 <span class="text-[10px] text-slate-500 font-medium block">
@@ -558,6 +576,15 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({
                 </div>
               </div>
 
+              ${isAntiEwActive && (vehicle as any).anti_ew_corrected ? `
+                <div class="bg-purple-50 p-1.5 rounded-md border border-purple-200 flex items-center justify-between">
+                  <div class="flex items-center gap-1 text-[10px] font-bold text-purple-900">
+                    <span>🛡️</span> <span>Анти-РЕБ калібрування</span>
+                  </div>
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-200/70 text-purple-800 font-mono">КОЛІЯ OK</span>
+                </div>
+              ` : ''}
+
               <div class="space-y-1 pt-1">
                 <div class="flex justify-between items-center">
                   <span class="text-slate-500 font-medium">Стан:</span>
@@ -572,6 +599,14 @@ export const TelemetryMarkers: React.FC<TelemetryMarkersProps> = ({
                   ${gpsSignalBadge}
                 </div>
               </div>
+
+              <button 
+                type="button"
+                class="w-full mt-2 py-1.5 px-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-md text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer select-none"
+                onclick="window.dispatchEvent(new CustomEvent('omet:dispatch-order', { detail: { vehicle_id: '${vehicle.vehicle_id}', route_id: '${cleanRouteNum}' } }))"
+              >
+                <span>📋</span> <span>Видати наказ диспетчера</span>
+              </button>
             </div>
           </div>
         `;

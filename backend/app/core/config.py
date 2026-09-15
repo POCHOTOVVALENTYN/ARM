@@ -37,10 +37,16 @@ class Settings(BaseSettings):
 
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost",
-        "http://localhost:80",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "http://localhost:5173",
-        "https://dispatch.omet.ua"
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:80",
+        "https://dispatch.omet.ua",
     ]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

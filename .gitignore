@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+.claude/sdd-cache/
+.claude/.simplify-ignore-cache/

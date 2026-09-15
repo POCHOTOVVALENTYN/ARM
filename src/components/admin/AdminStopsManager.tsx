@@ -57,51 +57,76 @@ export const AdminStopsManager: React.FC = () => {
   // Create Mutation
   const createMutation = useMutation({
     mutationFn: async (newStop: any) => {
-      const res = await apiClient.post('/api/v1/stations', newStop);
-      return res.data;
+      const res = await apiClient.post('/api/v1/stations', newStop)
+      return res.data
     },
     onSuccess: (data) => {
-      toast.success(`Зупинку «${data.station?.name || 'Нову зупинку'}» успішно створено в PostgreSQL!`);
-      queryClient.invalidateQueries({ queryKey: ['admin-stations-all'] });
-      setIsAddOpen(false);
-      resetForm();
+      const st = data.station
+      if (st) {
+        useStationStore.getState().addStation({
+          id: st.id,
+          name: st.name,
+          lat: st.lat,
+          lng: st.lng,
+          code: st.name.slice(0, 3).toUpperCase(),
+          isTerminal: st.is_dispatch_station || st.type === 'TERMINAL'
+        })
+      }
+      toast.success(`Зупинку «${st?.name || 'Нову зупинку'}» успішно створено в PostgreSQL!`)
+      queryClient.invalidateQueries({ queryKey: ['admin-stations-all'] })
+      setIsAddOpen(false)
+      resetForm()
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.detail || 'Помилка створення зупинки');
+      toast.error(err?.response?.data?.detail || 'Помилка створення зупинки')
     }
-  });
+  })
 
   // Update Mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
-      const res = await apiClient.put(`/api/v1/stations/${id}`, payload);
-      return res.data;
+      const res = await apiClient.put(`/api/v1/stations/${id}`, payload)
+      return res.data
     },
-    onSuccess: () => {
-      toast.success('Параметри зупинки успішно оновлено!');
-      queryClient.invalidateQueries({ queryKey: ['admin-stations-all'] });
-      setEditingStation(null);
-      resetForm();
+    onSuccess: (data, variables) => {
+      const st = data?.station
+      if (st) {
+        useStationStore.getState().updateStation({
+          id: st.id,
+          name: st.name,
+          lat: st.lat,
+          lng: st.lng,
+          code: st.name.slice(0, 3).toUpperCase(),
+          isTerminal: st.is_dispatch_station || st.type === 'TERMINAL'
+        })
+      }
+      toast.success('Параметри зупинки успішно оновлено!')
+      queryClient.invalidateQueries({ queryKey: ['admin-stations-all'] })
+      setEditingStation(null)
+      resetForm()
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.detail || 'Помилка оновлення зупинки');
+      toast.error(err?.response?.data?.detail || 'Помилка оновлення зупинки')
     }
-  });
+  })
 
   // Delete Mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiClient.delete(`/api/v1/stations/${id}`);
-      return res.data;
+      const res = await apiClient.delete(`/api/v1/stations/${id}`)
+      return { data: res.data, id }
     },
-    onSuccess: () => {
-      toast.success('Зупинку видалено з бази даних!');
-      queryClient.invalidateQueries({ queryKey: ['admin-stations-all'] });
+    onSuccess: (result) => {
+      if (result?.id) {
+        useStationStore.getState().deleteStation(result.id)
+      }
+      toast.success('Зупинку видалено з бази даних!')
+      queryClient.invalidateQueries({ queryKey: ['admin-stations-all'] })
     },
     onError: (err: any) => {
-      toast.error(err?.response?.data?.detail || 'Помилка видалення');
+      toast.error(err?.response?.data?.detail || 'Помилка видалення')
     }
-  });
+  })
 
   const resetForm = () => {
     setStopName('');

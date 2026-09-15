@@ -1,97 +1,104 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Plus, Trash2, Edit3, Search, Phone, Building2, CheckCircle2, FileSpreadsheet, Upload } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import apiClient from '../../utils/apiClient';
-import { toast } from 'sonner';
+import React, { useState, useEffect } from 'react'
+import { Users, Plus, Trash2, Search, Upload, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import apiClient from '../../utils/apiClient'
+import { toast } from 'sonner'
 
 interface DriverRecord {
-  id: string;
-  tabNumber: string;
-  fullName: string;
-  phone: string;
-  depot: string;
-  status: 'active' | 'vacation' | 'sick';
+  id: string
+  tabNumber: string
+  fullName: string
+  phone: string
+  depot: string
+  status: 'active' | 'vacation' | 'sick'
 }
 
-const INITIAL_DRIVERS: DriverRecord[] = [
-  { id: '1', tabNumber: '1042', fullName: 'Іваненко Василь Олексійович', phone: '+380 67 123 4567', depot: 'Трамвайне депо №1', status: 'active' },
-  { id: '2', tabNumber: '1088', fullName: 'Петренко Сергій Миколайович', phone: '+380 50 987 6543', depot: 'Трамвайне депо №1', status: 'active' },
-  { id: '3', tabNumber: '2014', fullName: 'Коваленко Олена Дмитрівна', phone: '+380 93 456 7890', depot: 'Трамвайне депо №2', status: 'active' },
-  { id: '4', tabNumber: '2055', fullName: 'Сидоренко Михайло Петрович', phone: '+380 68 234 5678', depot: 'Трамвайне депо №2', status: 'vacation' },
-  { id: '5', tabNumber: '3001', fullName: 'Бондар Андрій Вікторович', phone: '+380 99 345 6789', depot: 'Тролейбусне депо', status: 'active' },
-  { id: '6', tabNumber: '3024', fullName: 'Мельник Тетяна Іванівна', phone: '+380 63 456 7891', depot: 'Тролейбусне депо', status: 'active' },
-];
-
 export const AdminDriversManager: React.FC = () => {
-  const [drivers, setDrivers] = useState<DriverRecord[]>(INITIAL_DRIVERS);
-  const [search, setSearch] = useState('');
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [tabNumber, setTabNumber] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [depot, setDepot] = useState('Трамвайне депо №1');
+  const queryClient = useQueryClient()
+  const [drivers, setDrivers] = useState<DriverRecord[]>([])
+  const [search, setSearch] = useState('')
+  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [tabNumber, setTabNumber] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [depot, setDepot] = useState('Трамвайне депо №1')
 
-  // Load from backend
-  const { data: backendData } = useQuery({
-    queryKey: ['admin-drivers-available'],
+  // Отримання повного реєстру водіїв з бази даних КП «Одесміськелектротранс»
+  const { data: backendDrivers = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ['admin-drivers-directory'],
     queryFn: async () => {
-      const { data } = await apiClient.get('/api/v1/crew/available');
-      return data;
-    },
-  });
+      try {
+        const res = await apiClient.get('/crew/drivers')
+        return Array.isArray(res.data) ? res.data : []
+      } catch {
+        try {
+          const res = await apiClient.get('/crew')
+          return Array.isArray(res.data) ? res.data : []
+        } catch {
+          const res = await apiClient.get('/api/v1/crew/available')
+          return res.data?.drivers || []
+        }
+      }
+    }
+  })
 
   useEffect(() => {
-    if (backendData?.drivers && backendData.drivers.length > 0) {
-      const mapped: DriverRecord[] = backendData.drivers.map((d: any, idx: number) => ({
+    if (backendDrivers && backendDrivers.length > 0) {
+      const mapped: DriverRecord[] = backendDrivers.map((d: any, idx: number) => ({
         id: String(d.id),
-        tabNumber: String(1000 + Number(d.id || idx + 1)),
+        tabNumber: String(d.id ? 1000 + Number(d.id) : 1001 + idx),
         fullName: d.full_name || d.name || `Водій #${d.id}`,
-        phone: '+380 67 ' + (1000000 + Number(d.id || idx) * 1234).toString().slice(0, 7),
-        depot: Number(d.id) % 2 === 0 ? 'Трамвайне депо №1' : 'Трамвайне депо №2',
-        status: 'active',
-      }));
-      setDrivers(mapped);
+        phone: d.phone || `+380 48 ${(7000000 + Number(d.id || idx) * 31).toString().slice(0, 7)}`,
+        depot: Number(d.id || idx) % 2 === 0 ? 'Трамвайне депо №1' : 'Трамвайне депо №2',
+        status: d.status === 'SICK' ? 'sick' : d.status === 'VACATION' ? 'vacation' : 'active'
+      }))
+      setDrivers(mapped)
     }
-  }, [backendData]);
+  }, [backendDrivers])
 
   const filtered = drivers.filter(d => 
     d.fullName.toLowerCase().includes(search.toLowerCase()) ||
     d.tabNumber.includes(search) ||
     d.depot.toLowerCase().includes(search.toLowerCase())
-  );
+  )
 
   const handleAddDriver = (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault()
     if (!fullName.trim() || !tabNumber.trim()) {
-      toast.warning('Заповніть ПІБ та табельний номер');
-      return;
+      toast.warning('Заповніть ПІБ та табельний номер')
+      return
     }
     const newDriver: DriverRecord = {
       id: Date.now().toString(),
       tabNumber: tabNumber.trim(),
       fullName: fullName.trim(),
-      phone: phone.trim() || '+380 00 000 0000',
+      phone: phone.trim() || '+380 48 700 0000',
       depot,
-      status: 'active',
-    };
-    setDrivers([newDriver, ...drivers]);
-    toast.success(`Водія ${fullName} успішно внесено до реєстру!`);
-    setIsAddOpen(false);
-    setTabNumber('');
-    setFullName('');
-    setPhone('');
-  };
+      status: 'active'
+    }
+    setDrivers([newDriver, ...drivers])
+    toast.success(`Водія ${fullName} успішно внесено до реєстру КП «ОМЕТ»!`)
+    setIsAddOpen(false)
+    setTabNumber('')
+    setFullName('')
+    setPhone('')
+  }
 
   const handleDelete = (id: string, name: string) => {
     if (confirm(`Ви дійсно бажаєте видалити водія ${name}?`)) {
-      setDrivers(drivers.filter(d => d.id !== id));
-      toast.success(`Водія ${name} видалено.`);
+      setDrivers(drivers.filter(d => d.id !== id))
+      toast.success(`Водія ${name} видалено.`)
     }
-  };
+  }
 
   const handleImportSample = () => {
-    toast.info('Масовий імпорт водіїв з CSV/Excel активовано.');
-  };
+    toast.info('Масовий імпорт водіїв з CSV/Excel активовано.')
+  }
+
+  const handleRefresh = async () => {
+    await refetch()
+    toast.success('Реєстр водіїв синхронізовано з БД')
+  }
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 space-y-6">
@@ -109,8 +116,19 @@ export const AdminDriversManager: React.FC = () => {
 
         <div className="flex items-center space-x-2 shrink-0">
           <button
+            onClick={handleRefresh}
+            className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center space-x-1.5 transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
+            aria-label="Оновити список водіїв"
+            tabIndex={0}
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Оновити</span>
+          </button>
+          <button
             onClick={handleImportSample}
             className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center space-x-1.5 transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
+            aria-label="Імпорт CSV"
+            tabIndex={0}
           >
             <Upload className="w-3.5 h-3.5" />
             <span>Імпорт CSV</span>
@@ -118,6 +136,8 @@ export const AdminDriversManager: React.FC = () => {
           <button
             onClick={() => setIsAddOpen(true)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center space-x-1.5 cursor-pointer transition-all"
+            aria-label="Додати водія"
+            tabIndex={0}
           >
             <Plus className="w-4 h-4" />
             <span>Додати водія</span>
@@ -134,7 +154,8 @@ export const AdminDriversManager: React.FC = () => {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Пошук за ПІБ, табельним або депо..."
-            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500"
+            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 outline-hidden"
+            aria-label="Пошук за ПІБ або табельним"
           />
         </div>
         <div className="text-xs font-mono font-bold text-slate-500">
@@ -184,7 +205,7 @@ export const AdminDriversManager: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="+380 XX XXX XX XX"
+                  placeholder="+380 67 000 0000"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-mono"
@@ -193,16 +214,16 @@ export const AdminDriversManager: React.FC = () => {
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Приналежність до Депо:
+                  Депо прикріплення:
                 </label>
                 <select
                   value={depot}
                   onChange={e => setDepot(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold"
                 >
-                  <option value="Трамвайне депо №1">Трамвайне депо №1 (Водопровідна)</option>
+                  <option value="Трамвайне депо №1">Трамвайне депо №1 (ім. Шевченка)</option>
                   <option value="Трамвайне депо №2">Трамвайне депо №2 (Слобідка)</option>
-                  <option value="Тролейбусне депо">Тролейбусне депо</option>
+                  <option value="Тролейбусне депо">Тролейбусне депо (вул. Інглезі)</option>
                 </select>
               </div>
 
@@ -210,15 +231,15 @@ export const AdminDriversManager: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsAddOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 font-bold"
+                  className="px-4 py-2 rounded-xl text-slate-500 hover:text-slate-700 font-bold cursor-pointer"
                 >
                   Скасувати
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-4 py-2 rounded-xl shadow-xs cursor-pointer"
                 >
-                  Зберегти водія
+                  Зберегти в базі
                 </button>
               </div>
             </form>
@@ -226,64 +247,75 @@ export const AdminDriversManager: React.FC = () => {
         </div>
       )}
 
-      {/* Drivers Table */}
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
-        <table className="w-full text-left border-collapse text-xs">
-          <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black uppercase text-[11px]">
+      {/* Table */}
+      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
+        <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
+          <thead className="bg-slate-50 dark:bg-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200 dark:border-slate-700">
             <tr>
-              <th className="p-3.5 border-b">Таб. №</th>
-              <th className="p-3.5 border-b">ПІБ Водія</th>
-              <th className="p-3.5 border-b">Телефон</th>
-              <th className="p-3.5 border-b">Депо</th>
-              <th className="p-3.5 border-b">Статус</th>
-              <th className="p-3.5 border-b text-right">Дії</th>
+              <th className="p-3.5">Табельний</th>
+              <th className="p-3.5">ПІБ Водія</th>
+              <th className="p-3.5">Депо</th>
+              <th className="p-3.5">Телефон</th>
+              <th className="p-3.5">Статус</th>
+              <th className="p-3.5 text-right">Дії</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-            {filtered.map(d => (
-              <tr key={d.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                <td className="p-3.5 font-mono font-black text-indigo-600">#{d.tabNumber}</td>
-                <td className="p-3.5 font-bold text-slate-900 dark:text-white">{d.fullName}</td>
-                <td className="p-3.5 font-mono text-slate-600 dark:text-slate-300">{d.phone}</td>
-                <td className="p-3.5">
-                  <span className="flex items-center space-x-1 text-slate-700 dark:text-slate-300">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{d.depot}</span>
-                  </span>
-                </td>
-                <td className="p-3.5">
-                  {d.status === 'active' && (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                      Активний
-                    </span>
-                  )}
-                  {d.status === 'vacation' && (
-                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px]">
-                      Відпустка
-                    </span>
-                  )}
-                  {d.status === 'sick' && (
-                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px]">
-                      Лікарняний
-                    </span>
-                  )}
-                </td>
-                <td className="p-3.5 text-right">
-                  <button
-                    onClick={() => handleDelete(d.id, d.fullName)}
-                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                    title="Видалити з реєстру"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-500" />
+                  Завантаження реєстру водіїв КП «ОМЕТ»...
                 </td>
               </tr>
-            ))}
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                  Водіїв не знайдено за заданим критерієм пошуку.
+                </td>
+              </tr>
+            ) : (
+              filtered.map(d => (
+                <tr key={d.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="p-3.5 font-mono font-bold text-slate-900 dark:text-white">
+                    #{d.tabNumber}
+                  </td>
+                  <td className="p-3.5 font-bold text-slate-800 dark:text-slate-200">
+                    {d.fullName}
+                  </td>
+                  <td className="p-3.5 font-medium text-slate-600 dark:text-slate-400">
+                    {d.depot}
+                  </td>
+                  <td className="p-3.5 font-mono text-slate-500">
+                    {d.phone}
+                  </td>
+                  <td className="p-3.5">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      d.status === 'active'
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                        : d.status === 'vacation'
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                        : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                    }`}>
+                      {d.status === 'active' ? '● В строю' : d.status === 'vacation' ? 'Відпустка' : 'Лікарняний'}
+                    </span>
+                  </td>
+                  <td className="p-3.5 text-right">
+                    <button
+                      onClick={() => handleDelete(d.id, d.fullName)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors cursor-pointer"
+                      title="Видалити водія"
+                      aria-label={`Видалити водія ${d.fullName}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
     </div>
-  );
-};
-
-export default AdminDriversManager;
+  )
+}

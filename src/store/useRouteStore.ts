@@ -1,5 +1,6 @@
-import { create } from 'zustand';
-import { Route, RouteStatus, TimePeriod, TransportType } from '../types';
+import { create } from 'zustand'
+import { Route, RouteStatus, TimePeriod, TransportType } from '../types'
+import { ODESSA_DEFAULT_ROUTES } from '../constants/defaultRoutes'
 
 interface RouteState {
   routes: Route[];
@@ -43,11 +44,11 @@ interface RouteState {
 }
 
 export const useRouteStore = create<RouteState>((set, get) => ({
-  routes: [],
+  routes: ODESSA_DEFAULT_ROUTES,
   searchQuery: '',
   typeFilter: 'all',
   statusFilter: 'all',
-  selectedRouteId: null,
+  selectedRouteId: ODESSA_DEFAULT_ROUTES[0]?.id || null,
   activeViewMode: 'overview',
   validationErrors: {},
 
@@ -230,7 +231,8 @@ export const useRouteStore = create<RouteState>((set, get) => ({
 
   resetToDefaults: () => {
     set({
-      selectedRouteId: get().routes[0]?.id || null,
+      routes: ODESSA_DEFAULT_ROUTES,
+      selectedRouteId: ODESSA_DEFAULT_ROUTES[0]?.id || null,
       validationErrors: {},
       searchQuery: '',
       typeFilter: 'all',

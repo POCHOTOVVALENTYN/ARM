@@ -9,36 +9,65 @@ logger = logging.getLogger("app.init_admin")
 
 async def seed_initial_admin():
     """
-    Гарантує створення або актуалізацію облікового запису 'admin' з паролем 'admin123'.
+    Гарантує створення або актуалізацію облікових записів:
+    - 'admin' (пароль: 'admin123' або 'admin') - SUPERUSER
+    - 'dispatcher' (пароль: 'dispatcher123') - CENTRAL_DISPATCHER
+    - 'planner' (пароль: 'planner123') - PLANNER
     Працює як для PostgreSQL, так і для SQLite.
     """
+    users_to_seed = [
+        {
+            "username": "admin",
+            "password": "admin123",
+            "full_name": "Головний Адміністратор & Диспетчер ОМЕТ",
+            "role": "SUPERUSER",
+            "is_superuser": True
+        },
+        {
+            "username": "dispatcher",
+            "password": "dispatcher123",
+            "full_name": "Черговий Диспетчер Лінії ОМЕТ",
+            "role": "CENTRAL_DISPATCHER",
+            "is_superuser": False
+        },
+        {
+            "username": "planner",
+            "password": "planner123",
+            "full_name": "Інженер-Плановик Служби Руху",
+            "role": "PLANNER",
+            "is_superuser": False
+        }
+    ]
+
     async with db_module.AsyncSessionLocal() as session:
         try:
-            query = select(Dispatcher).where(Dispatcher.username == "admin")
-            result = await session.execute(query)
-            admin_user = result.scalar_one_or_none()
+            for u in users_to_seed:
+                query = select(Dispatcher).where(Dispatcher.username == u["username"])
+                result = await session.execute(query)
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    user = Dispatcher(
+                        username=u["username"],
+                        hashed_password=get_password_hash(u["password"]),
+                        full_name=u["full_name"],
+                        role=u["role"],
+                        is_active=True,
+                        is_superuser=u["is_superuser"]
+                    )
+                    session.add(user)
+                    print(f"✅ Користувача '{u['username']}' (пароль: '{u['password']}') успішно створено.")
+                else:
+                    user.hashed_password = get_password_hash(u["password"])
+                    user.is_active = True
+                    user.is_superuser = u["is_superuser"]
+                    user.role = u["role"]
+                    user.full_name = u["full_name"]
             
-            if not admin_user:
-                admin_user = Dispatcher(
-                    username="admin",
-                    hashed_password=get_password_hash("admin123"),
-                    full_name="Головний Диспетчер ОМЕТ",
-                    role="SUPERUSER",
-                    is_active=True,
-                    is_superuser=True
-                )
-                session.add(admin_user)
-                await session.commit()
-                print("✅ Початкового адміністратора 'admin' (пароль: 'admin123') успішно створено.")
-            else:
-                admin_user.hashed_password = get_password_hash("admin123")
-                admin_user.is_active = True
-                admin_user.is_superuser = True
-                admin_user.role = "SUPERUSER"
-                await session.commit()
-                print("✅ Пароль адміністратора 'admin' актуалізовано до 'admin123'.")
+            await session.commit()
+            print("✅ Стандартні акаунти КП ОМЕТ синхронізовано.")
         except Exception as e:
-            print(f"⚠️ Помилка при ініціалізації адміна: {e}")
+            print(f"⚠️ Помилка при ініціалізації користувачів: {e}")
 
 if __name__ == "__main__":
     async def main():
